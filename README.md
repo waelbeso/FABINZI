@@ -1,49 +1,31 @@
 # FABINZI
 
-Greenfield implementation of the FABINZI digital fashion manufacturing marketplace.
+FABINZI is a greenfield fashion design, manufacturing, marketplace, Store and Studio platform built with Django/DRF.
 
-> **Designer creates. Manufacturer produces. Customer buys. FABINZI orchestrates.**
+## Current delivery status
+- Stage 0 — Engineering Foundation: COMPLETE
+- Stage 1 — Business Identity & Onboarding: COMPLETE
+- Stage 2 — Garment Design Domain: COMPLETE
+- Stage 3 — Artwork & Designed Products + IP Governance: COMPLETE
+- Stage 4 — Manufacturer Marketplace: COMPLETE
+- Stage 5 — Store & Studio: COMPLETE
 
-This repository intentionally does **not** preserve or depend on any previous FABINZI implementation.
+The domain boundaries remain explicit: Garment Design, Artwork, Designed Product and Customer Customization are separate concepts. Manufacturer is the manufacturing marketplace actor; printing and embroidery are capabilities, not actors.
 
-## Current status
+## Major web surfaces
+- `/` public home
+- `/app/` signed-in application home
+- `/store/` public Designer stores and products
+- `/studio/` authenticated customer Studio projects
+- `/artwork/` approved Artwork marketplace
+- `/manufacturers/` public Manufacturer marketplace
+- `/designer/` Designer business portal
+- `/designer/store/` Designer Store management
+- `/manufacturer/` Manufacturer business portal
+- `/manufacturer/marketplace/` Manufacturer marketplace workspace
+- `/Maneg/` privileged FABINZI Control Center protected by OTP
 
-- **Stage 0 — Engineering Foundation: complete.** See `docs/STAGE_0_ACCEPTANCE.md`.
-- **Stage 1 — Designer & Manufacturer Onboarding: complete.** See `docs/STAGE_1_ACCEPTANCE.md`.
+## Infrastructure
+Python/Django/DRF/PostgreSQL/Celery/Redis. Optional external integrations remain disabled until configured and tested. COD, Paymob/Stripe checkout and all actual order/payment execution are intentionally deferred to Stage 6. Manufacturing fulfillment is Stage 7 and finance/settlement is Stage 8.
 
-Stage 1 adds tenant-aware Designer/Manufacturer organizations, self-service onboarding, business memberships and roles, verification workflows, branded Control Center review actions, notifications, audit events and DRF onboarding APIs.
-
-## Stack
-
-- Python / Django / Django REST Framework
-- PostgreSQL
-- Redis + Celery
-- Amazon S3 + Cloudflare Images provider abstraction
-- TOTP/MFA-protected branded Django Control Center at `/Maneg/`
-- Arabic/English, RTL/LTR, Light/Dark/System theme foundation
-- Sentry foundation (disabled until configured)
-
-## Local bootstrap
-
-```bash
-cp .env.example .env
-docker compose up -d db redis
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python manage.py migrate
-python manage.py createsuperuser
-python manage.py runserver
-```
-
-Then open `http://127.0.0.1:8000/Maneg/`. Privileged administration is designed to use two-factor authentication.
-
-Designer onboarding begins at `/designer/`. Manufacturer onboarding begins at `/manufacturer/`.
-
-## Integration security
-
-Optional integrations are disabled by default. COD is seeded enabled as the initial practical payment method. Provider credentials are not hard-coded. The integration model supports encrypted write-only secret payloads and a provider-specific Test Connection action with safe diagnostics.
-
-## Greenfield rule
-
-The historical FABINZI database, migrations, actors, portals, CSS, APIs, workflows and old source code are explicitly out of scope. The approved FABINZI logo is the only carried-forward product asset.
+See `docs/STAGE_5_ACCEPTANCE.md` for the current acceptance boundary.
