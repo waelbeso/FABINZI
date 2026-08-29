@@ -1,6 +1,7 @@
 from django.urls import include, path
 from two_factor.urls import urlpatterns as tf_urls
 from apps.accounts.views import app_home, profile_preferences
+from apps.artwork.media_views import public_artwork_preview_media
 from apps.artwork.views import artwork_detail, artwork_marketplace
 from apps.checkout.views import (
     add_product_to_cart,
@@ -86,6 +87,7 @@ urlpatterns = [
     path("studio/<int:project_id>/checkout/", checkout_start, name="checkout-start"),
     path("media/private/<int:pk>/", private_studio_media, name="private-studio-media"),
     path("media/designer-private/<int:pk>/", private_designer_media, name="private-designer-media"),
+    path("artwork/media/<int:pk>/", public_artwork_preview_media, name="artwork-public-preview-media"),
     path("checkout/<int:pk>/", checkout_detail, name="checkout-detail"),
     path("purchases/", purchases, name="purchases"),
     path("purchases/<int:pk>/confirmation/", purchase_confirmation, name="purchase-confirmation"),
