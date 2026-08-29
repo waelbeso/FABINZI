@@ -1,0 +1,105 @@
+from functools import lru_cache
+from io import BytesIO
+
+from PIL import Image, ImageDraw, ImageFont
+
+DARK = "#111827"
+PURPLE = "#6D4AFF"
+PURPLE_LIGHT = "#7C5CFF"
+TEAL = "#21D3AE"
+OFF_WHITE = "#F6F6FB"
+MUTED = "#AEB2C2"
+
+
+def _font(size, bold=False):
+    candidates = (
+        ("DejaVuSans-Bold.ttf", "DejaVuSans.ttf"),
+        ("Arial Bold.ttf", "Arial.ttf"),
+    )
+    for bold_name, regular_name in candidates:
+        try:
+            return ImageFont.truetype(bold_name if bold else regular_name, size=size)
+        except OSError:
+            continue
+    return ImageFont.load_default(size=size)
+
+
+def _hex(value):
+    value = value.lstrip("#")
+    return tuple(int(value[i : i + 2], 16) for i in (0, 2, 4))
+
+
+def _icon(size):
+    scale = 4
+    canvas = size * scale
+    image = Image.new("RGBA", (canvas, canvas), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+
+    def p(value):
+        return round(value / 64 * canvas)
+
+    draw.rounded_rectangle((p(3), p(3), p(61), p(61)), radius=p(16), fill=DARK)
+
+    mask = Image.new("L", (canvas, canvas), 0)
+    m = ImageDraw.Draw(mask)
+    m.rectangle((p(18), p(16), p(29), p(56)), fill=255)
+    m.rectangle((p(18), p(16), p(47), p(25)), fill=255)
+    m.rectangle((p(18), p(33), p(44), p(42)), fill=255)
+    top = _hex(PURPLE_LIGHT)
+    bottom = _hex("#5A36E6")
+    gradient = Image.new("RGBA", (canvas, canvas))
+    pixels = gradient.load()
+    for y in range(canvas):
+        t = y / max(canvas - 1, 1)
+        color = tuple(round(top[i] * (1 - t) + bottom[i] * t) for i in range(3)) + (255,)
+        for x in range(canvas):
+            pixels[x, y] = color
+    image.alpha_composite(Image.composite(gradient, Image.new("RGBA", image.size), mask))
+
+    draw = ImageDraw.Draw(image)
+    draw.polygon([(p(46.5), p(12.5)), (p(53), p(19)), (p(49.8), p(22.2)), (p(43.3), p(15.7))], fill=TEAL)
+    draw.ellipse((p(45.7), p(42.7), p(50.3), p(47.3)), fill=TEAL)
+    draw.ellipse((p(51), p(47), p(55), p(51)), fill=(33, 211, 174, 209))
+    draw.ellipse((p(54.3), p(52.3), p(57.7), p(55.7)), fill=(33, 211, 174, 158))
+    return image.resize((size, size), Image.Resampling.LANCZOS)
+
+
+def _png_bytes(image):
+    output = BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
+@lru_cache(maxsize=8)
+def icon_png(size):
+    return _png_bytes(_icon(size))
+
+
+@lru_cache(maxsize=1)
+def favicon_ico():
+    output = BytesIO()
+    _icon(256).save(output, format="ICO", sizes=[(16, 16), (32, 32), (48, 48), (64, 64)])
+    return output.getvalue()
+
+
+@lru_cache(maxsize=1)
+def social_share_png():
+    width, height = 1200, 630
+    image = Image.new("RGB", (width, height), "#090A10")
+    draw = ImageDraw.Draw(image)
+    for x in range(width):
+        t = x / (width - 1)
+        left = (9, 10, 16)
+        right = (35, 29, 77)
+        color = tuple(round(left[i] * (1 - t) + right[i] * t) for i in range(3))
+        draw.line((x, 0, x, height), fill=color)
+    draw.ellipse((820, -220, 1300, 260), fill=(45, 35, 102))
+    image.paste(_icon(208), (96, 107), _icon(208))
+    draw = ImageDraw.Draw(image)
+    draw.text((350, 130), "FABINZI", font=_font(88, True), fill=OFF_WHITE)
+    draw.text((101, 335), "Fashion, from original idea", font=_font(47, True), fill=OFF_WHITE)
+    draw.text((101, 393), "to real product.", font=_font(47, True), fill=OFF_WHITE)
+    draw.text((101, 468), "Designer creates · Manufacturer produces · Customer buys", font=_font(30), fill=MUTED)
+    draw.rounded_rectangle((101, 548, 291, 553), radius=3, fill=PURPLE)
+    draw.rounded_rectangle((301, 548, 366, 553), radius=3, fill=TEAL)
+    return _png_bytes(image)
