@@ -23,6 +23,9 @@ _ARABIC_LABELS = {
     "operator": "مشغّل",
     "qc": "مراقبة الجودة",
     # RFQ / quote
+    "open": "مفتوح",
+    "selected": "تم اختيار المصنع",
+    "closed": "مغلق",
     "invited": "مدعو",
     "viewed": "تمت المشاهدة",
     "declined": "مرفوض",
@@ -79,11 +82,8 @@ _ARABIC_LABELS = {
     "artwork": "عمل فني",
     # Manufacturer capability classes
     "cut_sew": "قص وخياطة",
-    "knitting": "حياكة",
-    "printing": "طباعة",
-    "embroidery_capability": "تطريز",
-    "washing": "غسيل وتشطيب",
-    "finishing_capability": "تشطيب",
+    "sampling": "إعداد عينات",
+    "pattern": "إعداد الباترون",
     "packaging": "تعبئة وتغليف",
     "other": "أخرى",
 }
