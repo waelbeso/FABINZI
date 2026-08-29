@@ -19,9 +19,8 @@ from apps.artwork.services import (
     submit_artwork_version,
 )
 from apps.audit.models import AuditEvent
-from apps.media.designer_services import create_private_designer_asset, require_private_designer_asset
+from apps.media.designer_services import create_private_designer_asset
 from apps.media.models import MediaAsset
-from apps.organizations.designer_context import resolve_designer_membership
 from apps.organizations.designer_services import (
     attach_designer_verification_document,
     secure_add_or_update_member,
@@ -74,27 +73,31 @@ def complete_private_artwork(owner, org, *, title="Private Wave"):
 
 @pytest.mark.django_db
 @pytest.mark.parametrize(
-    "app_status,org_status",
+    "app_status,org_status,expected_heading,can_edit",
     [
-        (OnboardingApplication.Status.DRAFT, Organization.VerificationStatus.DRAFT),
-        (OnboardingApplication.Status.REVISION_REQUIRED, Organization.VerificationStatus.DRAFT),
-        (OnboardingApplication.Status.SUBMITTED, Organization.VerificationStatus.PENDING),
-        (OnboardingApplication.Status.APPROVED, Organization.VerificationStatus.ACTIVE),
-        (OnboardingApplication.Status.REJECTED, Organization.VerificationStatus.REJECTED),
-        (OnboardingApplication.Status.APPROVED, Organization.VerificationStatus.SUSPENDED),
+        (OnboardingApplication.Status.DRAFT, Organization.VerificationStatus.DRAFT, "Your draft has not been submitted yet", True),
+        (OnboardingApplication.Status.REVISION_REQUIRED, Organization.VerificationStatus.DRAFT, "Revision required", True),
+        (OnboardingApplication.Status.SUBMITTED, Organization.VerificationStatus.PENDING, "Under review", False),
+        (OnboardingApplication.Status.APPROVED, Organization.VerificationStatus.ACTIVE, "Designer workspace", False),
+        (OnboardingApplication.Status.REJECTED, Organization.VerificationStatus.REJECTED, "Application rejected", False),
+        (OnboardingApplication.Status.APPROVED, Organization.VerificationStatus.SUSPENDED, "Organization suspended", False),
     ],
 )
-def test_designer_onboarding_states_render_without_crossing_access(client, app_status, org_status):
+def test_designer_onboarding_states_render_without_crossing_access(client, app_status, org_status, expected_heading, can_edit):
     user = User.objects.create_user(username=f"state-{app_status}-{org_status}", password="password123")
     designer_org(user, f"State {app_status} {org_status}", status=org_status, app_status=app_status)
     client.force_login(user)
     response = client.get(reverse("designer"))
     assert response.status_code == 200
     assert response["X-Robots-Tag"] == "noindex, nofollow, noarchive"
+    text = response.content.decode("utf-8")
+    assert expected_heading in text
     if org_status == Organization.VerificationStatus.ACTIVE:
-        assert b"Designer workspace" in response.content or "مساحة المصمم" in response.content.decode("utf-8")
+        assert "Active work" in text
     else:
-        assert b"Garment Designs" not in response.content or app_status == OnboardingApplication.Status.REVISION_REQUIRED
+        assert "Full Designer workspace access follows" in text
+        assert ("Edit application" in text) is can_edit
+        assert ("Submit for review" in text) is can_edit
 
 
 @pytest.mark.django_db
@@ -354,4 +357,4 @@ def test_public_artwork_api_never_contains_designer_private_urls(settings, clien
     assert "designer-private" not in payload
     assert source.provider_asset_id not in payload
     assert rights.provider_asset_id not in payload
-    assert f"/artwork/media/" in payload
+    assert "/artwork/media/" in payload
