@@ -16,7 +16,7 @@ INSTALLED_APPS = [
     "django.contrib.messages", "django.contrib.staticfiles", "django.contrib.sites", "rest_framework",
     "django_otp", "django_otp.plugins.otp_totp", "django_otp.plugins.otp_static", "two_factor",
     "apps.accounts", "apps.audit", "apps.integrations", "apps.media", "apps.notifications", "apps.platform_ops",
-    "apps.organizations",
+    "apps.organizations", "apps.design",
 ]
 
 MIDDLEWARE = [
@@ -55,9 +55,7 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-    "staticfiles": {
-        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage" if DEBUG else "whitenoise.storage.CompressedManifestStaticFilesStorage"
-    },
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage" if DEBUG else "whitenoise.storage.CompressedManifestStaticFilesStorage"},
 }
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 REST_FRAMEWORK = {"DEFAULT_AUTHENTICATION_CLASSES":["rest_framework.authentication.SessionAuthentication"],"DEFAULT_PERMISSION_CLASSES":["rest_framework.permissions.IsAuthenticated"],"DEFAULT_VERSIONING_CLASS":"rest_framework.versioning.NamespaceVersioning"}
