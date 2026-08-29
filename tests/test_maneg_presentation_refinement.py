@@ -159,8 +159,8 @@ def test_responsive_maneg_nav_scroll_contract_in_real_chrome_ltr_and_rtl(client,
         pytest.skip("Real Chrome /Maneg/ presentation QA is CI-only.")
 
     root = staff("presentation-nav-root", superuser=True)
-    root.theme_preference = root.Theme.LIGHT
-    root.language_preference = root.Language.ENGLISH
+    root.theme_preference = "light"
+    root.language_preference = "en"
     root.save(update_fields=["theme_preference", "language_preference"])
     driver = _chrome(width=390, height=844)
     try:
@@ -172,8 +172,8 @@ def test_responsive_maneg_nav_scroll_contract_in_real_chrome_ltr_and_rtl(client,
         after = driver.execute_script("return arguments[0].scrollLeft", nav)
         assert after != before
 
-        root.theme_preference = root.Theme.DARK
-        root.language_preference = root.Language.ARABIC
+        root.theme_preference = "dark"
+        root.language_preference = "ar"
         root.save(update_fields=["theme_preference", "language_preference"])
         driver.get(f"{live_server.url}/Maneg/?lang=ar")
         _assert_mobile_nav_contract(driver, expected_dir="rtl")
