@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block title %}{% if request.LANGUAGE_CODE == 'ar' %}طلباتي{% else %}My Orders{% endif %} | FABINZI{% endblock %}
+{% block content %}
+<section class="section--tight"><div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}حسابي{% else %}My account{% endif %}</div><h1 class="page-title">{% if request.LANGUAGE_CODE == 'ar' %}طلباتي{% else %}My Orders{% endif %}</h1><p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}كل عملية شراء تظهر كطلب واحد للعميل، حتى لو تم تنفيذ عناصره في مسارات تشغيلية منفصلة.{% else %}Each checkout appears as one customer order, even when its items are fulfilled through separate operational orders.{% endif %}</p></section>
+{% if purchases %}
+<div class="stack">
+{% for purchase in purchases %}
+<article class="card purchase-row">
+  <div><div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}رقم الطلب{% else %}Order number{% endif %}</div><strong class="purchase-number">{{ purchase.number }}</strong><p class="muted">{{ purchase.created_at|date:"Y-m-d H:i" }}</p></div>
+  <div class="cluster"><span class="badge {% if purchase.status == 'confirmed' %}badge--success{% elif purchase.status == 'payment_failed' or purchase.status == 'cancelled' %}badge--danger{% else %}badge--info{% endif %}">{{ purchase.get_status_display }}</span><span class="badge">{{ purchase.fulfillment_status }}</span></div>
+  <div><strong class="price">{{ purchase.total }} {{ purchase.currency }}</strong><p class="muted">{{ purchase.child_orders.count }} {% if request.LANGUAGE_CODE == 'ar' %}عنصر{% else %}item{{ purchase.child_orders.count|pluralize }}{% endif %}</p></div>
+  <a class="button button--ghost" href="{% url 'purchase-detail' purchase.id %}">{% if request.LANGUAGE_CODE == 'ar' %}تفاصيل الطلب{% else %}Order details{% endif %}</a>
+</article>
+{% endfor %}
+</div>
+{% else %}<section class="empty-state"><h2>{% if request.LANGUAGE_CODE == 'ar' %}لا توجد طلبات بعد{% else %}No orders yet{% endif %}</h2><p>{% if request.LANGUAGE_CODE == 'ar' %}عند إتمام أول عملية شراء ستظهر هنا كطلب واحد.{% else %}Your first completed checkout will appear here as one customer order.{% endif %}</p><a class="button" href="{% url 'store-marketplace' %}">{% if request.LANGUAGE_CODE == 'ar' %}ابدأ التسوق{% else %}Start shopping{% endif %}</a></section>{% endif %}
+{% endblock %}

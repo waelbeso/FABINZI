@@ -1,1 +1,63 @@
-{% extends 'base.html' %}{% block content %}<h1>{{ project.product.title_en }}</h1><p>Status: {{ project.get_status_display }}</p><p>Variant: {{ project.variant }}</p><p>Quantity: {{ project.quantity }}</p>{% if project.product.customization_enabled %}<h2>Customer Customization</h2>{% if project.customization %}{% for e in project.customization.elements.all %}<p>{{ e.get_kind_display }} — {{ e.decoration_zone.name }}{% if e.text %}: {{ e.text }}{% endif %}</p>{% empty %}<p>No customization elements yet.</p>{% endfor %}{% else %}<p>No customization added.</p>{% endif %}{% endif %}<p>This project can become Ready for Checkout, but Stage 5 does not create orders or payments.</p>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}{% if request.LANGUAGE_CODE == 'ar' %}مشروع Studio{% else %}Studio Project{% endif %} | FABINZI{% endblock %}
+{% block content %}
+<nav class="breadcrumbs"><a href="{% url 'studio' %}">Studio</a><span>/</span><span>{% if request.LANGUAGE_CODE == 'ar' and project.product.title_ar %}{{ project.product.title_ar }}{% else %}{{ project.product.title_en }}{% endif %}</span></nav>
+<section class="split">
+  <div class="stack">
+    <div class="surface stack">
+      <div class="cluster"><span class="badge {% if project.status == 'ready' %}badge--success{% else %}badge--info{% endif %}">{{ project.get_status_display }}</span></div>
+      <h1 class="page-title">{% if request.LANGUAGE_CODE == 'ar' and project.product.title_ar %}{{ project.product.title_ar }}{% else %}{{ project.product.title_en }}{% endif %}</h1>
+      {% with image=project.product.images.first %}{% if image %}<div class="studio-canvas"><img src="{{ image.media_asset.metadata.public_url|default:image.media_asset.provider_asset_id }}" alt=""></div>{% else %}<div class="studio-canvas product-placeholder">FABINZI</div>{% endif %}{% endwith %}
+      <p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}هذه شاشة دمج التخصيص مع مسار الشراء الحالي. المحرر البصري الكامل للأعمال الفنية سيُستكمل في مرحلة Studio Productization التالية.{% else %}This screen integrates customization with the live commerce flow. The full visual artwork editor is reserved for the next Studio Productization checkpoint.{% endif %}</p>
+    </div>
+
+    {% if project.product.customization_enabled %}
+    <div class="surface stack">
+      <div><div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}التخصيص{% else %}Customization{% endif %}</div><h2 class="section-title">{% if request.LANGUAGE_CODE == 'ar' %}عناصر التخصيص{% else %}Customization elements{% endif %}</h2></div>
+      {% if project.customization %}
+        {% for e in project.customization.elements.all %}
+        <div class="card summary-row"><span><strong>{{ e.decoration_zone.name }}</strong><br><span class="muted">{{ e.get_kind_display }}</span></span><span>{% if e.text %}{{ e.text }}{% else %}—{% endif %}</span></div>
+        {% empty %}<div class="empty-state"><p>{% if request.LANGUAGE_CODE == 'ar' %}لا توجد عناصر تخصيص بعد.{% else %}No customization elements yet.{% endif %}</p></div>{% endfor %}
+      {% else %}<div class="empty-state"><p>{% if request.LANGUAGE_CODE == 'ar' %}لم يتم تفعيل التخصيص بعد.{% else %}Customization is not enabled yet.{% endif %}</p></div>{% endif %}
+
+      {% if project.status == 'draft' %}
+      {% if zones %}
+      <form method="post" class="form-grid">
+        {% csrf_token %}<input type="hidden" name="action" value="add_text">
+        <div class="field"><label for="zone">{% if request.LANGUAGE_CODE == 'ar' %}منطقة الزخرفة{% else %}Decoration zone{% endif %}</label><select class="select" id="zone" name="decoration_zone" required>{% for zone in zones %}<option value="{{ zone.id }}">{{ zone.name }} · {{ zone.get_method_display }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="text">{% if request.LANGUAGE_CODE == 'ar' %}النص{% else %}Text{% endif %}</label><input class="input" id="text" name="text" maxlength="240" required></div>
+        <div class="field field--full"><button class="button button--ghost" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}إضافة النص{% else %}Add text{% endif %}</button></div>
+      </form>
+      {% else %}<p class="error">{% if request.LANGUAGE_CODE == 'ar' %}لا توجد مناطق زخرفة متاحة لهذا المنتج.{% else %}No decoration zones are available for this product.{% endif %}</p>{% endif %}
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <aside class="stack">
+    <div class="surface stack">
+      <div><div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}الاختيارات{% else %}Product choices{% endif %}</div><h2 class="section-title">{% if request.LANGUAGE_CODE == 'ar' %}المقاس والكمية{% else %}Variant & quantity{% endif %}</h2></div>
+      {% if project.status == 'draft' %}
+      <form method="post" class="stack">
+        {% csrf_token %}<input type="hidden" name="action" value="update">
+        <div class="field"><label for="variant">{% if request.LANGUAGE_CODE == 'ar' %}الخيار{% else %}Variant{% endif %}</label><select class="select" id="variant" name="variant" required>{% for v in project.product.variants.all %}{% if v.is_active %}<option value="{{ v.id }}" {% if project.variant_id == v.id %}selected{% endif %}>{{ v.size }}{% if v.color_name %} · {{ v.color_name }}{% endif %} — {{ v.price }} {{ project.product.currency }}</option>{% endif %}{% endfor %}</select></div>
+        <div class="field"><label for="quantity">{% if request.LANGUAGE_CODE == 'ar' %}الكمية{% else %}Quantity{% endif %}</label><input class="input" id="quantity" name="quantity" type="number" min="1" value="{{ project.quantity }}" required></div>
+        <div class="field"><label for="notes">{% if request.LANGUAGE_CODE == 'ar' %}ملاحظات{% else %}Notes{% endif %}</label><textarea class="textarea" id="notes" name="customer_notes">{{ project.customer_notes }}</textarea></div>
+        <button class="button button--ghost" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}حفظ الاختيارات{% else %}Save choices{% endif %}</button>
+      </form>
+      {% else %}<div class="summary-list"><div class="summary-row"><span>{% if request.LANGUAGE_CODE == 'ar' %}الخيار{% else %}Variant{% endif %}</span><strong>{{ project.variant.size }}{% if project.variant.color_name %} · {{ project.variant.color_name }}{% endif %}</strong></div><div class="summary-row"><span>{% if request.LANGUAGE_CODE == 'ar' %}الكمية{% else %}Quantity{% endif %}</span><strong>{{ project.quantity }}</strong></div></div>{% endif %}
+    </div>
+
+    <div class="surface stack">
+      <h2 class="section-title">{% if request.LANGUAGE_CODE == 'ar' %}الإجراء التالي{% else %}Next step{% endif %}</h2>
+      {% if project.status == 'draft' %}
+      <form method="post">{% csrf_token %}<input type="hidden" name="action" value="ready"><button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}اعتبر التخصيص جاهزًا{% else %}Mark customization Ready{% endif %}</button></form>
+      <p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}سيعيد الخادم التحقق من المنتج والخيار والكمية والعناصر قبل تغيير الحالة.{% else %}The server revalidates product, variant, quantity and elements before changing status.{% endif %}</p>
+      {% elif project.status == 'ready' %}
+      <form method="post">{% csrf_token %}<input type="hidden" name="action" value="add_cart"><button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}أضف التخصيص إلى السلة{% else %}Add customization to Cart{% endif %}</button></form>
+      <a class="button button--ghost" href="{% url 'cart' %}">{% if request.LANGUAGE_CODE == 'ar' %}عرض السلة{% else %}View Cart{% endif %}</a>
+      {% else %}<p class="muted">{% if request.LANGUAGE_CODE == 'ar' %}هذا المشروع مؤرشف ولا يمكن شراؤه.{% else %}This project is archived and cannot be purchased.{% endif %}</p>{% endif %}
+    </div>
+  </aside>
+</section>
+{% endblock %}

@@ -13,3 +13,4 @@ whitenoise>=6.7,<7.0
 gunicorn>=23,<24
 pytest>=8,<9
 pytest-django>=4.9,<5.0
+selenium>=4.30,<5.0

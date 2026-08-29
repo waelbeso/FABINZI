@@ -1,1 +1,36 @@
-{% extends 'base.html' %}{% block content %}<h1>{% if request.LANGUAGE_CODE == 'ar' %}متاجر FABINZI{% else %}FABINZI Stores{% endif %}</h1><div class="grid">{% for store in stores %}<article><h2><a href="{% url 'public-storefront' store.slug %}">{% if request.LANGUAGE_CODE == 'ar' and store.name_ar %}{{ store.name_ar }}{% else %}{{ store.name_en }}{% endif %}</a></h2><p>{% if request.LANGUAGE_CODE == 'ar' and store.about_ar %}{{ store.about_ar|truncatewords:30 }}{% else %}{{ store.about_en|truncatewords:30 }}{% endif %}</p></article>{% empty %}<p>No published stores yet.</p>{% endfor %}</div>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}{% if request.LANGUAGE_CODE == 'ar' %}المتاجر | FABINZI{% else %}Stores | FABINZI{% endif %}{% endblock %}
+{% block content %}
+<section class="section--tight">
+  <div class="eyebrow">FABINZI Marketplace</div>
+  <h1 class="page-title">{% if request.LANGUAGE_CODE == 'ar' %}تسوّق من مصممين حقيقيين{% else %}Shop real designer storefronts{% endif %}</h1>
+  <p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}اكتشف المنتجات المنشورة فعليًا من متاجر المصممين على FABINZI. الأسعار والتوافر والخيارات تأتي مباشرة من بيانات المتجر.{% else %}Discover live products from FABINZI designer storefronts. Prices, availability and options come directly from store data.{% endif %}</p>
+</section>
+
+{% if stores %}
+<section class="section--tight card-grid" aria-label="{% if request.LANGUAGE_CODE == 'ar' %}المتاجر المتاحة{% else %}Available stores{% endif %}">
+  {% for store in stores %}
+  <article class="card store-card">
+    <div class="store-card__identity">
+      {% if store.logo %}
+      <div class="store-avatar"><img src="{{ store.logo.metadata.public_url|default:store.logo.provider_asset_id }}" alt="{% if request.LANGUAGE_CODE == 'ar' and store.name_ar %}{{ store.name_ar }}{% else %}{{ store.name_en }}{% endif %}"></div>
+      {% else %}
+      <div class="store-avatar store-avatar--placeholder" aria-hidden="true">{{ store.name_en|slice:':1' }}</div>
+      {% endif %}
+      <div>
+        <h2 class="section-title">{% if request.LANGUAGE_CODE == 'ar' and store.name_ar %}{{ store.name_ar }}{% else %}{{ store.name_en }}{% endif %}</h2>
+        <span class="badge badge--success">{% if request.LANGUAGE_CODE == 'ar' %}متجر منشور{% else %}Published store{% endif %}</span>
+      </div>
+    </div>
+    <p class="muted">{% if request.LANGUAGE_CODE == 'ar' and store.about_ar %}{{ store.about_ar|truncatewords:28 }}{% elif store.about_en %}{{ store.about_en|truncatewords:28 }}{% else %}{% if request.LANGUAGE_CODE == 'ar' %}متجر مصمم على FABINZI.{% else %}A FABINZI designer storefront.{% endif %}{% endif %}</p>
+    <a class="button button--ghost" href="{% url 'public-storefront' store.slug %}">{% if request.LANGUAGE_CODE == 'ar' %}فتح المتجر{% else %}Open store{% endif %}</a>
+  </article>
+  {% endfor %}
+</section>
+{% else %}
+<section class="empty-state">
+  <h2>{% if request.LANGUAGE_CODE == 'ar' %}لا توجد متاجر منشورة حاليًا{% else %}No published stores right now{% endif %}</h2>
+  <p>{% if request.LANGUAGE_CODE == 'ar' %}ستظهر هنا المتاجر بمجرد نشرها من أصحابها.{% else %}Stores will appear here as soon as their owners publish them.{% endif %}</p>
+</section>
+{% endif %}
+{% endblock %}

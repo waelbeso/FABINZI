@@ -1,1 +1,33 @@
-{% extends 'base.html' %}{% block content %}<h1>FABINZI Studio</h1><p>Choose a published product and save a customer configuration. Checkout is intentionally handled in Stage 6.</p>{% if product %}<h2>{{ product.title_en }}</h2><form method="post">{% csrf_token %}<input type="hidden" name="product" value="{{ product.id }}"><label>Variant <select name="variant" required>{% for v in product.variants.all %}{% if v.is_active %}<option value="{{ v.id }}">{{ v.size }} {{ v.color_name }} — {{ v.price }} {{ product.currency }}</option>{% endif %}{% endfor %}</select></label><label>Quantity <input name="quantity" type="number" min="1" value="1"></label><button>Start Studio Project</button></form>{% endif %}<h2>Saved Projects</h2>{% for p in projects %}<p><a href="{% url 'studio-project' p.id %}">{{ p.product.title_en }}</a> — {{ p.get_status_display }}</p>{% empty %}<p>No saved Studio projects.</p>{% endfor %}{% endblock %}
+{% extends 'base.html' %}
+{% block title %}FABINZI Studio{% endblock %}
+{% block content %}
+<section class="section--tight">
+  <div class="eyebrow">FABINZI Studio</div>
+  <h1 class="page-title">{% if request.LANGUAGE_CODE == 'ar' %}خصّص منتجك ثم أضفه إلى نفس السلة{% else %}Customize your product, then add it to the same Cart{% endif %}</h1>
+  <p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}الاستوديو اختياري ويُستخدم فقط عندما تريد تخصيص منتج يدعم التخصيص. الشراء العادي لا يحتاج إلى مشروع Studio.{% else %}Studio is optional and only used when you choose to customize an eligible product. Plain purchases never require a Studio project.{% endif %}</p>
+</section>
+
+{% if product %}
+<section class="surface split">
+  <div class="stack">
+    <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}المنتج المختار{% else %}Selected product{% endif %}</div>
+    <h2 class="section-title">{% if request.LANGUAGE_CODE == 'ar' and product.title_ar %}{{ product.title_ar }}{% else %}{{ product.title_en }}{% endif %}</h2>
+    {% with image=product.images.first %}{% if image %}<div class="studio-entry-media"><img src="{{ image.media_asset.metadata.public_url|default:image.media_asset.provider_asset_id }}" alt=""></div>{% endif %}{% endwith %}
+    <p class="muted">{% if request.LANGUAGE_CODE == 'ar' and product.description_ar %}{{ product.description_ar }}{% else %}{{ product.description_en }}{% endif %}</p>
+  </div>
+  <form method="post" class="stack" aria-label="{% if request.LANGUAGE_CODE == 'ar' %}بدء مشروع التخصيص{% else %}Start customization project{% endif %}">
+    {% csrf_token %}<input type="hidden" name="product" value="{{ product.id }}">
+    <div class="field"><label for="studio-variant">{% if request.LANGUAGE_CODE == 'ar' %}الخيار{% else %}Variant{% endif %}</label><select id="studio-variant" class="select" name="variant" required>{% for v in product.variants.all %}{% if v.is_active %}<option value="{{ v.id }}">{% if v.size %}{{ v.size }}{% endif %}{% if v.color_name %} · {{ v.color_name }}{% endif %} — {{ v.price }} {{ product.currency }}</option>{% endif %}{% endfor %}</select></div>
+    <div class="field"><label for="studio-quantity">{% if request.LANGUAGE_CODE == 'ar' %}الكمية{% else %}Quantity{% endif %}</label><input id="studio-quantity" class="input" name="quantity" type="number" min="1" value="1" required></div>
+    <button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}ابدأ التخصيص{% else %}Start customization{% endif %}</button>
+    <a class="button button--ghost" href="{% url 'public-store-product' product.storefront.slug product.slug %}">{% if request.LANGUAGE_CODE == 'ar' %}العودة للمنتج{% else %}Back to product{% endif %}</a>
+  </form>
+</section>
+{% endif %}
+
+<section class="section">
+  <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}مشروعاتي{% else %}My projects{% endif %}</div>
+  <h2 class="section-title">{% if request.LANGUAGE_CODE == 'ar' %}مشروعات Studio المحفوظة{% else %}Saved Studio projects{% endif %}</h2>
+  {% if projects %}<div class="card-grid">{% for p in projects %}<article class="card stack"><div class="cluster"><span class="badge {% if p.status == 'ready' %}badge--success{% else %}badge--info{% endif %}">{{ p.get_status_display }}</span></div><h3>{% if request.LANGUAGE_CODE == 'ar' and p.product.title_ar %}{{ p.product.title_ar }}{% else %}{{ p.product.title_en }}{% endif %}</h3><p class="muted">{% if p.variant %}{{ p.variant.size }}{% if p.variant.color_name %} · {{ p.variant.color_name }}{% endif %}{% endif %} · {{ p.quantity }}</p><a class="button button--ghost" href="{% url 'studio-project' p.id %}">{% if request.LANGUAGE_CODE == 'ar' %}فتح المشروع{% else %}Open project{% endif %}</a></article>{% endfor %}</div>{% else %}<div class="empty-state"><h3>{% if request.LANGUAGE_CODE == 'ar' %}لا توجد مشروعات محفوظة{% else %}No saved projects{% endif %}</h3><p>{% if request.LANGUAGE_CODE == 'ar' %}افتح منتجًا قابلًا للتخصيص واختر «خصّص في الاستوديو».{% else %}Open a customizable product and choose “Customize in Studio”.{% endif %}</p></div>{% endif %}
+</section>
+{% endblock %}

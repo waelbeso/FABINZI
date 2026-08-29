@@ -1,1 +1,13 @@
-{% extends 'base.html' %}{% block content %}<section class="page-shell"><h1>Checkout</h1><p>{{ error }}</p></section>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}{% if request.LANGUAGE_CODE == 'ar' %}تعذر إكمال الطلب{% else %}Unable to continue{% endif %} | FABINZI{% endblock %}
+{% block content %}
+<section class="confirmation-panel surface stack">
+  <div class="confirmation-icon commerce-error-icon" aria-hidden="true">!</div>
+  <div>
+    <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}تعذر المتابعة{% else %}Unable to continue{% endif %}</div>
+    <h1 class="page-title">{% if request.LANGUAGE_CODE == 'ar' %}لم نتمكن من تنفيذ هذا الإجراء{% else %}We couldn't complete this action{% endif %}</h1>
+    <p class="lead">{{ error }}</p>
+  </div>
+  <div class="page-actions"><a class="button" href="{% url 'store-marketplace' %}">{% if request.LANGUAGE_CODE == 'ar' %}العودة إلى المتجر{% else %}Back to Shop{% endif %}</a>{% if user.is_authenticated %}<a class="button button--ghost" href="{% url 'cart' %}">{% if request.LANGUAGE_CODE == 'ar' %}عرض السلة{% else %}View Cart{% endif %}</a>{% endif %}</div>
+</section>
+{% endblock %}

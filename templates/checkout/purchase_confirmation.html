@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+{% block title %}{% if request.LANGUAGE_CODE == 'ar' %}تم تأكيد الطلب{% else %}Order confirmed{% endif %} | FABINZI{% endblock %}
+{% block content %}
+<section class="confirmation-panel surface stack">
+  <div class="confirmation-icon" aria-hidden="true">✓</div>
+  <div>
+    <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}تم إنشاء الطلب{% else %}Order created{% endif %}</div>
+    <h1 class="page-title">{% if request.LANGUAGE_CODE == 'ar' %}شكرًا، تم استلام طلبك{% else %}Thank you — your order is in{% endif %}</h1>
+    <p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}أنشأ FABINZI عملية شراء واحدة لك، بينما سيُدار كل عنصر تشغيليًا بشكل مستقل عند الحاجة.{% else %}FABINZI created one customer purchase for you while each item can proceed independently through operations when needed.{% endif %}</p>
+  </div>
+  <div class="card summary-list">
+    <div class="summary-row"><span>{% if request.LANGUAGE_CODE == 'ar' %}رقم الطلب{% else %}Order number{% endif %}</span><strong class="purchase-number">{{ purchase.number }}</strong></div>
+    <div class="summary-row"><span>{% if request.LANGUAGE_CODE == 'ar' %}الحالة{% else %}Status{% endif %}</span><strong>{{ purchase.get_status_display }}</strong></div>
+    <div class="summary-row"><span>{% if request.LANGUAGE_CODE == 'ar' %}طريقة الدفع{% else %}Payment{% endif %}</span><strong>{{ purchase.get_payment_method_display }}</strong></div>
+    <div class="summary-row summary-row--total"><span>{% if request.LANGUAGE_CODE == 'ar' %}الإجمالي{% else %}Total{% endif %}</span><strong>{{ purchase.total }} {{ purchase.currency }}</strong></div>
+  </div>
+  <div class="page-actions"><a class="button" href="{% url 'purchase-detail' purchase.id %}">{% if request.LANGUAGE_CODE == 'ar' %}عرض تفاصيل الطلب{% else %}View order details{% endif %}</a><a class="button button--ghost" href="{% url 'store-marketplace' %}">{% if request.LANGUAGE_CODE == 'ar' %}متابعة التسوق{% else %}Continue shopping{% endif %}</a></div>
+</section>
+{% endblock %}

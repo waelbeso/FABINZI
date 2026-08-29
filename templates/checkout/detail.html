@@ -1,1 +1,78 @@
-{% extends 'base.html' %}{% block content %}<section class="page-shell"><h1>Checkout</h1>{% if error %}<p class="alert">{{ error }}</p>{% endif %}<p>{{ checkout.studio_project.product.title_en }} · {{ checkout.total }} {{ checkout.currency }}</p><form method="post">{% csrf_token %}<input type="hidden" name="action" value="shipping"><label>Name<input name="shipping_name" value="{{ checkout.shipping_name }}" required></label><label>Phone<input name="shipping_phone" value="{{ checkout.shipping_phone }}" required></label><label>Email<input name="shipping_email" value="{{ checkout.shipping_email }}"></label><label>Address<input name="shipping_address1" value="{{ checkout.shipping_address1 }}" required></label><label>Address 2<input name="shipping_address2" value="{{ checkout.shipping_address2 }}"></label><label>City<input name="shipping_city" value="{{ checkout.shipping_city }}" required></label><label>Region<input name="shipping_region" value="{{ checkout.shipping_region }}"></label><label>Country<input name="shipping_country" value="{{ checkout.shipping_country|default:'EG' }}" maxlength="2" required></label><label>Postal code<input name="postal_code" value="{{ checkout.postal_code }}"></label><button type="submit">Save delivery details</button></form><form method="post">{% csrf_token %}<input type="hidden" name="action" value="place"><label>Payment<select name="payment_method"><option value="cod">Cash on Delivery</option><option value="paymob">Paymob</option><option value="stripe">Stripe</option></select></label><button type="submit">Place order</button></form></section>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}{% if request.LANGUAGE_CODE == 'ar' %}الدفع{% else %}Checkout{% endif %} | FABINZI{% endblock %}
+{% block content %}
+<nav class="breadcrumbs"><a href="{% url 'cart' %}">{% if request.LANGUAGE_CODE == 'ar' %}السلة{% else %}Cart{% endif %}</a><span>/</span><span>{% if request.LANGUAGE_CODE == 'ar' %}الدفع{% else %}Checkout{% endif %}</span></nav>
+<section class="section--tight">
+  <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}إتمام الطلب{% else %}Secure checkout{% endif %}</div>
+  <h1 class="page-title">{% if request.LANGUAGE_CODE == 'ar' %}بيانات التوصيل والدفع{% else %}Delivery & payment{% endif %}</h1>
+  <p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}سيعيد FABINZI التحقق من السعر والتوافر والكمية على الخادم لحظة إنشاء الطلب.{% else %}FABINZI revalidates price, availability and quantity on the server when you place the order.{% endif %}</p>
+</section>
+
+{% if error %}<div class="flash flash--error checkout-inline-error" role="alert">{{ error }}</div>{% endif %}
+
+<form method="post" class="checkout-layout">
+  {% csrf_token %}<input type="hidden" name="action" value="place">
+  <div class="stack">
+    <section class="surface stack">
+      <div><div class="eyebrow">1 · {% if request.LANGUAGE_CODE == 'ar' %}التوصيل{% else %}Delivery{% endif %}</div><h2 class="section-title">{% if request.LANGUAGE_CODE == 'ar' %}عنوان الاستلام{% else %}Delivery address{% endif %}</h2></div>
+      <div class="form-grid">
+        <div class="field"><label for="shipping_name">{% if request.LANGUAGE_CODE == 'ar' %}الاسم الكامل{% else %}Full name{% endif %}</label><input class="input" id="shipping_name" name="shipping_name" value="{{ checkout.shipping_name }}" autocomplete="name" required></div>
+        <div class="field"><label for="shipping_phone">{% if request.LANGUAGE_CODE == 'ar' %}رقم الهاتف{% else %}Phone{% endif %}</label><input class="input" id="shipping_phone" name="shipping_phone" value="{{ checkout.shipping_phone }}" autocomplete="tel" required></div>
+        <div class="field field--full"><label for="shipping_email">{% if request.LANGUAGE_CODE == 'ar' %}البريد الإلكتروني{% else %}Email{% endif %}</label><input class="input" id="shipping_email" name="shipping_email" type="email" value="{{ checkout.shipping_email }}" autocomplete="email"></div>
+        <div class="field field--full"><label for="shipping_address1">{% if request.LANGUAGE_CODE == 'ar' %}العنوان{% else %}Address{% endif %}</label><input class="input" id="shipping_address1" name="shipping_address1" value="{{ checkout.shipping_address1 }}" autocomplete="address-line1" required></div>
+        <div class="field field--full"><label for="shipping_address2">{% if request.LANGUAGE_CODE == 'ar' %}العنوان الإضافي{% else %}Address line 2{% endif %}</label><input class="input" id="shipping_address2" name="shipping_address2" value="{{ checkout.shipping_address2 }}" autocomplete="address-line2"></div>
+        <div class="field"><label for="shipping_city">{% if request.LANGUAGE_CODE == 'ar' %}المدينة{% else %}City{% endif %}</label><input class="input" id="shipping_city" name="shipping_city" value="{{ checkout.shipping_city }}" autocomplete="address-level2" required></div>
+        <div class="field"><label for="shipping_region">{% if request.LANGUAGE_CODE == 'ar' %}المحافظة / المنطقة{% else %}Region{% endif %}</label><input class="input" id="shipping_region" name="shipping_region" value="{{ checkout.shipping_region }}" autocomplete="address-level1"></div>
+        <div class="field"><label for="shipping_country">{% if request.LANGUAGE_CODE == 'ar' %}رمز الدولة{% else %}Country code{% endif %}</label><input class="input" id="shipping_country" name="shipping_country" value="{{ checkout.shipping_country|default:'EG' }}" maxlength="2" autocomplete="country" required></div>
+        <div class="field"><label for="postal_code">{% if request.LANGUAGE_CODE == 'ar' %}الرمز البريدي{% else %}Postal code{% endif %}</label><input class="input" id="postal_code" name="postal_code" value="{{ checkout.postal_code }}" autocomplete="postal-code"></div>
+      </div>
+    </section>
+
+    <section class="surface stack">
+      <div class="eyebrow">2 · {% if request.LANGUAGE_CODE == 'ar' %}الدفع{% else %}Payment{% endif %}</div>
+      {% if payment_methods %}
+      <fieldset class="payment-fieldset">
+        <legend class="section-title">{% if request.LANGUAGE_CODE == 'ar' %}اختر طريقة الدفع{% else %}Choose payment method{% endif %}</legend>
+        <div class="payment-options">
+          {% for value,en,ar in payment_methods %}
+          <div class="payment-option-wrap">
+            <input class="payment-option__control" id="payment-{{ value }}" type="radio" name="payment_method" value="{{ value }}" {% if forloop.first %}checked{% endif %}>
+            <label class="payment-option" for="payment-{{ value }}" data-payment-method="{{ value }}">
+              <span class="payment-option__indicator" aria-hidden="true"></span>
+              <span class="payment-option__copy"><strong>{% if request.LANGUAGE_CODE == 'ar' %}{{ ar }}{% else %}{{ en }}{% endif %}</strong>{% if value == 'cod' %}<small>{% if request.LANGUAGE_CODE == 'ar' %}ادفع عند استلام الطلب.{% else %}Pay when your order is delivered.{% endif %}</small>{% endif %}</span>
+            </label>
+          </div>
+          {% endfor %}
+        </div>
+      </fieldset>
+      {% else %}
+      <div><h2 class="section-title">{% if request.LANGUAGE_CODE == 'ar' %}اختر طريقة الدفع{% else %}Choose payment method{% endif %}</h2></div>
+      <div class="empty-state"><h3>{% if request.LANGUAGE_CODE == 'ar' %}لا توجد طريقة دفع متاحة{% else %}No payment method available{% endif %}</h3><p>{% if request.LANGUAGE_CODE == 'ar' %}لا يمكن إنشاء الطلب حتى يتم تفعيل طريقة دفع صالحة من إعدادات المنصة.{% else %}The order cannot be placed until a valid payment method is enabled by the platform.{% endif %}</p></div>
+      {% endif %}
+    </section>
+  </div>
+
+  <aside class="surface stack checkout-summary">
+    <div><div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}الملخص{% else %}Summary{% endif %}</div><h2 class="section-title">{% if request.LANGUAGE_CODE == 'ar' %}طلبك{% else %}Your order{% endif %}</h2></div>
+    <div class="checkout-lines">
+      {% for line in lines %}
+      <div class="checkout-line">
+        <div>
+          {% if line.item %}<strong>{% if request.LANGUAGE_CODE == 'ar' and line.item.store_product.title_ar %}{{ line.item.store_product.title_ar }}{% else %}{{ line.item.store_product.title_en }}{% endif %}</strong><div class="muted">{{ line.item.variant.size }}{% if line.item.variant.color_name %} · {{ line.item.variant.color_name }}{% endif %} · ×{{ line.item.quantity }}</div>{% if line.item.kind == 'studio' %}<span class="badge badge--info">{% if request.LANGUAGE_CODE == 'ar' %}مخصص{% else %}Customized{% endif %}</span>{% elif line.item.kind == 'ready_designed' %}<span class="badge badge--success">{% if request.LANGUAGE_CODE == 'ar' %}تصميم جاهز{% else %}Ready designed{% endif %}</span>{% endif %}
+          {% else %}<strong>{{ line.project.product.title_en }}</strong><div class="muted">×{{ line.project.quantity }}</div>{% endif %}
+        </div>
+        <strong>{{ line.line_total }} {{ checkout.currency }}</strong>
+      </div>
+      {% empty %}<p class="muted">{% if request.LANGUAGE_CODE == 'ar' %}لا توجد عناصر في جلسة الدفع.{% else %}No items in this checkout session.{% endif %}</p>{% endfor %}
+    </div>
+    <div class="summary-list">
+      <div class="summary-row"><span>{% if request.LANGUAGE_CODE == 'ar' %}الإجمالي الفرعي{% else %}Subtotal{% endif %}</span><strong>{{ checkout.subtotal }} {{ checkout.currency }}</strong></div>
+      <div class="summary-row"><span>{% if request.LANGUAGE_CODE == 'ar' %}الشحن{% else %}Shipping{% endif %}</span><strong>{{ checkout.shipping_amount }} {{ checkout.currency }}</strong></div>
+      {% if checkout.discount_amount %}<div class="summary-row"><span>{% if request.LANGUAGE_CODE == 'ar' %}الخصم{% else %}Discount{% endif %}</span><strong>-{{ checkout.discount_amount }} {{ checkout.currency }}</strong></div>{% endif %}
+      <div class="summary-row summary-row--total"><span>{% if request.LANGUAGE_CODE == 'ar' %}الإجمالي{% else %}Total{% endif %}</span><strong>{{ checkout.total }} {{ checkout.currency }}</strong></div>
+    </div>
+    <button class="button" type="submit" {% if not payment_methods %}disabled{% endif %}>{% if request.LANGUAGE_CODE == 'ar' %}تأكيد الطلب{% else %}Place order{% endif %}</button>
+    <a class="button button--ghost" href="{% url 'cart' %}">{% if request.LANGUAGE_CODE == 'ar' %}العودة إلى السلة{% else %}Back to Cart{% endif %}</a>
+  </aside>
+</form>
+{% endblock %}

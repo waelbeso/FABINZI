@@ -1,1 +1,69 @@
-{% extends 'base.html' %}{% block content %}<h1>{% if request.LANGUAGE_CODE == 'ar' and product.title_ar %}{{ product.title_ar }}{% else %}{{ product.title_en }}{% endif %}</h1><p>{% if request.LANGUAGE_CODE == 'ar' and product.description_ar %}{{ product.description_ar }}{% else %}{{ product.description_en }}{% endif %}</p><p>From {{ product.base_price }} {{ product.currency }}</p><h2>Variants</h2>{% for v in product.variants.all %}{% if v.is_active %}<p>{{ v.size }} {{ v.color_name }} — {{ v.price }} {{ product.currency }}</p>{% endif %}{% endfor %}{% if user.is_authenticated %}<a href="{% url 'studio' %}?product={{ product.id }}">{% if product.customization_enabled %}Open in Studio{% else %}Choose in Studio{% endif %}</a>{% else %}<a href="{% url 'two_factor:login' %}?next={{ request.path }}">Sign in to continue</a>{% endif %}{% endblock %}
+{% extends 'base.html' %}
+{% block title %}{% if request.LANGUAGE_CODE == 'ar' and product.title_ar %}{{ product.title_ar }}{% else %}{{ product.title_en }}{% endif %} | FABINZI{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Breadcrumb">
+  <a href="{% url 'store-marketplace' %}">{% if request.LANGUAGE_CODE == 'ar' %}المتاجر{% else %}Stores{% endif %}</a><span>/</span>
+  <a href="{% url 'public-storefront' product.storefront.slug %}">{% if request.LANGUAGE_CODE == 'ar' and product.storefront.name_ar %}{{ product.storefront.name_ar }}{% else %}{{ product.storefront.name_en }}{% endif %}</a><span>/</span>
+  <span>{% if request.LANGUAGE_CODE == 'ar' and product.title_ar %}{{ product.title_ar }}{% else %}{{ product.title_en }}{% endif %}</span>
+</nav>
+<section class="product-layout">
+  <div class="gallery">
+    <div class="gallery__main">
+      {% if primary_image %}<img src="{{ primary_image.media_asset.metadata.public_url|default:primary_image.media_asset.provider_asset_id }}" alt="{% if request.LANGUAGE_CODE == 'ar' and primary_image.alt_ar %}{{ primary_image.alt_ar }}{% else %}{{ primary_image.alt_en|default:product.title_en }}{% endif %}">
+      {% else %}<div class="product-placeholder product-placeholder--large" aria-hidden="true">FABINZI</div>{% endif %}
+    </div>
+    {% if product.images.count > 1 %}<div class="product-thumbs">{% for image in product.images.all %}<div class="product-thumb"><img src="{{ image.media_asset.metadata.public_url|default:image.media_asset.provider_asset_id }}" alt="{% if request.LANGUAGE_CODE == 'ar' and image.alt_ar %}{{ image.alt_ar }}{% else %}{{ image.alt_en|default:product.title_en }}{% endif %}"></div>{% endfor %}</div>{% endif %}
+  </div>
+
+  <div class="stack product-buybox">
+    <div>
+      <div class="cluster">
+        {% if is_ready_designed %}<span class="badge badge--success">{% if request.LANGUAGE_CODE == 'ar' %}تصميم جاهز{% else %}Ready designed{% endif %}</span>{% endif %}
+        {% if product.customization_enabled %}<span class="badge badge--info">{% if request.LANGUAGE_CODE == 'ar' %}التخصيص اختياري{% else %}Optional customization{% endif %}</span>{% endif %}
+        {% if product.fulfillment_mode == 'stock' %}<span class="badge">{% if request.LANGUAGE_CODE == 'ar' %}مخزون{% else %}Stock{% endif %}</span>{% else %}<span class="badge">{% if request.LANGUAGE_CODE == 'ar' %}يصنع حسب الطلب{% else %}Made to order{% endif %}</span>{% endif %}
+      </div>
+      <h1 class="page-title">{% if request.LANGUAGE_CODE == 'ar' and product.title_ar %}{{ product.title_ar }}{% else %}{{ product.title_en }}{% endif %}</h1>
+      <p class="price">{% if request.LANGUAGE_CODE == 'ar' %}يبدأ من{% else %}From{% endif %} {{ product.base_price }} {{ product.currency }}</p>
+      {% if product.description_ar or product.description_en %}<p class="lead">{% if request.LANGUAGE_CODE == 'ar' and product.description_ar %}{{ product.description_ar }}{% else %}{{ product.description_en }}{% endif %}</p>{% endif %}
+    </div>
+
+    <div class="surface stack">
+      <h2 class="section-title">{% if request.LANGUAGE_CODE == 'ar' %}اختر المنتج{% else %}Choose your product{% endif %}</h2>
+      {% if variants %}
+        {% if user.is_authenticated %}
+        <form method="post" action="{% url 'cart-add-product' product.id %}" class="stack">
+          {% csrf_token %}
+          <div class="field">
+            <label for="variant">{% if request.LANGUAGE_CODE == 'ar' %}المقاس / اللون{% else %}Size / color{% endif %}</label>
+            <select id="variant" name="variant" class="select" required>
+              {% for v in variants %}
+              <option value="{{ v.id }}">{% if v.size %}{{ v.size }}{% endif %}{% if v.color_name %}{% if v.size %} · {% endif %}{{ v.color_name }}{% endif %} — {{ v.price }} {{ product.currency }}{% if product.fulfillment_mode == 'stock' and v.stock_quantity != None %} · {% if request.LANGUAGE_CODE == 'ar' %}المتاح{% else %}Stock{% endif %}: {{ v.stock_quantity }}{% endif %}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="quantity">{% if request.LANGUAGE_CODE == 'ar' %}الكمية{% else %}Quantity{% endif %}</label>
+            <input class="input" id="quantity" name="quantity" type="number" min="1" value="1" required>
+          </div>
+          <button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}أضف إلى السلة{% else %}Add to Cart{% endif %}</button>
+        </form>
+        {% if product.customization_enabled %}
+        <a class="button button--ghost" href="{% url 'studio' %}?product={{ product.id }}">{% if request.LANGUAGE_CODE == 'ar' %}خصّص في الاستوديو{% else %}Customize in Studio{% endif %}</a>
+        <p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}التخصيص اختياري. يمكنك شراء المنتج مباشرة دون فتح الاستوديو.{% else %}Customization is optional. You can buy this product directly without opening Studio.{% endif %}</p>
+        {% endif %}
+        {% else %}
+        <a class="button" href="{% url 'two_factor:login' %}?next={{ request.path }}">{% if request.LANGUAGE_CODE == 'ar' %}سجّل الدخول للشراء{% else %}Sign in to buy{% endif %}</a>
+        {% endif %}
+      {% else %}
+      <div class="empty-state"><h3>{% if request.LANGUAGE_CODE == 'ar' %}غير متاح للشراء حاليًا{% else %}Currently unavailable{% endif %}</h3><p>{% if request.LANGUAGE_CODE == 'ar' %}لا توجد خيارات نشطة لهذا المنتج حاليًا.{% else %}There are no active variants for this product right now.{% endif %}</p></div>
+      {% endif %}
+    </div>
+
+    <div class="card summary-list">
+      <div class="summary-row"><span>{% if request.LANGUAGE_CODE == 'ar' %}المتجر{% else %}Store{% endif %}</span><strong>{% if request.LANGUAGE_CODE == 'ar' and product.storefront.name_ar %}{{ product.storefront.name_ar }}{% else %}{{ product.storefront.name_en }}{% endif %}</strong></div>
+      <div class="summary-row"><span>{% if request.LANGUAGE_CODE == 'ar' %}التنفيذ{% else %}Fulfillment{% endif %}</span><strong>{% if product.fulfillment_mode == 'stock' %}{% if request.LANGUAGE_CODE == 'ar' %}من المخزون{% else %}From stock{% endif %}{% else %}{% if request.LANGUAGE_CODE == 'ar' %}حسب الطلب{% else %}Made to order{% endif %}{% endif %}</strong></div>
+      {% if product.lead_time_days %}<div class="summary-row"><span>{% if request.LANGUAGE_CODE == 'ar' %}مدة التجهيز{% else %}Lead time{% endif %}</span><strong>{{ product.lead_time_days }} {% if request.LANGUAGE_CODE == 'ar' %}يوم{% else %}days{% endif %}</strong></div>{% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}

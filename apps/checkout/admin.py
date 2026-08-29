@@ -1,6 +1,20 @@
 from django.contrib import admin
 from apps.integrations.admin_site import fabinzi_admin_site
-from .models import CheckoutSession, CustomerOrder, OrderItem, PaymentAttempt, PaymentWebhookEvent
+from .models import Cart, CartItem, CheckoutSession, CustomerOrder, CustomerPurchase, OrderItem, PaymentAttempt, PaymentWebhookEvent
+
+
+@admin.register(Cart, site=fabinzi_admin_site)
+class CartAdmin(admin.ModelAdmin):
+    list_display = ("id", "customer", "status", "updated_at")
+    list_filter = ("status",)
+    search_fields = ("customer__username", "customer__email")
+
+
+@admin.register(CartItem, site=fabinzi_admin_site)
+class CartItemAdmin(admin.ModelAdmin):
+    list_display = ("id", "cart", "kind", "store_product", "variant", "quantity", "updated_at")
+    list_filter = ("kind",)
+    search_fields = ("variant__sku", "store_product__title_en")
 
 
 @admin.register(CheckoutSession, site=fabinzi_admin_site)
@@ -10,11 +24,19 @@ class CheckoutSessionAdmin(admin.ModelAdmin):
     search_fields = ("customer__username", "shipping_phone", "shipping_email")
 
 
-@admin.register(CustomerOrder, site=fabinzi_admin_site)
-class CustomerOrderAdmin(admin.ModelAdmin):
+@admin.register(CustomerPurchase, site=fabinzi_admin_site)
+class CustomerPurchaseAdmin(admin.ModelAdmin):
     list_display = ("number", "customer", "status", "payment_method", "total", "currency", "created_at")
     list_filter = ("status", "payment_method", "currency")
-    search_fields = ("number", "customer__username")
+    search_fields = ("number", "customer__username", "customer__email")
+    readonly_fields = ("number", "shipping_snapshot")
+
+
+@admin.register(CustomerOrder, site=fabinzi_admin_site)
+class CustomerOrderAdmin(admin.ModelAdmin):
+    list_display = ("number", "purchase", "customer", "designer_organization", "status", "total", "currency", "created_at")
+    list_filter = ("status", "payment_method", "currency")
+    search_fields = ("number", "purchase__number", "customer__username")
 
 
 @admin.register(OrderItem, site=fabinzi_admin_site)
@@ -24,7 +46,7 @@ class OrderItemAdmin(admin.ModelAdmin):
 
 @admin.register(PaymentAttempt, site=fabinzi_admin_site)
 class PaymentAttemptAdmin(admin.ModelAdmin):
-    list_display = ("order", "provider", "status", "amount", "currency", "provider_reference", "created_at")
+    list_display = ("purchase", "order", "provider", "status", "amount", "currency", "provider_reference", "created_at")
     list_filter = ("provider", "status")
     readonly_fields = ("idempotency_key", "provider_payload")
 
