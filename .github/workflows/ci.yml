@@ -67,3 +67,11 @@ jobs:
           path: artifacts/designer-browser-qa
           if-no-files-found: ignore
           retention-days: 14
+      - name: Upload Manufacturer Portal browser QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manufacturer-portal-browser-qa
+          path: artifacts/manufacturer-browser-qa
+          if-no-files-found: error
+          retention-days: 14
