@@ -193,7 +193,7 @@ def _human_words(value):
 
 def _sentence(value):
     text = _human_words(value)
-    return text[:1].upper() + text[1:] if text else ""
+    return text[:1].upper() + text[1:].lower() if text else ""
 
 
 def _localized_pair(pair, language):
