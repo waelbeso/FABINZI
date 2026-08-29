@@ -1,0 +1,62 @@
+# Refreshed for the Global Live E2E execution checkpoint; reports presence only, never secret values.
+name: Live QA Capability Audit
+
+on:
+  push:
+    branches:
+      - work/global-live-e2e-qa
+    paths:
+      - .github/workflows/live-qa-capability-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capabilities:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      HAS_RENDER_API_KEY: ${{ secrets.RENDER_API_KEY != '' }}
+      HAS_RENDER_API_TOKEN: ${{ secrets.RENDER_API_TOKEN != '' }}
+      HAS_RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK != '' }}
+      HAS_QA_BASE_URL: ${{ secrets.FABINZI_QA_BASE_URL != '' }}
+      HAS_QA_ADMIN_EMAIL: ${{ secrets.FABINZI_QA_ADMIN_EMAIL != '' }}
+      HAS_QA_ADMIN_PASSWORD: ${{ secrets.FABINZI_QA_ADMIN_PASSWORD != '' }}
+      HAS_QA_ADMIN_OTP_SECRET: ${{ secrets.FABINZI_QA_ADMIN_OTP_SECRET != '' }}
+      HAS_QA_CUSTOMER_EMAIL: ${{ secrets.FABINZI_QA_CUSTOMER_EMAIL != '' }}
+      HAS_QA_CUSTOMER_PASSWORD: ${{ secrets.FABINZI_QA_CUSTOMER_PASSWORD != '' }}
+      HAS_QA_DESIGNER_EMAIL: ${{ secrets.FABINZI_QA_DESIGNER_EMAIL != '' }}
+      HAS_QA_DESIGNER_PASSWORD: ${{ secrets.FABINZI_QA_DESIGNER_PASSWORD != '' }}
+      HAS_QA_MANUFACTURER_EMAIL: ${{ secrets.FABINZI_QA_MANUFACTURER_EMAIL != '' }}
+      HAS_QA_MANUFACTURER_PASSWORD: ${{ secrets.FABINZI_QA_MANUFACTURER_PASSWORD != '' }}
+    steps:
+      - name: Record protected capability presence only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/global-live-e2e-qa/capability-audit
+          out="artifacts/global-live-e2e-qa/capability-audit/presence.txt"
+          {
+            echo "render_api_key=${HAS_RENDER_API_KEY}"
+            echo "render_api_token=${HAS_RENDER_API_TOKEN}"
+            echo "render_deploy_hook=${HAS_RENDER_DEPLOY_HOOK}"
+            echo "qa_base_url=${HAS_QA_BASE_URL}"
+            echo "qa_admin_email=${HAS_QA_ADMIN_EMAIL}"
+            echo "qa_admin_password=${HAS_QA_ADMIN_PASSWORD}"
+            echo "qa_admin_otp_secret=${HAS_QA_ADMIN_OTP_SECRET}"
+            echo "qa_customer_email=${HAS_QA_CUSTOMER_EMAIL}"
+            echo "qa_customer_password=${HAS_QA_CUSTOMER_PASSWORD}"
+            echo "qa_designer_email=${HAS_QA_DESIGNER_EMAIL}"
+            echo "qa_designer_password=${HAS_QA_DESIGNER_PASSWORD}"
+            echo "qa_manufacturer_email=${HAS_QA_MANUFACTURER_EMAIL}"
+            echo "qa_manufacturer_password=${HAS_QA_MANUFACTURER_PASSWORD}"
+          } | tee "$out"
+
+      - name: Upload capability audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: global-live-qa-capability-audit
+          path: artifacts/global-live-e2e-qa/capability-audit
+          if-no-files-found: error
+          retention-days: 14

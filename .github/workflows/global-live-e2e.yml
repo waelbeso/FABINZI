@@ -1,0 +1,72 @@
+name: Global Live E2E QA
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Explicit non-production QA base URL (HTTPS)"
+        required: true
+        type: string
+      confirm_non_production:
+        description: "I confirm this URL is the controlled QA/demo environment, not production"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  live-e2e:
+    if: ${{ inputs.confirm_non_production == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      FABINZI_LIVE_E2E_ENABLED: "true"
+      FABINZI_LIVE_E2E_BASE_URL: ${{ inputs.base_url }}
+      FABINZI_LIVE_E2E_EXPECTED_SHA: ${{ github.sha }}
+      FABINZI_LIVE_E2E_EXPECTED_BRANCH: ${{ github.ref_name }}
+      FABINZI_LIVE_E2E_CONFIRM_NON_PRODUCTION: "true"
+      FABINZI_LIVE_E2E_CUSTOMER_PASSWORD: ${{ secrets.FABINZI_QA_CUSTOMER_PASSWORD }}
+      FABINZI_LIVE_E2E_DESIGNER_PASSWORD: ${{ secrets.FABINZI_QA_DESIGNER_PASSWORD }}
+      FABINZI_LIVE_E2E_MANUFACTURER_PASSWORD: ${{ secrets.FABINZI_QA_MANUFACTURER_PASSWORD }}
+      FABINZI_LIVE_E2E_ADMIN_PASSWORD: ${{ secrets.FABINZI_QA_ADMIN_PASSWORD }}
+      FABINZI_LIVE_E2E_ADMIN_TOTP_SECRET: ${{ secrets.FABINZI_QA_ADMIN_TOTP_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install repository dependencies
+        run: pip install -r requirements.txt
+
+      - name: Refuse missing protected QA identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in \
+            FABINZI_LIVE_E2E_CUSTOMER_PASSWORD \
+            FABINZI_LIVE_E2E_DESIGNER_PASSWORD \
+            FABINZI_LIVE_E2E_MANUFACTURER_PASSWORD \
+            FABINZI_LIVE_E2E_ADMIN_PASSWORD \
+            FABINZI_LIVE_E2E_ADMIN_TOTP_SECRET; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Required protected QA value ${name} is not configured."
+              exit 1
+            fi
+          done
+
+      - name: Run exact-SHA deployed Chrome lifecycle
+        run: python live_e2e/global_live_e2e.py
+
+      - name: Upload live QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: global-live-e2e-qa-${{ github.run_id }}
+          path: artifacts/global-live-e2e-qa
+          if-no-files-found: warn
+          retention-days: 14

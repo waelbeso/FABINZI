@@ -1,0 +1,122 @@
+name: Live Environment Audit
+
+on:
+  push:
+    branches:
+      - work/global-live-e2e-qa
+    paths:
+      - .github/workflows/live-environment-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Probe repository-declared Render candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="artifacts/global-live-e2e-qa/live-environment-audit"
+          mkdir -p "$root/probes"
+
+          qa_base="$(awk '/key: FABINZI_PUBLIC_BASE_URL/{getline; sub(/^[[:space:]]*value:[[:space:]]*/, ""); print; exit}' render-qa.yaml)"
+          if [[ -z "$qa_base" || "$qa_base" != https://* ]]; then
+            echo "::error::Unable to derive an HTTPS QA base URL from render-qa.yaml"
+            exit 1
+          fi
+          printf '%s\n' "$qa_base" > "$root/repository-declared-qa-base-url.txt"
+
+          probe_one() {
+            base="$1"
+            path="$2"
+            key="$(printf '%s%s' "$base" "$path" | sha256sum | cut -c1-16)"
+            headers="$root/probes/${key}.headers"
+            body="$root/probes/${key}.body"
+            meta="$root/probes/${key}.meta"
+            code="$(curl --connect-timeout 10 --max-time 35 -sS -L -D "$headers" -o "$body" -w '%{http_code}' "${base}${path}" || true)"
+            {
+              echo "base=${base}"
+              echo "path=${path}"
+              echo "http_status=${code}"
+              echo "body_sha256=$(sha256sum "$body" | awk '{print $1}')"
+              echo "body_bytes=$(wc -c < "$body" | tr -d ' ')"
+            } > "$meta"
+          }
+
+          export -f probe_one
+          export root
+          bases=("$qa_base" "https://fabinzi-web.onrender.com" "https://fabinzi-prod-web.onrender.com")
+          for base in "${bases[@]}"; do
+            host="${base#https://}"
+            {
+              echo "===== ${base} ====="
+              getent ahosts "$host" 2>&1 | head -n 12 || true
+            } > "$root/dns-${host}.txt"
+            for path in /healthz/ /readyz/ /api/v1/health/ / /robots.txt /static/css/maneg-control-center.css; do
+              probe_one "$base" "$path" &
+            done
+          done
+          wait
+
+          out="$root/public-probe.txt"
+          : > "$out"
+          for base in "${bases[@]}"; do
+            host="${base#https://}"
+            cat "$root/dns-${host}.txt" >> "$out"
+            for path in /healthz/ /readyz/ /api/v1/health/ / /robots.txt /static/css/maneg-control-center.css; do
+              key="$(printf '%s%s' "$base" "$path" | sha256sum | cut -c1-16)"
+              echo "--- ${path}" >> "$out"
+              cat "$root/probes/${key}.meta" >> "$out"
+              sed -n '1,30p' "$root/probes/${key}.headers" >> "$out"
+              if [[ "$path" != "/static/css/maneg-control-center.css" ]]; then
+                head -c 1000 "$root/probes/${key}.body" | tr '\000' '?' >> "$out" || true
+                echo >> "$out"
+              fi
+            done
+          done
+          cat "$out"
+
+      - name: Record repository fingerprints
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="artifacts/global-live-e2e-qa/live-environment-audit/repository-fingerprints.txt"
+          : > "$out"
+          git fetch origin main feature/web-productization pre-flutter-web-qa --depth=100 || true
+          for ref in \
+            "origin/main" \
+            "origin/feature/web-productization" \
+            "origin/pre-flutter-web-qa" \
+            "HEAD"; do
+            if git rev-parse --verify "$ref" >/dev/null 2>&1; then
+              sha="$(git rev-parse "$ref")"
+              echo "===== ${ref} ${sha} =====" >> "$out"
+              for file in \
+                static/css/maneg-control-center.css \
+                static/js/studio-editor.js \
+                static/css/storefront.css; do
+                if git cat-file -e "${sha}:${file}" 2>/dev/null; then
+                  git show "${sha}:${file}" | sha256sum | awk -v f="$file" '{print f" "$1}' >> "$out"
+                else
+                  echo "$file MISSING" >> "$out"
+                fi
+              done
+            fi
+          done
+          cat "$out"
+
+      - name: Upload live environment audit evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: global-live-environment-audit
+          path: artifacts/global-live-e2e-qa/live-environment-audit
+          if-no-files-found: error
+          retention-days: 14
