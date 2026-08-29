@@ -130,6 +130,11 @@ def test_maneg_control_center_real_chrome_a_to_l(client, live_server):
     root.theme_preference = User.Theme.LIGHT
     root.language_preference = User.Language.ENGLISH
     root.save(update_fields=["theme_preference", "language_preference"])
+    for provider, _label in IntegrationConfig.Provider.choices:
+        IntegrationConfig.objects.get_or_create(
+            provider=provider,
+            defaults={"enabled": provider == IntegrationConfig.Provider.COD},
+        )
     suspend_target = User.objects.create_user(username="maneg-browser-target", email="target@example.test", password="strong-pass-123")
 
     # Real submitted onboarding case for Designer verification.
