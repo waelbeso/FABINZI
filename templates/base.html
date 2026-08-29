@@ -5,9 +5,34 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#6d4aff">
-  <title>{% block title %}FABINZI{% endblock %}</title>
+  <meta name="color-scheme" content="light dark">
+  <title>{% if page_seo.title %}{{ page_seo.title }}{% else %}{% block title %}FABINZI{% endblock %}{% endif %}</title>
+  <meta name="description" content="{{ page_seo.description|default:seo_default_description }}">
+  <meta name="robots" content="{{ seo_robots }}">
+  <link rel="canonical" href="{{ seo_canonical }}">
+  {% if seo_hreflang %}<link rel="alternate" hreflang="en" href="{{ seo_hreflang.en }}"><link rel="alternate" hreflang="ar" href="{{ seo_hreflang.ar }}"><link rel="alternate" hreflang="x-default" href="{{ seo_hreflang.x_default }}">{% endif %}
+  <meta property="og:site_name" content="FABINZI">
+  <meta property="og:type" content="{{ page_seo.type|default:'website' }}">
+  <meta property="og:title" content="{{ page_seo.title|default:'FABINZI — Fashion from design to production' }}">
+  <meta property="og:description" content="{{ page_seo.description|default:seo_default_description }}">
+  <meta property="og:url" content="{{ seo_canonical }}">
+  <meta property="og:image" content="{{ page_seo.image|default:seo_default_image }}">
+  <meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+  <meta property="og:locale" content="{% if LANGUAGE_CODE == 'ar' %}ar_AR{% else %}en_US{% endif %}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ page_seo.title|default:'FABINZI — Fashion from design to production' }}">
+  <meta name="twitter:description" content="{{ page_seo.description|default:seo_default_description }}">
+  <meta name="twitter:image" content="{{ page_seo.image|default:seo_default_image }}">
+  <link rel="icon" href="{% url 'favicon' %}" sizes="any">
+  <link rel="icon" type="image/svg+xml" href="{% static 'brand/fabinzi-logo.svg' %}">
+  <link rel="apple-touch-icon" sizes="180x180" href="{% url 'apple-touch-icon' %}">
+  <link rel="manifest" href="{% url 'site-manifest' %}">
   <link rel="stylesheet" href="{% static 'css/fabinzi.css' %}">
   <link rel="stylesheet" href="{% static 'css/customer-commerce.css' %}">
+  <link rel="stylesheet" href="{% static 'css/public-site.css' %}">
+  <script type="application/ld+json">{{ seo_base_json_ld|safe }}</script>
+  {% if page_seo.json_ld %}<script type="application/ld+json">{{ page_seo.json_ld|safe }}</script>{% endif %}
+  <script>try{const t=localStorage.getItem('fabinzi-theme');if(t&&['light','dark','system'].includes(t))document.documentElement.dataset.theme=t}catch(e){}</script>
   {% block extra_head %}{% endblock %}
 </head>
 <body>
@@ -16,14 +41,26 @@
 {% for a in platform_announcements %}<aside class="announcement announcement--{{ a.severity }}" role="status"><strong>{% if LANGUAGE_CODE == 'ar' %}{{ a.title_ar }}{% else %}{{ a.title_en }}{% endif %}</strong><span>{% if LANGUAGE_CODE == 'ar' %}{{ a.message_ar }}{% else %}{{ a.message_en }}{% endif %}</span>{% if a.cta_url %}<a href="{{ a.cta_url }}">{% if LANGUAGE_CODE == 'ar' %}{{ a.cta_label_ar }}{% else %}{{ a.cta_label_en }}{% endif %}</a>{% endif %}</aside>{% endfor %}
 <header class="site-header">
   <div class="site-header__inner">
-    <a class="brand" href="/" aria-label="FABINZI"><img src="{% static 'brand/fabinzi-logo.svg' %}" alt="FABINZI" class="brand-logo"></a>
+    <a class="brand" href="{% url 'home' %}" aria-label="FABINZI home">
+      <span class="brand-logo-pair">
+        <img src="{% static 'brand/fabinzi-logo.svg' %}" alt="FABINZI" class="brand-logo brand-logo--light" width="158" height="50">
+        <img src="{% static 'brand/fabinzi-logo-on-dark.svg' %}" alt="" aria-hidden="true" class="brand-logo brand-logo--dark" width="158" height="50">
+      </span>
+    </a>
     <nav class="desktop-nav" aria-label="{% if LANGUAGE_CODE == 'ar' %}التنقل الرئيسي{% else %}Primary navigation{% endif %}">
       <a href="{% url 'store-marketplace' %}">{% if LANGUAGE_CODE == 'ar' %}المتجر{% else %}Shop{% endif %}</a>
       <a href="{% url 'artwork' %}">{% if LANGUAGE_CODE == 'ar' %}الأعمال الفنية{% else %}Artwork{% endif %}</a>
       <a href="{% url 'manufacturer-marketplace' %}">{% if LANGUAGE_CODE == 'ar' %}المصنّعون{% else %}Manufacturers{% endif %}</a>
-      {% if user.is_authenticated %}<a href="{% url 'cart' %}">{% if LANGUAGE_CODE == 'ar' %}السلة{% else %}Cart{% endif %}</a><a href="{% url 'purchases' %}">{% if LANGUAGE_CODE == 'ar' %}طلباتي{% else %}Orders{% endif %}</a><a href="{% url 'notifications' %}">{% if LANGUAGE_CODE == 'ar' %}الإشعارات{% else %}Notifications{% endif %}</a>{% endif %}
+      {% if user.is_authenticated %}<a href="{% url 'app-home' %}">{% if LANGUAGE_CODE == 'ar' %}الرئيسية{% else %}My FABINZI{% endif %}</a><a href="{% url 'studio' %}">{% if LANGUAGE_CODE == 'ar' %}الاستوديو{% else %}Studio{% endif %}</a><a href="{% url 'purchases' %}">{% if LANGUAGE_CODE == 'ar' %}طلباتي{% else %}Orders{% endif %}</a>{% endif %}
     </nav>
     <div class="header-actions">
+      <div class="header-utilities">
+        <span class="locale-switch" aria-label="Language">
+          <a href="{{ request.path }}?lang=en" lang="en" {% if LANGUAGE_CODE == 'en' %}aria-current="true"{% endif %}>EN</a>
+          <a href="{{ request.path }}?lang=ar" lang="ar" {% if LANGUAGE_CODE == 'ar' %}aria-current="true"{% endif %}>ع</a>
+        </span>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="{% if LANGUAGE_CODE == 'ar' %}تغيير المظهر{% else %}Change appearance{% endif %}" title="{% if LANGUAGE_CODE == 'ar' %}تغيير المظهر{% else %}Change appearance{% endif %}">◐</button>
+      </div>
       {% if user.is_authenticated %}
         <a class="button button--ghost button--sm" href="{% url 'cart' %}">{% if LANGUAGE_CODE == 'ar' %}السلة{% else %}Cart{% endif %}</a>
         <a class="button button--ghost button--sm" href="{% url 'app-home' %}">{% if LANGUAGE_CODE == 'ar' %}حسابي{% else %}Account{% endif %}</a>
@@ -33,11 +70,13 @@
       {% endif %}
       <details class="mobile-menu">
         <summary aria-label="{% if LANGUAGE_CODE == 'ar' %}فتح القائمة{% else %}Open menu{% endif %}"><span></span><span></span><span></span></summary>
-        <nav>
+        <nav aria-label="{% if LANGUAGE_CODE == 'ar' %}قائمة الهاتف{% else %}Mobile navigation{% endif %}">
+          <a href="{% url 'home' %}">{% if LANGUAGE_CODE == 'ar' %}الرئيسية العامة{% else %}Home{% endif %}</a>
           <a href="{% url 'store-marketplace' %}">{% if LANGUAGE_CODE == 'ar' %}المتجر{% else %}Shop{% endif %}</a>
           <a href="{% url 'artwork' %}">{% if LANGUAGE_CODE == 'ar' %}الأعمال الفنية{% else %}Artwork{% endif %}</a>
           <a href="{% url 'manufacturer-marketplace' %}">{% if LANGUAGE_CODE == 'ar' %}المصنّعون{% else %}Manufacturers{% endif %}</a>
-          {% if user.is_authenticated %}<a href="{% url 'cart' %}">{% if LANGUAGE_CODE == 'ar' %}السلة{% else %}Cart{% endif %}</a><a href="{% url 'purchases' %}">{% if LANGUAGE_CODE == 'ar' %}طلباتي{% else %}Orders{% endif %}</a><a href="{% url 'notifications' %}">{% if LANGUAGE_CODE == 'ar' %}الإشعارات{% else %}Notifications{% endif %}</a><a href="{% url 'designer' %}">{% if LANGUAGE_CODE == 'ar' %}بوابة المصمم{% else %}Designer Portal{% endif %}</a><a href="{% url 'manufacturer' %}">{% if LANGUAGE_CODE == 'ar' %}بوابة المصنع{% else %}Manufacturer Portal{% endif %}</a>{% endif %}
+          {% if user.is_authenticated %}<a href="{% url 'app-home' %}">{% if LANGUAGE_CODE == 'ar' %}الرئيسية الخاصة بي{% else %}My FABINZI{% endif %}</a><a href="{% url 'cart' %}">{% if LANGUAGE_CODE == 'ar' %}السلة{% else %}Cart{% endif %}</a><a href="{% url 'purchases' %}">{% if LANGUAGE_CODE == 'ar' %}طلباتي{% else %}Orders{% endif %}</a><a href="{% url 'studio' %}">{% if LANGUAGE_CODE == 'ar' %}الاستوديو{% else %}Studio{% endif %}</a><a href="{% url 'notifications' %}">{% if LANGUAGE_CODE == 'ar' %}الإشعارات{% else %}Notifications{% endif %}</a>{% endif %}
+          <span class="locale-switch"><a href="{{ request.path }}?lang=en" lang="en">English</a><a href="{{ request.path }}?lang=ar" lang="ar">العربية</a></span>
         </nav>
       </details>
     </div>
@@ -45,6 +84,7 @@
 </header>
 {% if messages %}<div class="flash-stack" aria-live="polite">{% for message in messages %}<div class="flash flash--{{ message.tags|default:'info' }}">{{ message }}</div>{% endfor %}</div>{% endif %}
 <main id="main-content" class="page-shell">{% block content %}{% endblock %}</main>
-<footer class="site-footer"><div class="site-footer__inner"><div><img src="{% static 'brand/fabinzi-logo.svg' %}" alt="FABINZI" class="footer-logo"><p>{% if LANGUAGE_CODE == 'ar' %}المصمم يبدع. المصنع ينتج. العميل يشتري. فابينزي تنسّق المنظومة.{% else %}Designer creates. Manufacturer produces. Customer buys. FABINZI orchestrates.{% endif %}</p></div><nav><a href="{% url 'store-marketplace' %}">{% if LANGUAGE_CODE == 'ar' %}تسوق{% else %}Shop{% endif %}</a><a href="{% url 'artwork' %}">{% if LANGUAGE_CODE == 'ar' %}الأعمال الفنية{% else %}Artwork{% endif %}</a><a href="{% url 'designer' %}">{% if LANGUAGE_CODE == 'ar' %}للمصممين{% else %}For Designers{% endif %}</a><a href="{% url 'manufacturer' %}">{% if LANGUAGE_CODE == 'ar' %}للمصنعين{% else %}For Manufacturers{% endif %}</a></nav></div></footer>
+<footer class="site-footer"><div class="site-footer__inner"><div><span class="brand-logo-pair"><img src="{% static 'brand/fabinzi-logo.svg' %}" alt="FABINZI" class="footer-logo brand-logo--light" width="140" height="45"><img src="{% static 'brand/fabinzi-logo-on-dark.svg' %}" alt="" aria-hidden="true" class="footer-logo brand-logo--dark" width="140" height="45"></span><p>{% if LANGUAGE_CODE == 'ar' %}المصمم يبدع. المصنع ينتج. العميل يشتري. FABINZI تنسّق المنظومة من الفكرة إلى المنتج.{% else %}Designer creates. Manufacturer produces. Customer buys. FABINZI orchestrates the journey from idea to product.{% endif %}</p></div><nav aria-label="{% if LANGUAGE_CODE == 'ar' %}روابط التذييل{% else %}Footer links{% endif %}"><a href="{% url 'store-marketplace' %}">{% if LANGUAGE_CODE == 'ar' %}تسوق{% else %}Shop{% endif %}</a><a href="{% url 'artwork' %}">{% if LANGUAGE_CODE == 'ar' %}الأعمال الفنية{% else %}Artwork{% endif %}</a><a href="{% url 'manufacturer-marketplace' %}">{% if LANGUAGE_CODE == 'ar' %}المصنّعون{% else %}Manufacturers{% endif %}</a>{% if user.is_authenticated %}<a href="{% url 'app-home' %}">{% if LANGUAGE_CODE == 'ar' %}حسابي{% else %}My FABINZI{% endif %}</a>{% else %}<a href="{% url 'two_factor:login' %}">{% if LANGUAGE_CODE == 'ar' %}تسجيل الدخول{% else %}Sign in{% endif %}</a>{% endif %}</nav></div></footer>
+<script>(function(){const b=document.getElementById('theme-toggle');if(!b)return;const order=['system','light','dark'];b.addEventListener('click',function(){let c=document.documentElement.dataset.theme||'system';let n=order[(order.indexOf(c)+1)%order.length];document.documentElement.dataset.theme=n;try{localStorage.setItem('fabinzi-theme',n)}catch(e){}})})();</script>
 {% block extra_body %}{% endblock %}
 </body></html>
