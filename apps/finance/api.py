@@ -73,3 +73,7 @@ class StaffAdjustmentAPIView(APIView):
         try:
             record=get_object_or_404(OrderFinance,pk=order_finance_id); account=get_object_or_404(FinanceAccount,pk=request.data.get("account_id")); a=create_adjustment(order_finance=record,account=account,amount=request.data.get("amount","0"),reason=request.data.get("reason",""),actor=request.user,request=request); return Response({"id":a.id,"amount":a.amount,"reason":a.reason})
         except (PermissionDenied,ValidationError) as exc: return _err(exc)
+
+# Compatibility aliases used by the Stage 9 consolidated API router.
+FinanceDashboardAPIView=FinanceSummaryAPIView
+SettlementRequestAPIView=SettlementListCreateAPIView
