@@ -3,13 +3,15 @@ from io import BytesIO
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.test import override_settings
+from django.contrib.auth.models import AnonymousUser
+from django.test import RequestFactory, override_settings
 from PIL import Image
 
 from apps.artwork.models import Artwork, ArtworkVersion, DesignedProduct
 from apps.design.models import GarmentDesign, GarmentDesignVersion
 from apps.media.models import MediaAsset
 from apps.organizations.models import Membership, Organization
+from apps.platform_ops.views import handler403, handler500
 from apps.storefront.models import ProductVariant, StoreProduct, StoreProductImage, Storefront
 
 User = get_user_model()
@@ -76,6 +78,7 @@ def test_public_home_has_bilingual_seo_identity_and_aeo(client):
     ar_body = ar.content.decode()
     assert '<html lang="ar" dir="rtl"' in ar_body
     assert 'الفكرة تبدأ عند المصمم' in ar_body
+    assert '"inLanguage":"ar"' in ar_body
     assert 'http://localhost:8000/?lang=ar' in ar_body
 
 
@@ -171,3 +174,21 @@ def test_branded_404_page_is_rendered_in_production_mode(client):
     body = response.content.decode()
     assert "FABINZI" in body
     assert "404" in body
+
+
+@pytest.mark.django_db
+def test_branded_403_and_500_handlers_render_without_domain_mutation():
+    factory = RequestFactory()
+    request = factory.get("/protected/")
+    request.user = AnonymousUser()
+    forbidden = handler403(request)
+    assert forbidden.status_code == 403
+    assert b"FABINZI" in forbidden.content
+    assert b"403" in forbidden.content
+
+    error_request = factory.get("/failed/")
+    error_request.user = AnonymousUser()
+    failed = handler500(error_request)
+    assert failed.status_code == 500
+    assert b"FABINZI" in failed.content
+    assert b"500" in failed.content
