@@ -7,8 +7,9 @@ from rest_framework.views import APIView
 from apps.artwork.models import DesignedProduct
 from apps.media.models import MediaAsset
 from apps.organizations.models import Membership, Organization
+from apps.organizations.services import require_org_access
 from .models import ManufacturerCapability, ManufacturerListing, ManufacturerQuote, RFQ, RFQInvitation
-from .services import add_capability, add_portfolio_asset, cancel_rfq, create_rfq, decline_invitation, get_or_create_listing, open_rfq, publish_listing, select_quote, submit_quote, update_listing
+from .services import MANUFACTURER_QUOTE_ROLES, add_capability, add_portfolio_asset, cancel_rfq, create_rfq, decline_invitation, get_or_create_listing, open_rfq, publish_listing, select_quote, submit_quote, update_listing
 
 
 class ListingSerializer(serializers.ModelSerializer):
@@ -90,7 +91,8 @@ class OpenRFQAPIView(APIView):
 
 class ManufacturerInvitationsAPIView(APIView):
     def get(self,request,organization_id):
-        org=get_object_or_404(Organization,pk=organization_id); Membership.objects.get(user=request.user,organization=org,is_active=True)
+        org=get_object_or_404(Organization,pk=organization_id,kind=Organization.Kind.MANUFACTURER,verification_status=Organization.VerificationStatus.ACTIVE)
+        require_org_access(request.user,org,roles=MANUFACTURER_QUOTE_ROLES)
         qs=RFQInvitation.objects.filter(manufacturer=org).select_related("rfq","rfq__designer_organization")
         return Response([{"id":i.id,"rfq":i.rfq_id,"title":i.rfq.title,"quantity":i.rfq.quantity,"status":i.status,"designer":i.rfq.designer_organization.display_name} for i in qs])
 

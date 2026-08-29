@@ -1,0 +1,124 @@
+from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
+from django.http import FileResponse, Http404, HttpResponseRedirect
+from django.shortcuts import get_object_or_404
+
+from apps.artwork.models import ArtworkAsset
+from apps.design.models import DesignAsset
+from apps.operations.models import ProductionAsset, ProductionJob
+from apps.operations.services import require_manufacturer_job_access
+from apps.organizations.manufacturer_context import MANUFACTURER_TECHNICAL_VIEW_ROLES
+from apps.storefront.models import CustomizationElement
+from .models import MediaAsset
+from .services import private_media_response
+
+
+def _job_for_actor(actor, job_id):
+    job = get_object_or_404(
+        ProductionJob.objects.select_related(
+            "manufacturer",
+            "order__item__store_product__designed_product__garment_version",
+            "order__item__store_product__designed_product__artwork_version",
+            "order__item__studio_project",
+        ),
+        pk=job_id,
+    )
+    try:
+        require_manufacturer_job_access(
+            actor,
+            job,
+            roles=MANUFACTURER_TECHNICAL_VIEW_ROLES,
+        )
+    except PermissionDenied as exc:
+        raise Http404 from exc
+    return job
+
+
+def _resolve_job_media(job, asset_type, pk):
+    product = job.order.item.store_product.designed_product
+    if asset_type == "job":
+        record = get_object_or_404(
+            ProductionAsset.objects.select_related("media_asset"),
+            pk=pk,
+            job=job,
+            media_asset__access=MediaAsset.Access.PRIVATE,
+        )
+        return record.media_asset
+
+    if asset_type == "design":
+        record = get_object_or_404(
+            DesignAsset.objects.select_related("media_asset"),
+            pk=pk,
+            version_id=product.garment_version_id,
+            kind__in=[
+                DesignAsset.Kind.PATTERN,
+                DesignAsset.Kind.TECH_PACK,
+                DesignAsset.Kind.THREE_D,
+                DesignAsset.Kind.TECHNICAL,
+            ],
+            media_asset__access=MediaAsset.Access.PRIVATE,
+        )
+        return record.media_asset
+
+    if asset_type == "artwork":
+        record = get_object_or_404(
+            ArtworkAsset.objects.select_related("media_asset"),
+            pk=pk,
+            version_id=product.artwork_version_id,
+            kind=ArtworkAsset.Kind.SOURCE,
+            media_asset__access=MediaAsset.Access.PRIVATE,
+        )
+        return record.media_asset
+
+    project_id = job.order.item.studio_project_id
+    if not project_id:
+        raise Http404
+
+    if asset_type == "studio":
+        element = get_object_or_404(
+            CustomizationElement.objects.select_related("media_asset"),
+            pk=pk,
+            customization__project_id=project_id,
+            kind=CustomizationElement.Kind.IMAGE,
+            media_asset__access=MediaAsset.Access.PRIVATE,
+        )
+        if not (element.media_asset.metadata or {}).get("studio_private_upload"):
+            raise Http404
+        if element.media_asset.uploaded_by_id != job.order.customer_id:
+            raise Http404
+        return element.media_asset
+
+    if asset_type == "studio-artwork":
+        source = get_object_or_404(
+            ArtworkAsset.objects.select_related("media_asset", "version"),
+            pk=pk,
+            kind=ArtworkAsset.Kind.SOURCE,
+            media_asset__access=MediaAsset.Access.PRIVATE,
+        )
+        if not CustomizationElement.objects.filter(
+            customization__project_id=project_id,
+            kind=CustomizationElement.Kind.ARTWORK,
+            artwork_version_id=source.version_id,
+        ).exists():
+            raise Http404
+        return source.media_asset
+
+    raise Http404
+
+
+@login_required
+def manufacturer_production_media(request, job_id, asset_type, pk):
+    job = _job_for_actor(request.user, job_id)
+    asset = _resolve_job_media(job, asset_type, pk)
+    payload = private_media_response(asset)
+    if isinstance(payload, str):
+        response = HttpResponseRedirect(payload)
+    else:
+        response = FileResponse(payload, content_type=asset.mime_type)
+        safe_name = asset.original_filename.replace(chr(34), "")
+        response["Content-Disposition"] = f'inline; filename="{safe_name}"'
+        response["X-Content-Type-Options"] = "nosniff"
+    response["Cache-Control"] = "private, no-store"
+    response["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    response["Referrer-Policy"] = "no-referrer"
+    return response
