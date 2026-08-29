@@ -48,6 +48,7 @@ services:
     dockerContext: .
     autoDeployTrigger: checksPass
     healthCheckPath: /readyz/
+    dockerCommand: sh render-start.sh
     envVars:
       - fromGroup: fabinzi-runtime
       - key: DATABASE_URL
