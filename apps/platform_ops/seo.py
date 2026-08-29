@@ -11,10 +11,6 @@ INDEXABLE_URL_NAMES = {
     "artwork",
     "manufacturer-marketplace",
     "manufacturer-public-detail",
-    "robots-txt",
-    "sitemap-xml",
-    "site-manifest",
-    "favicon",
 }
 
 DEFAULT_DESCRIPTIONS = {
@@ -24,13 +20,35 @@ DEFAULT_DESCRIPTIONS = {
 
 
 def absolute_url(path="/"):
+    if path.startswith("http://") or path.startswith("https://"):
+        return path
     if not path.startswith("/"):
         path = f"/{path}"
-    return f"{settings.FABINZI_PUBLIC_BASE_URL}{path}"
+    return f"{settings.FABINZI_PUBLIC_BASE_URL.rstrip('/')}{path}"
 
 
 def localized_public_url(path, language):
     return f"{absolute_url(path)}?{urlencode({'lang': language})}"
+
+
+def media_url(value):
+    if not value:
+        return absolute_url("/share/fabinzi-1200x630.png")
+    return absolute_url(value)
+
+
+def safe_json_ld(payload):
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
+
+
+def page_seo(*, title, description, image=None, page_type="website", json_ld=None):
+    return {
+        "title": title,
+        "description": description,
+        "image": media_url(image),
+        "type": page_type,
+        "json_ld": safe_json_ld(json_ld) if json_ld else "",
+    }
 
 
 def request_is_indexable(request):
@@ -63,7 +81,7 @@ def seo_context(request):
         if indexable
         else None
     )
-    social_image = absolute_url("/static/brand/fabinzi-social-1200x630.png")
+    social_image = absolute_url("/share/fabinzi-1200x630.png")
     organization_schema = {
         "@context": "https://schema.org",
         "@type": "Organization",
@@ -83,7 +101,6 @@ def seo_context(request):
             "query-input": "required name=search_term_string",
         },
     }
-    base_json_ld = json.dumps([organization_schema, website_schema], ensure_ascii=False).replace("</", "<\\/")
     return {
         "seo_default_description": DEFAULT_DESCRIPTIONS[language],
         "seo_robots": robots,
@@ -91,6 +108,6 @@ def seo_context(request):
         "seo_hreflang": hreflang,
         "seo_default_image": social_image,
         "seo_public_base_url": settings.FABINZI_PUBLIC_BASE_URL,
-        "seo_base_json_ld": base_json_ld,
+        "seo_base_json_ld": safe_json_ld([organization_schema, website_schema]),
         "seo_is_indexable": indexable,
     }
