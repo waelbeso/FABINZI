@@ -1,124 +1,94 @@
-# FABINZI Render Deployment
+# FABINZI Production Deployment
 
-## Target
+This document describes the repository-defined production topology. It does **not** assert that the currently running public service is on the latest repository revision, that optional integrations are configured, or that account-owner operational checks have been completed.
 
-Current public URL:
+## Production Blueprint
+
+`render.yaml` defines:
+
+1. `fabinzi-web` — Django/Gunicorn Docker web service.
+2. `fabinzi-db` — paid Render PostgreSQL 17 (`basic-256mb`).
+3. `fabinzi-redis` — Render Key Value/Redis-compatible Celery transport.
+4. `fabinzi-worker` — Celery worker.
+5. `fabinzi-beat` — Celery Beat scheduler.
+
+The production Blueprint tracks `main`. This checkpoint does not merge or deploy `main`.
+
+## Required production configuration
+
+The Blueprint sets non-secret production policy including:
+
+- `DJANGO_DEBUG=0`
+- `ENVIRONMENT=production`
+- `PRIVATE_MEDIA_STORAGE_MODE=s3`
+- HTTPS redirect enabled
+- demo seeding disabled
+- the Render public origin and host/CSRF policy
+
+Render generates `DJANGO_SECRET_KEY` and `INTEGRATION_ENCRYPTION_KEY` for the environment group. These values must remain stable for the deployed environment, especially the integration encryption key after provider credentials have been encrypted.
+
+`DATABASE_URL` and `REDIS_URL` are wired from the dedicated Render resources.
+
+## Web startup order
+
+`render-start.sh` performs:
 
 ```text
-https://fabinzi-web.onrender.com
-```
-
-The repository contains a Render Blueprint in `render.yaml`.
-
-## Required services
-
-The current application architecture uses:
-
-1. `fabinzi-web` — Django/Gunicorn web service.
-2. `fabinzi-db` — persistent PostgreSQL database.
-3. `fabinzi-redis` — Render Key Value (Redis-compatible/Valkey) used by Celery.
-4. `fabinzi-worker` — Celery worker for asynchronous delivery work.
-5. `fabinzi-beat` — Celery Beat scheduler for periodic notification dispatch.
-
-The worker and Beat services are part of the implemented communications subsystem. External Mailgun/Twilio providers may remain disabled; the processes should still be healthy.
-
-## Deployment flow
-
-The Docker image installs Python dependencies and copies the application. The Render web `dockerCommand` performs:
-
-```bash
+python manage.py reconcile_migration_state
 python manage.py migrate --noinput
 python manage.py collectstatic --noinput
-gunicorn config.wsgi:application ...
+exec gunicorn config.wsgi:application ...
 ```
 
-No demo seed command is present in Docker build/start, migrations, application initialization, worker startup, or Beat startup.
+No demo seed or provider test is part of startup.
 
-## Health checks
+## Health and readiness
 
-Render should use:
+- `/healthz/` — liveness plus non-secret Render source identity (`branch`, `commit`, `service`) when supplied by Render.
+- `/readyz/` — database readiness only.
+- `/api/v1/health/` — API liveness.
 
-```text
-/readyz/
-```
+These endpoints do not claim provider health, Celery health, backup status, email/SMS delivery, or payment success.
 
-for deployment health checks because it verifies database connectivity.
+## Private media
 
-Use `/healthz/` for basic liveness and `/api/v1/health/` for API liveness.
+Production is configured fail-closed for S3 private media. Before a real go-live, the account owner must configure and test an isolated production Amazon S3 `IntegrationConfig`. Private uploads must not fall back to Render local disk.
 
-## Data persistence
+## Optional integrations
 
-PostgreSQL is the durable system of record. The Blueprint uses a persistent paid PostgreSQL plan rather than treating a free, expiring database as a production QA baseline.
+Paymob, Stripe, Mailgun, Twilio, Cloudflare Images and Sentry may remain disabled until intentionally configured. COD is the internal payment option and requires no external credential. A production launch report must classify every optional provider from actual configuration rather than adapter existence.
 
-Render Key Value is transport infrastructure for Celery and is not the source of truth for customer, order, product, or finance data.
+## Deployment sequence
 
-Deployments must never recreate or reset database data.
+1. Confirm the intended release SHA and CI are GREEN.
+2. Confirm production environment values and the public origin in Render.
+3. Confirm a recoverable PostgreSQL point per `BACKUP_AND_RECOVERY.md`.
+4. Confirm production S3 configuration before accepting private-media writes.
+5. Deploy the web/worker/Beat revision through the approved Render/main release process.
+6. Wait for `/readyz/` to be healthy.
+7. Verify `/healthz/` reports the exact intended deployed source commit.
+8. Run non-destructive public/account/Commerce/portal smoke checks.
+9. Verify actual worker/Beat logs if async delivery is required for the release.
+10. Verify only the external integrations intended for that release.
 
-## Environment configuration
+## Rollback
 
-The Blueprint links common non-secret/runtime configuration through the `fabinzi-runtime` environment group and wires `DATABASE_URL`/`REDIS_URL` from managed Render resources.
+Application-only regressions should roll back to a known source revision that is schema-compatible with the current database. If a migration or data change is not safely reversible, use the database recovery runbook rather than pretending a source rollback alone restores data. Validate the restored environment before cutover.
 
-For an existing Render service, confirm these values in the Render Dashboard before deployment:
+## QA separation
 
-- `FABINZI_PUBLIC_BASE_URL=https://fabinzi-web.onrender.com`
-- `DJANGO_ALLOWED_HOSTS` includes the Render hostname.
-- `DJANGO_CSRF_TRUSTED_ORIGINS` includes the HTTPS Render origin/pattern.
-- `DJANGO_DEBUG=false`
-- `INTEGRATION_ENCRYPTION_KEY` is stable and shared by web, worker, and Beat.
-- `DJANGO_SECRET_KEY` is stable and shared by web, worker, and Beat.
+Production must not be used for demo seeding or live E2E test mutation. The repository contains a separate `render-qa.yaml` architecture for the future isolated QA return. The unresolved external QA/live gates are preserved in `DEFERRED_LIVE_E2E.md` and must be resumed after Flutter.
 
-Do not rotate `INTEGRATION_ENCRYPTION_KEY` after provider secrets have been encrypted unless a controlled re-encryption procedure is performed.
+## Production launch limitations to resolve operationally
 
-## Demo credentials on Render
+Repository readiness cannot prove:
 
-Demo credential variables are intentionally declared as secret/manual values. For an existing service, set them through the Render Dashboard or another approved secret-management path.
+- the exact live production deployment SHA until a release is actually deployed,
+- actual production S3/provider credentials,
+- worker/Beat runtime health,
+- provider connectivity,
+- backup restore execution,
+- public legal approval,
+- public support contact coordinates.
 
-To enable a one-time seed temporarily:
-
-```text
-FABINZI_DEMO_SEED_ENABLED=true
-```
-
-Then explicitly run in a Render shell/job:
-
-```bash
-python manage.py seed_demo
-```
-
-After successful seeding, set:
-
-```text
-FABINZI_DEMO_SEED_ENABLED=false
-```
-
-The command is never an automatic deployment hook.
-
-## External integrations
-
-Keep Paymob, Stripe, Mailgun, Twilio, Amazon S3, Cloudflare Images, and Sentry disabled until their Control Center configuration is complete and Test Connection succeeds where required.
-
-COD remains available for QA without external payment credentials.
-
-## Media decision for QA
-
-The demo dataset uses original SVG files committed under `static/demo/`. The database `MediaAsset` rows point to these stable static references. This avoids relying on Render's ephemeral local filesystem while preserving the existing production media/provider abstraction.
-
-Production user-uploaded arbitrary media should use the existing durable provider path (Amazon S3 when configured). Do not treat Render local disk as durable media storage unless the architecture is intentionally changed later.
-
-## Live validation checklist
-
-After deployment verify:
-
-- `/`
-- `/app/`
-- `/store/`
-- `/studio/`
-- `/artwork/`
-- `/designer/`
-- `/manufacturer/`
-- `/Maneg/`
-- `/healthz/`
-- `/readyz/`
-- `/api/v1/health/`
-
-Then verify authenticated RBAC and the QA journeys in `docs/DEMO_QA.md`.
+Those facts must be verified by the account owner during the later go-live checkpoint, not invented here.
