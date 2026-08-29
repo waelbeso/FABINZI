@@ -31,7 +31,7 @@
       <h2 class="section-title">{% if request.LANGUAGE_CODE == 'ar' %}اختر المنتج{% else %}Choose your product{% endif %}</h2>
       {% if variants %}
         {% if user.is_authenticated %}
-        <form method="post" action="{% url 'cart-add-product' product.id %}" class="stack">
+        <form id="product-purchase-form" method="post" action="{% url 'cart-add-product' product.id %}" class="stack">
           {% csrf_token %}
           <div class="field">
             <label for="variant">{% if request.LANGUAGE_CODE == 'ar' %}المقاس / اللون{% else %}Size / color{% endif %}</label>
@@ -48,8 +48,8 @@
           <button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}أضف إلى السلة{% else %}Add to Cart{% endif %}</button>
         </form>
         {% if product.customization_enabled %}
-        <a class="button button--ghost" href="{% url 'studio' %}?product={{ product.id }}">{% if request.LANGUAGE_CODE == 'ar' %}خصّص في الاستوديو{% else %}Customize in Studio{% endif %}</a>
-        <p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}التخصيص اختياري. يمكنك شراء المنتج مباشرة دون فتح الاستوديو.{% else %}Customization is optional. You can buy this product directly without opening Studio.{% endif %}</p>
+        <a class="button button--ghost" id="product-customize-link" data-studio-base="{% url 'studio' %}?product={{ product.id }}" href="{% url 'studio' %}?product={{ product.id }}">{% if request.LANGUAGE_CODE == 'ar' %}خصّص في الاستوديو{% else %}Customize in Studio{% endif %}</a>
+        <p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}التخصيص اختياري. اختيار المقاس/اللون الحالي سيُحمل إلى Studio، ويمكنك شراء المنتج مباشرة دون فتحه.{% else %}Customization is optional. Your current size/color selection carries into Studio, and you can still buy directly without opening it.{% endif %}</p>
         {% endif %}
         {% else %}
         <a class="button" href="{% url 'two_factor:login' %}?next={{ request.path }}">{% if request.LANGUAGE_CODE == 'ar' %}سجّل الدخول للشراء{% else %}Sign in to buy{% endif %}</a>
@@ -67,3 +67,4 @@
   </div>
 </section>
 {% endblock %}
+{% block extra_body %}<script>(function(){const link=document.getElementById('product-customize-link'),variant=document.getElementById('variant'),qty=document.getElementById('quantity');if(!link||!variant)return;const sync=()=>{const url=new URL(link.dataset.studioBase,window.location.origin);url.searchParams.set('variant',variant.value);if(qty)url.searchParams.set('quantity',qty.value||'1');link.href=url.pathname+url.search};variant.addEventListener('change',sync);qty?.addEventListener('input',sync);sync()})();</script>{% endblock %}
