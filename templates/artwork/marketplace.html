@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block content %}<h1>Artwork Marketplace</h1><p>Approved artwork available on FABINZI.</p>{% for artwork in artworks %}<article><h2>{{ artwork.title }}</h2><p>{{ artwork.description }}</p><small>{{ artwork.organization.display_name }}</small></article>{% empty %}<p>No approved artwork yet.</p>{% endfor %}{% endblock %}

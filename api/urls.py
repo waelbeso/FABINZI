@@ -3,6 +3,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.artwork.api import ArtworkAssetAPIView, ArtworkDetailAPIView, ArtworkListCreateAPIView, ArtworkPublicAPIView, ArtworkRevisionAPIView, ArtworkReviewAPIView, ArtworkVersionDetailAPIView, DesignedProductListCreateAPIView, IPCaseCreateAPIView, IPCaseEvidenceAPIView, IPCaseModerateAPIView, IPDeclarationAPIView, ProductPlacementAPIView, PublishDesignedProductAPIView, SubmitArtworkVersionAPIView
 from apps.design.api import CreateRevisionAPIView, DecorationZoneAPIView, DesignAssetAPIView, GarmentDesignDetailAPIView, GarmentDesignListCreateAPIView, SizeRowAPIView, SubmitVersionAPIView, TechnicalReviewAPIView, VersionDetailAPIView
 from apps.organizations.api import DesignerOnboardingAPIView, ManufacturerOnboardingAPIView, OrganizationMemberDetailAPIView, OrganizationMembersAPIView, SubmitOnboardingAPIView, VerificationDocumentAPIView
 
@@ -32,4 +33,19 @@ urlpatterns = [
     path("design-versions/<int:version_id>/decoration-zones/", DecorationZoneAPIView.as_view(), name="design-version-zone"),
     path("design-versions/<int:version_id>/assets/", DesignAssetAPIView.as_view(), name="design-version-asset"),
     path("design-versions/<int:version_id>/review/", TechnicalReviewAPIView.as_view(), name="design-version-review"),
+    path("artworks/public/", ArtworkPublicAPIView.as_view(), name="artwork-public"),
+    path("artworks/", ArtworkListCreateAPIView.as_view(), name="artwork-list-create"),
+    path("artworks/<int:pk>/", ArtworkDetailAPIView.as_view(), name="artwork-detail"),
+    path("artworks/<int:pk>/revisions/", ArtworkRevisionAPIView.as_view(), name="artwork-revision"),
+    path("artwork-versions/<int:version_id>/", ArtworkVersionDetailAPIView.as_view(), name="artwork-version-detail"),
+    path("artwork-versions/<int:version_id>/assets/", ArtworkAssetAPIView.as_view(), name="artwork-version-asset"),
+    path("artwork-versions/<int:version_id>/ip-declaration/", IPDeclarationAPIView.as_view(), name="artwork-version-ip"),
+    path("artwork-versions/<int:version_id>/submit/", SubmitArtworkVersionAPIView.as_view(), name="artwork-version-submit"),
+    path("artwork-versions/<int:version_id>/review/", ArtworkReviewAPIView.as_view(), name="artwork-version-review"),
+    path("designed-products/", DesignedProductListCreateAPIView.as_view(), name="designed-product-list-create"),
+    path("designed-products/<int:product_id>/placements/", ProductPlacementAPIView.as_view(), name="designed-product-placement"),
+    path("designed-products/<int:product_id>/publish/", PublishDesignedProductAPIView.as_view(), name="designed-product-publish"),
+    path("ip-cases/", IPCaseCreateAPIView.as_view(), name="ip-case-create"),
+    path("ip-cases/<int:case_id>/evidence/", IPCaseEvidenceAPIView.as_view(), name="ip-case-evidence"),
+    path("ip-cases/<int:case_id>/moderate/", IPCaseModerateAPIView.as_view(), name="ip-case-moderate"),
 ]

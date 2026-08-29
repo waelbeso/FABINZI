@@ -16,7 +16,7 @@ INSTALLED_APPS = [
     "django.contrib.messages", "django.contrib.staticfiles", "django.contrib.sites", "rest_framework",
     "django_otp", "django_otp.plugins.otp_totp", "django_otp.plugins.otp_static", "two_factor",
     "apps.accounts", "apps.audit", "apps.integrations", "apps.media", "apps.notifications", "apps.platform_ops",
-    "apps.organizations", "apps.design",
+    "apps.organizations", "apps.design", "apps.artwork",
 ]
 
 MIDDLEWARE = [
