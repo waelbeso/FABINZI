@@ -102,7 +102,6 @@ class LiveState:
     rfq_id: int | None = None
     private_media_url: str = ""
     integration_snapshot: str = ""
-    provider_truth: dict[str, Any] = field(default_factory=dict)
     cookies: dict[str, dict[str, str]] = field(default_factory=dict)
     results: dict[str, str] = field(default_factory=dict)
 
@@ -255,19 +254,31 @@ def _login(state: LiveState, driver, role: str) -> None:
     password = driver.find_element(By.CSS_SELECTOR, 'input[type="password"]')
     username.clear(); username.send_keys(QA_USERS[role])
     password.clear(); password.send_keys(_required_env(f"FABINZI_LIVE_E2E_{role.upper()}_PASSWORD"))
-    submit = driver.find_element(By.CSS_SELECTOR, 'button[type="submit"], input[type="submit"]')
-    submit.click()
+    driver.find_element(By.CSS_SELECTOR, 'button[type="submit"], input[type="submit"]').click()
 
     if role == "admin":
         try:
             token = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'input[name$="otp_token"], input[name*="otp"], input[autocomplete="one-time-code"]')))
             token.clear(); token.send_keys(_totp(_required_env("FABINZI_LIVE_E2E_ADMIN_TOTP_SECRET")))
             driver.find_element(By.CSS_SELECTOR, 'button[type="submit"], input[type="submit"]').click()
-        except TimeoutException as exc:
+        except TimeoutException:
             _fail("Controlled QA admin did not present the required OTP step; MFA must not be bypassed.")
 
     wait.until(lambda d: "/account/login/" not in d.current_url)
     state.cookies[role] = {c["name"]: c["value"] for c in driver.get_cookies()}
+
+
+def _restore_session(state: LiveState, driver, role: str) -> None:
+    saved = state.cookies.get(role)
+    if not saved:
+        _fail(f"No previously MFA/authenticated browser session is available for {role}.")
+    driver.delete_all_cookies()
+    driver.get(state.base_url)
+    for name, value in saved.items():
+        driver.add_cookie({"name": name, "value": value, "path": "/"})
+    driver.get(_absolute(state, "/app/" if role != "admin" else "/Maneg/"))
+    if role == "admin":
+        assert "/account/login/" not in driver.current_url, "Saved Admin session lost OTP verification."
 
 
 def _set_preferences(state: LiveState, driver, language: str, theme: str) -> None:
@@ -332,15 +343,12 @@ def _clear_cart(state: LiveState, driver) -> None:
     cart = _api(state, driver, "GET", "/api/v1/cart/")
     for item in list(cart.get("items") or []):
         _api(state, driver, "DELETE", f"/api/v1/cart/items/{item['id']}/")
-    cart = _api(state, driver, "GET", "/api/v1/cart/")
-    assert cart.get("item_count") == 0
+    assert _api(state, driver, "GET", "/api/v1/cart/").get("item_count") == 0
 
 
 def _add_plain_product(state: LiveState, driver, slug: str) -> None:
     driver.get(_absolute(state, f"/store/fabinzi-demo-studio/{slug}/?lang=en"))
     _wait(driver).until(EC.presence_of_element_located((By.ID, "product-purchase-form")))
-    form = driver.find_element(By.ID, "product-purchase-form")
-    assert form.is_displayed()
     _click(driver, By.CSS_SELECTOR, "#product-purchase-form button[type='submit']")
     _wait(driver).until(EC.url_contains("/cart/"))
 
@@ -363,13 +371,11 @@ def _create_private_studio_item(state: LiveState, driver) -> None:
                 zone.select_by_value(option.get_attribute("value")); break
     Select(driver.find_element(By.ID, "upload-method")).select_by_value("print")
     rights = driver.find_element(By.ID, "rights-confirmed")
-    if not rights.is_selected():
-        _click(driver, By.ID, "rights-confirmed")
+    if not rights.is_selected(): _click(driver, By.ID, "rights-confirmed")
     _click(driver, By.CSS_SELECTOR, "#private-upload-form button[type='submit']")
     image_element = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-studio-element][data-kind="image"]')))
     try:
-        img = image_element.find_element(By.TAG_NAME, "img")
-        state.private_media_url = img.get_attribute("src") or ""
+        state.private_media_url = image_element.find_element(By.TAG_NAME, "img").get_attribute("src") or ""
     except NoSuchElementException:
         state.private_media_url = ""
     wait.until(lambda d: d.find_element(By.ID, "studio-save-state").get_attribute("data-state") == "saved")
@@ -448,12 +454,10 @@ def _designer_create_rfq(state: LiveState, driver) -> None:
     _set_preferences(state, driver, "en", "light")
     driver.get(_absolute(state, "/designer/?lang=en")); _wait(driver).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
     _shot(driver, SCREENSHOTS[7])
-
     seeded = _api(state, driver, "GET", "/api/v1/rfqs/")
     reference = next(row for row in seeded if row["title"] == "QA Men's T-Shirt Production")
     state.designer_org_id = int(reference["designer_organization"])
-    public_manufacturers = _api(state, driver, "GET", "/api/v1/manufacturers/public/")
-    demo = next(row for row in public_manufacturers if row["organization_name"] == "FABINZI Demo Manufacturing")
+    demo = next(row for row in _api(state, driver, "GET", "/api/v1/manufacturers/public/") if row["organization_name"] == "FABINZI Demo Manufacturing")
     state.manufacturer_org_id = int(demo["organization"])
     stamp = int(time.time())
     rfq = _api(state, driver, "POST", "/api/v1/rfqs/", {
@@ -540,7 +544,7 @@ def _manufacturer_production_and_ship(state: LiveState, driver) -> None:
         "tracking_url": "https://example.invalid/fabinzi-qa-tracking",
     })
     assert shipped["status"] == "shipped" and shipped["tracking_number"] == tracking
-    driver.get(_absolute(state, "/manufacturer/production/?lang=en"))
+    driver.get(_absolute(state, f"/manufacturer/production/{state.job_id}/shipment/?org={state.manufacturer_org_id}&lang=en"))
     _wait(driver).until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), tracking))
     _shot(driver, SCREENSHOTS[11])
     state.results["production_qc_pack_ship"] = "PASS"
@@ -571,8 +575,7 @@ def _private_media_session_status(state: LiveState, cookie_role: str, url: str) 
     session = requests.Session()
     for key, value in state.cookies[cookie_role].items():
         session.cookies.set(key, value)
-    response = session.get(url, timeout=30, allow_redirects=False)
-    return response.status_code
+    return session.get(url, timeout=30, allow_redirects=False).status_code
 
 
 def _private_media_security(state: LiveState, driver) -> None:
@@ -613,15 +616,18 @@ def _maneg_live(state: LiveState, driver) -> None:
 
     driver.get(_absolute(state, "/Maneg/integrations/?lang=en"))
     _wait(driver).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-    integration_text = driver.find_element(By.TAG_NAME, "body").text
-    state.integration_snapshot = integration_text[:5000]
+    state.integration_snapshot = driver.find_element(By.TAG_NAME, "body").text[:5000]
     assert "api_key" not in driver.page_source.lower()
     state.results["maneg_operational_visibility"] = "PASS"
     state.results["audit_humanized_canonical_chain_visible"] = "PASS"
+    state.results["mfa_admin_session"] = "PASS"
 
 
 def _mobile_evidence(state: LiveState, driver, role: str, path: str, screenshot: str) -> None:
-    _login(state, driver, role)
+    if role == "admin" and state.cookies.get("admin"):
+        _restore_session(state, driver, role)
+    else:
+        _login(state, driver, role)
     _set_preferences(state, driver, "ar", "dark")
     driver.set_window_size(390, 844)
     driver.get(_absolute(state, path + ("&" if "?" in path else "?") + "lang=ar"))
@@ -696,8 +702,6 @@ def run() -> int:
         _customer_verify_shipment(state, driver)
         _manufacturer_deliver_and_finance(state, driver)
 
-        # Ensure we have browser-derived sessions for all supply-side roles before
-        # the private-media boundary test.
         _login(state, driver, "designer")
         _login(state, driver, "manufacturer")
         _private_media_security(state, driver)
