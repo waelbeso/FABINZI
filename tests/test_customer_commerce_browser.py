@@ -159,7 +159,9 @@ def test_real_chrome_mixed_customer_commerce_journey(client, live_server):
         pytest.skip("Real Chrome QA is CI-only.")
 
     customer = User.objects.create_user(username="chrome-commerce-customer", password="password12345", theme_preference="light")
-    IntegrationConfig.objects.filter(provider=IntegrationConfig.Provider.COD).update(enabled=True)
+    cod, _ = IntegrationConfig.objects.get_or_create(provider=IntegrationConfig.Provider.COD)
+    cod.enabled = True
+    cod.save(update_fields=["enabled"])
     assert IntegrationConfig.objects.filter(provider=IntegrationConfig.Provider.COD, enabled=True).exists()
     plain, plain_variant, _ = _catalog("chromeplain")
     custom, custom_variant, custom_zone = _catalog("chromecustom", customization=True)
