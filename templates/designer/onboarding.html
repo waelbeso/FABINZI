@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}{% if request.LANGUAGE_CODE == 'ar' %}انضم كمصمم{% else %}Designer onboarding{% endif %} · FABINZI{% endblock %}
+{% block content %}
+<section class="section--tight split">
+  <div>
+    <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}مساحة المصمم{% else %}DESIGNER WORKSPACE{% endif %}</div>
+    <h1 class="page-title">{% if request.LANGUAGE_CODE == 'ar' %}أنشئ جهة التصميم الخاصة بك{% else %}Create your Designer organization{% endif %}</h1>
+    <p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}ابدأ بمسودة بيانات حقيقية، ثم أرسلها لمراجعة FABINZI قبل الوصول إلى أدوات النشر والتصنيع.{% else %}Start with a real business profile, then submit it for FABINZI review before publishing and sourcing tools become available.{% endif %}</p>
+  </div>
+  <aside class="card"><strong>{% if request.LANGUAGE_CODE == 'ar' %}ما الذي يحدث بعد ذلك؟{% else %}What happens next?{% endif %}</strong><p class="muted">{% if request.LANGUAGE_CODE == 'ar' %}يمكنك تعديل المسودة قبل الإرسال. بعد الإرسال تُقفل أثناء المراجعة، وقد تُطلب منك تعديلات قبل الاعتماد.{% else %}You can edit the draft before submission. It locks during review, and FABINZI may request revisions before approval.{% endif %}</p></aside>
+</section>
+<form method="post" class="surface stack" novalidate>{% csrf_token %}
+  <h2>{% if request.LANGUAGE_CODE == 'ar' %}بيانات الجهة{% else %}Organization details{% endif %}</h2>
+  <div class="form-grid">
+    <div class="field"><label for="id_org-display_name">{% if request.LANGUAGE_CODE == 'ar' %}اسم العرض{% else %}Display name{% endif %}</label>{{ org_form.display_name }}{{ org_form.display_name.errors }}</div>
+    <div class="field"><label for="id_org-legal_name">{% if request.LANGUAGE_CODE == 'ar' %}الاسم القانوني{% else %}Legal name{% endif %}</label>{{ org_form.legal_name }}{{ org_form.legal_name.errors }}</div>
+    <div class="field"><label for="id_org-email">{% if request.LANGUAGE_CODE == 'ar' %}البريد الإلكتروني{% else %}Email{% endif %}</label>{{ org_form.email }}{{ org_form.email.errors }}</div>
+    <div class="field"><label for="id_org-phone">{% if request.LANGUAGE_CODE == 'ar' %}الهاتف{% else %}Phone{% endif %}</label>{{ org_form.phone }}{{ org_form.phone.errors }}</div>
+    <div class="field"><label for="id_org-website">{% if request.LANGUAGE_CODE == 'ar' %}الموقع{% else %}Website{% endif %}</label>{{ org_form.website }}{{ org_form.website.errors }}</div>
+    <div class="field"><label for="id_org-country">{% if request.LANGUAGE_CODE == 'ar' %}الدولة{% else %}Country{% endif %}</label>{{ org_form.country }}{{ org_form.country.errors }}</div>
+    <div class="field"><label for="id_org-city">{% if request.LANGUAGE_CODE == 'ar' %}المدينة{% else %}City{% endif %}</label>{{ org_form.city }}{{ org_form.city.errors }}</div>
+    <div class="field"><label for="id_org-region">{% if request.LANGUAGE_CODE == 'ar' %}المنطقة/المحافظة{% else %}Region{% endif %}</label>{{ org_form.region }}{{ org_form.region.errors }}</div>
+    <div class="field field--full"><label for="id_org-address_line1">{% if request.LANGUAGE_CODE == 'ar' %}العنوان{% else %}Address{% endif %}</label>{{ org_form.address_line1 }}{{ org_form.address_line1.errors }}</div>
+    <div class="field field--full"><label for="id_org-address_line2">{% if request.LANGUAGE_CODE == 'ar' %}تفاصيل عنوان إضافية{% else %}Address line 2{% endif %}</label>{{ org_form.address_line2 }}{{ org_form.address_line2.errors }}</div>
+  </div>
+  <h2>{% if request.LANGUAGE_CODE == 'ar' %}ملف المصمم{% else %}Designer profile{% endif %}</h2>
+  <div class="form-grid">
+    <div class="field"><label for="id_profile-studio_name">{% if request.LANGUAGE_CODE == 'ar' %}اسم الاستوديو{% else %}Studio name{% endif %}</label>{{ profile_form.studio_name }}{{ profile_form.studio_name.errors }}</div>
+    <div class="field"><label for="id_profile-portfolio_url">{% if request.LANGUAGE_CODE == 'ar' %}رابط الأعمال{% else %}Portfolio URL{% endif %}</label>{{ profile_form.portfolio_url }}{{ profile_form.portfolio_url.errors }}</div>
+    <div class="field"><label for="id_profile-legal_registration_number">{% if request.LANGUAGE_CODE == 'ar' %}رقم التسجيل القانوني{% else %}Registration number{% endif %}</label>{{ profile_form.legal_registration_number }}{{ profile_form.legal_registration_number.errors }}</div>
+    <div class="field"><label for="id_profile-tax_number">{% if request.LANGUAGE_CODE == 'ar' %}الرقم الضريبي{% else %}Tax number{% endif %}</label>{{ profile_form.tax_number }}{{ profile_form.tax_number.errors }}</div>
+    <div class="field field--full"><label for="id_profile-payout_information">{% if request.LANGUAGE_CODE == 'ar' %}معلومات أولية للتحويلات{% else %}Initial payout information{% endif %}</label>{{ profile_form.payout_information }}<span class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}هذه بيانات انضمام أولية فقط؛ ملف التحويل الفعلي يُدار لاحقًا من قسم المالية.{% else %}This is onboarding information only; the real payout profile is managed later in Finance.{% endif %}</span>{{ profile_form.payout_information.errors }}</div>
+  </div>
+  <label class="card cluster" for="id_profile-accept_terms">{{ profile_form.accept_terms }} <span>{% if request.LANGUAGE_CODE == 'ar' %}أوافق على شروط انضمام المصمم{% else %}I accept the Designer onboarding terms{% endif %}</span></label>{{ profile_form.accept_terms.errors }}
+  <div><button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}إنشاء المسودة{% else %}Create onboarding draft{% endif %}</button></div>
+</form>
+{% endblock %}
