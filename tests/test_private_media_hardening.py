@@ -8,7 +8,13 @@ from django.test import override_settings
 from django.urls import reverse
 
 from apps.media.models import MediaAsset
-from apps.media.services import create_private_studio_image, private_media_response
+from apps.media.services import (
+    ProductionStorageUnavailable,
+    assert_production_file_storage,
+    create_private_studio_image,
+    private_media_response,
+    private_media_storage_mode,
+)
 
 User = get_user_model()
 PNG_1X1 = bytes.fromhex(
@@ -21,6 +27,24 @@ def upload():
 
 
 @pytest.mark.django_db
+def test_test_environment_uses_private_local_storage_even_when_debug_is_false(tmp_path):
+    owner = User.objects.create_user(username="local-test-owner", password="password12345")
+    with override_settings(
+        DEBUG=False,
+        ENVIRONMENT="test",
+        PRIVATE_MEDIA_STORAGE_MODE="local",
+        MEDIA_ROOT=tmp_path,
+    ):
+        asset = create_private_studio_image(upload=upload(), owner=owner)
+        assert private_media_storage_mode() == "local"
+
+    assert asset.provider == MediaAsset.Provider.LOCAL_DEV
+    assert asset.access == MediaAsset.Access.PRIVATE
+    assert asset.uploaded_by == owner
+    assert asset.provider_asset_id.startswith(f"studio-private/{owner.pk}/")
+
+
+@pytest.mark.django_db
 def test_production_s3_upload_is_private_and_stores_no_credentials():
     owner = User.objects.create_user(username="s3-owner", password="password12345")
     fake_config = SimpleNamespace(
@@ -28,7 +52,7 @@ def test_production_s3_upload_is_private_and_stores_no_credentials():
         get_secrets=lambda: {"access_key_id": "AKIA_TEST_ONLY", "secret_access_key": "SUPER_SECRET_NEVER_EXPOSE"},
     )
     client = Mock()
-    with override_settings(DEBUG=False), patch("apps.media.services.active_provider", return_value=fake_config), patch("apps.media.services._s3_client", return_value=client):
+    with override_settings(ENVIRONMENT="production", PRIVATE_MEDIA_STORAGE_MODE="s3"), patch("apps.media.services.active_provider", return_value=fake_config), patch("apps.media.services._s3_client", return_value=client):
         asset = create_private_studio_image(upload=upload(), owner=owner)
 
     assert asset.provider == MediaAsset.Provider.AMAZON_S3
@@ -45,6 +69,22 @@ def test_production_s3_upload_is_private_and_stores_no_credentials():
     assert "ACL" not in kwargs
     assert "aws_access_key_id" not in kwargs
     assert "aws_secret_access_key" not in kwargs
+
+
+def test_production_storage_mode_cannot_fall_back_to_local():
+    with override_settings(ENVIRONMENT="production", PRIVATE_MEDIA_STORAGE_MODE="local"):
+        with pytest.raises(ProductionStorageUnavailable, match="not permitted"):
+            private_media_storage_mode()
+
+
+@pytest.mark.django_db
+def test_production_s3_unavailable_fails_closed():
+    with override_settings(ENVIRONMENT="production", PRIVATE_MEDIA_STORAGE_MODE="s3"), patch(
+        "apps.media.services.active_provider",
+        side_effect=ProductionStorageUnavailable("amazon_s3 is not configured and enabled"),
+    ):
+        with pytest.raises(ProductionStorageUnavailable, match="amazon_s3"):
+            assert_production_file_storage()
 
 
 @pytest.mark.django_db
@@ -68,7 +108,7 @@ def test_production_private_preview_uses_short_lived_authorized_signed_access_an
     s3 = Mock()
     s3.generate_presigned_url.return_value = "https://storage.example/private/file.png?X-Amz-Credential=AKIA_TEST_ONLY&X-Amz-Signature=abc123"
 
-    with patch("apps.media.services.active_provider", return_value=fake_config), patch("apps.media.services._s3_client", return_value=s3):
+    with override_settings(ENVIRONMENT="production", PRIVATE_MEDIA_STORAGE_MODE="s3"), patch("apps.media.services.active_provider", return_value=fake_config), patch("apps.media.services._s3_client", return_value=s3):
         signed = private_media_response(asset)
     assert signed.startswith("https://storage.example/private/")
     assert "SUPER_SECRET_NEVER_EXPOSE" not in signed
