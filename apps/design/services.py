@@ -4,6 +4,7 @@ from django.db.models import Max
 from django.utils import timezone
 
 from apps.audit.services import record_audit_event
+from apps.media.designer_services import require_private_designer_asset
 from apps.notifications.models import Notification
 from apps.organizations.models import Membership, Organization
 from apps.organizations.services import require_org_access, user_has_org_access
@@ -111,7 +112,12 @@ def require_draft(version, actor):
 @transaction.atomic
 def add_asset(*, version, actor, media_asset, kind, label="", request=None):
     require_draft(version, actor)
-    if media_asset.uploaded_by_id and media_asset.uploaded_by_id != actor.pk and not actor.is_staff:
+    organization = version.design.organization
+    if media_asset.access == media_asset.Access.PRIVATE:
+        require_private_designer_asset(asset=media_asset, organization=organization, actor=actor)
+    elif kind != DesignAsset.Kind.PRODUCT_IMAGE:
+        raise ValidationError("Technical design assets must remain private.")
+    elif media_asset.uploaded_by_id and media_asset.uploaded_by_id != actor.pk and not actor.is_staff:
         raise PermissionDenied("This media asset is not owned by the current user.")
     asset = DesignAsset(version=version, media_asset=media_asset, kind=kind, label=label); asset.full_clean(); asset.save()
     record_audit_event(actor=actor, action="design.asset.added", instance=asset, metadata={"design_id": version.design_id, "kind": kind}, request=request)
