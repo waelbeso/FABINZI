@@ -5,7 +5,7 @@ from django.utils import timezone
 
 from apps.audit.services import record_audit_event
 from apps.design.models import GarmentDesignVersion
-from apps.media.designer_services import require_private_designer_asset
+from apps.media.designer_services import claim_or_require_private_designer_asset, require_private_designer_asset
 from apps.media.models import MediaAsset
 from apps.notifications.models import Notification
 from apps.organizations.models import Membership, Organization
@@ -34,11 +34,7 @@ def require_artwork_access(user, artwork, *, edit=False):
 
 
 def _public_preview_rows(artwork):
-    return ArtworkAsset.objects.filter(
-        version__artwork=artwork,
-        kind=ArtworkAsset.Kind.PREVIEW,
-        media_asset__metadata__artwork_public_derivative=True,
-    ).select_related("media_asset", "version")
+    return ArtworkAsset.objects.filter(version__artwork=artwork, kind=ArtworkAsset.Kind.PREVIEW, media_asset__metadata__artwork_public_derivative=True).select_related("media_asset", "version")
 
 
 def _set_public_derivative_state(media, *, enabled, version=None):
@@ -62,81 +58,27 @@ def revoke_public_preview_derivatives(*, artwork, actor=None, reason="state_chan
     for row in _public_preview_rows(artwork):
         if row.media_asset.access != MediaAsset.Access.PRIVATE or (row.media_asset.metadata or {}).get("public_url"):
             _set_public_derivative_state(row.media_asset, enabled=False)
-            record_audit_event(
-                actor=actor,
-                action="artwork.preview.revoked",
-                instance=row.version,
-                metadata={"artwork_id": artwork.pk, "media_asset_id": row.media_asset_id, "reason": reason},
-                request=request,
-            )
+            record_audit_event(actor=actor, action="artwork.preview.revoked", instance=row.version, metadata={"artwork_id": artwork.pk, "media_asset_id": row.media_asset_id, "reason": reason}, request=request)
 
 
 def ensure_public_preview_for_version(*, version, actor=None, request=None):
     if version.status != ArtworkVersion.Status.APPROVED or version.artwork.status != Artwork.Status.APPROVED:
         raise ValidationError("Only an approved Artwork Version can publish a public preview.")
-
-    # Backward-compatible public previews remain valid. New Designer Portal workflow
-    # previews stay private and receive a separate public derivative row on approval.
-    existing_public = version.assets.filter(
-        kind=ArtworkAsset.Kind.PREVIEW,
-        media_asset__access=MediaAsset.Access.PUBLIC,
-        media_asset__mime_type__startswith="image/",
-    ).select_related("media_asset").order_by("id").first()
+    existing_public = version.assets.filter(kind=ArtworkAsset.Kind.PREVIEW, media_asset__access=MediaAsset.Access.PUBLIC, media_asset__mime_type__startswith="image/").select_related("media_asset").order_by("id").first()
     if existing_public and not (existing_public.media_asset.metadata or {}).get("artwork_public_revoked"):
         return existing_public
-
-    source_row = version.assets.filter(
-        kind=ArtworkAsset.Kind.PREVIEW,
-        media_asset__access=MediaAsset.Access.PRIVATE,
-        media_asset__mime_type__startswith="image/",
-        media_asset__metadata__designer_private_upload=True,
-        media_asset__metadata__organization_id=version.artwork.organization_id,
-    ).select_related("media_asset").order_by("id").first()
+    source_row = version.assets.filter(kind=ArtworkAsset.Kind.PREVIEW, media_asset__access=MediaAsset.Access.PRIVATE, media_asset__mime_type__startswith="image/", media_asset__metadata__designer_private_upload=True, media_asset__metadata__organization_id=version.artwork.organization_id).select_related("media_asset").order_by("id").first()
     if not source_row:
         raise ValidationError("Approved Artwork requires a valid private Designer preview before it can be published.")
-
     source = source_row.media_asset
-    derivative_row = version.assets.filter(
-        kind=ArtworkAsset.Kind.PREVIEW,
-        media_asset__metadata__artwork_public_derivative=True,
-        media_asset__metadata__source_media_asset_id=source.pk,
-    ).select_related("media_asset").order_by("id").first()
+    derivative_row = version.assets.filter(kind=ArtworkAsset.Kind.PREVIEW, media_asset__metadata__artwork_public_derivative=True, media_asset__metadata__source_media_asset_id=source.pk).select_related("media_asset").order_by("id").first()
     if derivative_row:
         _set_public_derivative_state(derivative_row.media_asset, enabled=True, version=version)
         return derivative_row
-
-    derivative = MediaAsset.objects.create(
-        provider=source.provider,
-        provider_asset_id=source.provider_asset_id,
-        original_filename=source.original_filename,
-        mime_type=source.mime_type,
-        size_bytes=source.size_bytes,
-        checksum_sha256=source.checksum_sha256,
-        access=MediaAsset.Access.PUBLIC,
-        metadata={
-            "artwork_public_derivative": True,
-            "source_media_asset_id": source.pk,
-            "organization_id": version.artwork.organization_id,
-            "artwork_version_id": version.pk,
-            "width": (source.metadata or {}).get("width"),
-            "height": (source.metadata or {}).get("height"),
-        },
-        uploaded_by=source.uploaded_by,
-    )
+    derivative = MediaAsset.objects.create(provider=source.provider, provider_asset_id=source.provider_asset_id, original_filename=source.original_filename, mime_type=source.mime_type, size_bytes=source.size_bytes, checksum_sha256=source.checksum_sha256, access=MediaAsset.Access.PUBLIC, metadata={"artwork_public_derivative": True, "source_media_asset_id": source.pk, "organization_id": version.artwork.organization_id, "artwork_version_id": version.pk, "width": (source.metadata or {}).get("width"), "height": (source.metadata or {}).get("height")}, uploaded_by=source.uploaded_by)
     _set_public_derivative_state(derivative, enabled=True, version=version)
-    derivative_row = ArtworkAsset.objects.create(
-        version=version,
-        kind=ArtworkAsset.Kind.PREVIEW,
-        media_asset=derivative,
-        label="Approved public preview",
-    )
-    record_audit_event(
-        actor=actor,
-        action="artwork.preview.published",
-        instance=version,
-        metadata={"artwork_id": version.artwork_id, "source_media_asset_id": source.pk, "public_media_asset_id": derivative.pk},
-        request=request,
-    )
+    derivative_row = ArtworkAsset.objects.create(version=version, kind=ArtworkAsset.Kind.PREVIEW, media_asset=derivative, label="Approved public preview")
+    record_audit_event(actor=actor, action="artwork.preview.published", instance=version, metadata={"artwork_id": version.artwork_id, "source_media_asset_id": source.pk, "public_media_asset_id": derivative.pk}, request=request)
     return derivative_row
 
 
@@ -176,9 +118,9 @@ def add_artwork_asset(*, version, actor, media_asset, kind, label="", request=No
     require_artwork_draft(version, actor)
     organization = version.artwork.organization
     if kind in {ArtworkAsset.Kind.SOURCE, ArtworkAsset.Kind.RIGHTS_EVIDENCE}:
-        require_private_designer_asset(asset=media_asset, organization=organization, actor=actor)
+        claim_or_require_private_designer_asset(asset=media_asset, organization=organization, actor=actor, purpose=f"artwork_{kind}")
     elif kind == ArtworkAsset.Kind.PREVIEW and media_asset.access == MediaAsset.Access.PRIVATE:
-        require_private_designer_asset(asset=media_asset, organization=organization, actor=actor)
+        claim_or_require_private_designer_asset(asset=media_asset, organization=organization, actor=actor, purpose="artwork_preview")
     elif media_asset.uploaded_by_id and media_asset.uploaded_by_id != actor.pk and not actor.is_staff:
         raise PermissionDenied("This media asset is not owned by the current user.")
     asset = ArtworkAsset(version=version, kind=kind, media_asset=media_asset, label=label)
