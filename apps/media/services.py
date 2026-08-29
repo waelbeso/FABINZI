@@ -34,10 +34,19 @@ def active_provider(provider: str):
         raise ProductionStorageUnavailable(f"{provider} is not configured and enabled") from exc
 
 
+def private_media_storage_mode():
+    mode = str(getattr(settings, "PRIVATE_MEDIA_STORAGE_MODE", "")).strip().lower()
+    environment = str(getattr(settings, "ENVIRONMENT", "development")).strip().lower()
+    if mode not in {"local", "s3"}:
+        raise ProductionStorageUnavailable("PRIVATE_MEDIA_STORAGE_MODE must be either 'local' or 's3'")
+    if mode == "local" and environment not in {"development", "dev", "test", "testing"}:
+        raise ProductionStorageUnavailable("Private local media storage is not permitted outside development/test")
+    return mode
+
+
 def assert_production_file_storage():
-    if settings.DEBUG:
-        return
-    active_provider(IntegrationConfig.Provider.AMAZON_S3)
+    if private_media_storage_mode() == "s3":
+        active_provider(IntegrationConfig.Provider.AMAZON_S3)
 
 
 def _s3_client(config):
@@ -85,8 +94,9 @@ def create_private_studio_image(*, upload, owner):
     checksum = hashlib.sha256(payload).hexdigest()
     key = f"studio-private/{owner.pk}/{uuid.uuid4().hex}{extension}"
     filename = Path(getattr(upload, "name", "studio-image")).name[:255]
+    storage_mode = private_media_storage_mode()
 
-    if settings.DEBUG:
+    if storage_mode == "local":
         stored_key = default_storage.save(key, ContentFile(payload))
         provider = MediaAsset.Provider.LOCAL_DEV
     else:
@@ -121,6 +131,8 @@ def private_media_response(asset):
     if asset.access != MediaAsset.Access.PRIVATE:
         raise ValidationError("This media asset is not private Studio media.")
     if asset.provider == MediaAsset.Provider.LOCAL_DEV:
+        if private_media_storage_mode() != "local":
+            raise ProductionStorageUnavailable("Local private Studio media cannot be served in this environment")
         return default_storage.open(asset.provider_asset_id, "rb")
     if asset.provider == MediaAsset.Provider.AMAZON_S3:
         integration = active_provider(IntegrationConfig.Provider.AMAZON_S3)
