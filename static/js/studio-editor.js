@@ -87,6 +87,34 @@
     if (selected === el) updateControls();
   }
 
+  function readyButton() {
+    const readyAction = document.querySelector('input[name="action"][value="ready"]');
+    return readyAction?.closest('form')?.querySelector('button[type="submit"]');
+  }
+
+  function showRejectedSave(messages = []) {
+    setSaveState('error');
+    if (!validationPanel) return;
+    validationPanel.classList.remove('is-valid');
+    validationPanel.classList.add('is-invalid');
+    validationPanel.dataset.correctionRequired = 'true';
+    if (validationTitle) validationTitle.textContent = language === 'ar' ? 'الموضع يحتاج إلى تصحيح' : 'Placement needs correction';
+    if (validationList) {
+      validationList.replaceChildren();
+      const fallback = language === 'ar'
+        ? 'لم يتم حفظ هذا التغيير. أُعيد آخر موضع صالح؛ عدّل الموضع ثم احفظ مرة أخرى.'
+        : 'This change was not saved. The last valid placement was restored; correct the placement and save again.';
+      const rows = messages.length ? messages : [fallback];
+      rows.forEach(message => {
+        const li = document.createElement('li');
+        li.textContent = String(message);
+        validationList.appendChild(li);
+      });
+    }
+    const button = readyButton();
+    if (button) button.disabled = true;
+  }
+
   async function saveElement(el, extra = {}) {
     if (!el || readonly) return false;
     dirty = true;
@@ -99,7 +127,13 @@
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf, 'Accept': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (!response.ok) throw new Error('validation');
+      if (!response.ok) {
+        let body = {};
+        try { body = await response.json(); } catch (_) {}
+        const error = new Error('validation');
+        error.studioMessages = Array.isArray(body.detail) ? body.detail : (body.detail ? [body.detail] : []);
+        throw error;
+      }
       const body = await response.json();
       const t = body.transform || payload.transform;
       Object.entries(t).forEach(([key, value]) => { el.dataset[key] = value; });
@@ -109,13 +143,13 @@
       dirty = false;
       setSaveState('saved');
       updateControls();
+      if (validationPanel) delete validationPanel.dataset.correctionRequired;
       await refreshValidation();
       return true;
-    } catch (_) {
+    } catch (error) {
       restoreSaved(el);
       dirty = false;
-      setSaveState('error');
-      await refreshValidation();
+      showRejectedSave(error?.studioMessages || []);
       return false;
     }
   }
@@ -128,15 +162,15 @@
       const data = await response.json();
       validationPanel.classList.toggle('is-valid', !!data.valid);
       validationPanel.classList.toggle('is-invalid', !data.valid);
+      delete validationPanel.dataset.correctionRequired;
       if (validationTitle) validationTitle.textContent = data.valid ? (language === 'ar' ? 'جاهز للطلب' : 'Ready to order') : (language === 'ar' ? 'يحتاج إلى انتباه' : 'Needs attention');
       if (validationList) {
         validationList.replaceChildren();
         const messages = data.valid ? [language === 'ar' ? 'المنتج والخيار والعناصر والمواضع صالحة حالياً.' : 'Product, variant, elements and placements are currently valid.'] : (language === 'ar' ? ['راجع موضع العنصر وطريقة الإنتاج وأهلية المصدر.'] : (data.errors || ['Review the customization before ordering.']));
         messages.forEach(message => { const li = document.createElement('li'); li.textContent = message; validationList.appendChild(li); });
       }
-      const readyAction = document.querySelector('input[name="action"][value="ready"]');
-      const readyButton = readyAction?.closest('form')?.querySelector('button[type="submit"]');
-      if (readyButton) readyButton.disabled = !data.valid;
+      const button = readyButton();
+      if (button) button.disabled = !data.valid;
     } catch (_) {}
   }
 
