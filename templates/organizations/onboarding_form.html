@@ -1,15 +1,16 @@
 {% extends "base.html" %}
-{% block title %}FABINZI · {{ portal_kind|title }} onboarding{% endblock %}
+{% block title %}{% if request.LANGUAGE_CODE == 'ar' %}FABINZI · انضمام {% if portal_kind == 'manufacturer' %}المصنع{% else %}المصمم{% endif %}{% else %}FABINZI · {{ portal_kind|title }} onboarding{% endif %}{% endblock %}
+{% block extra_head %}{{ block.super }}<meta name="robots" content="noindex, nofollow, noarchive">{% endblock %}
 {% block content %}
-<section class="surface shell">
-  <div class="eyebrow">FABINZI BUSINESS ONBOARDING</div>
-  <h1>{{ portal_kind|title }} onboarding</h1>
-  <p>{% if editing %}Update the application before submitting or resubmitting it.{% else %}Create your business profile, accept the platform terms, then submit it for FABINZI review.{% endif %}</p>
-  <form method="post" class="stack">
+<section class="surface shell portal-onboarding">
+  <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}انضمام شركاء FABINZI{% else %}FABINZI BUSINESS ONBOARDING{% endif %}</div>
+  <h1>{% if request.LANGUAGE_CODE == 'ar' %}{% if portal_kind == 'manufacturer' %}انضمام شريك التصنيع{% else %}انضمام المصمم{% endif %}{% else %}{{ portal_kind|title }} onboarding{% endif %}</h1>
+  <p>{% if editing %}{% if request.LANGUAGE_CODE == 'ar' %}حدّث البيانات المطلوبة قبل إرسال الطلب أو إعادة إرساله للمراجعة.{% else %}Update the application before submitting or resubmitting it.{% endif %}{% else %}{% if request.LANGUAGE_CODE == 'ar' %}أنشئ ملف الجهة، وافق على شروط المنصة، ثم أرسل الطلب لمراجعة FABINZI.{% else %}Create your business profile, accept the platform terms, then submit it for FABINZI review.{% endif %}{% endif %}</p>
+  <form method="post" class="stack onboarding-form">
     {% csrf_token %}
-    <div class="card"><h2>Business information</h2>{{ org_form.as_p }}</div>
-    <div class="card"><h2>{{ portal_kind|title }} profile</h2>{{ profile_form.as_p }}</div>
-    <button class="button" type="submit">{% if editing %}Save changes{% else %}Save onboarding draft{% endif %}</button>
+    <div class="card"><h2>{% if request.LANGUAGE_CODE == 'ar' %}بيانات الجهة{% else %}Business information{% endif %}</h2>{{ org_form.as_p }}</div>
+    <div class="card"><h2>{% if request.LANGUAGE_CODE == 'ar' %}{% if portal_kind == 'manufacturer' %}ملف التصنيع{% else %}ملف المصمم{% endif %}{% else %}{{ portal_kind|title }} profile{% endif %}</h2>{{ profile_form.as_p }}</div>
+    <button class="button" type="submit">{% if editing %}{% if request.LANGUAGE_CODE == 'ar' %}حفظ التعديلات{% else %}Save changes{% endif %}{% else %}{% if request.LANGUAGE_CODE == 'ar' %}حفظ مسودة الانضمام{% else %}Save onboarding draft{% endif %}{% endif %}</button>
   </form>
 </section>
 {% endblock %}
