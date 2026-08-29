@@ -461,7 +461,7 @@ def test_production_transitions_qc_packing_and_shipment_use_canonical_record(cli
     assert data["fulfillment"].status == FulfillmentRecord.Status.SHIPPED
     assert data["order"].fulfillment.pk == data["fulfillment"].pk
     assert data["fulfillment"].tracking_number == "TRACK-001"
-    assert AuditEvent.objects.filter(action="production.started", object_id=str(job.pk)).exists()
+    assert AuditEvent.objects.filter(action="production_job.started", object_id=str(job.pk)).exists()
 
 
 @pytest.mark.django_db
