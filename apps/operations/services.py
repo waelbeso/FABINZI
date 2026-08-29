@@ -4,7 +4,6 @@ from django.utils import timezone
 
 from apps.audit.services import record_audit_event
 from apps.checkout.models import CustomerOrder
-from apps.manufacturer_marketplace.models import ManufacturerSelection
 from apps.notifications.models import Notification
 from apps.organizations.models import Membership, Organization
 from apps.storefront.models import StoreProduct
@@ -65,7 +64,7 @@ def start_order_operations(*, order, actor=None, request=None):
 
 @transaction.atomic
 def assign_manufacturer(*, job, selection, actor, request=None):
-    job=ProductionJob.objects.select_for_update().select_related("order__item__store_product__designed_product","order__designer_organization").get(pk=job.pk)
+    job=ProductionJob.objects.select_for_update().get(pk=job.pk)
     require_designer_operations(actor,job.order)
     if job.status != ProductionJob.Status.AWAITING_ASSIGNMENT: raise ValidationError("Manufacturer can only be assigned before production is queued.")
     if selection.rfq.designed_product_id != job.order.item.store_product.designed_product_id: raise ValidationError("Selection does not match this order's Designed Product.")
@@ -78,7 +77,7 @@ def assign_manufacturer(*, job, selection, actor, request=None):
 
 @transaction.atomic
 def start_production(*, job, actor, request=None):
-    job=ProductionJob.objects.select_for_update().select_related("manufacturer").get(pk=job.pk); require_manufacturer_job_access(actor,job)
+    job=ProductionJob.objects.select_for_update().get(pk=job.pk); require_manufacturer_job_access(actor,job)
     if job.status not in {ProductionJob.Status.QUEUED,ProductionJob.Status.QC_FAILED}: raise ValidationError("Production cannot start from its current state.")
     job.status=ProductionJob.Status.IN_PRODUCTION; job.started_at=job.started_at or timezone.now(); job.save(update_fields=["status","started_at","updated_at"])
     record_audit_event(actor=actor,action="production_job.started",instance=job,request=request); return job
@@ -86,7 +85,7 @@ def start_production(*, job, actor, request=None):
 
 @transaction.atomic
 def update_milestone(*, milestone, actor, status, notes="", request=None):
-    milestone=ProductionMilestone.objects.select_for_update().select_related("job__manufacturer").get(pk=milestone.pk); job=milestone.job; require_manufacturer_job_access(actor,job)
+    milestone=ProductionMilestone.objects.select_for_update().get(pk=milestone.pk); job=milestone.job; require_manufacturer_job_access(actor,job)
     if job.status != ProductionJob.Status.IN_PRODUCTION: raise ValidationError("Milestones can only change while production is active.")
     if status not in dict(ProductionMilestone.Status.choices): raise ValidationError("Invalid milestone status.")
     milestone.status=status; milestone.notes=notes; milestone.updated_by=actor
@@ -98,7 +97,7 @@ def update_milestone(*, milestone, actor, status, notes="", request=None):
 
 @transaction.atomic
 def request_qc(*, job, actor, request=None):
-    job=ProductionJob.objects.select_for_update().prefetch_related("milestones").select_related("manufacturer").get(pk=job.pk); require_manufacturer_job_access(actor,job)
+    job=ProductionJob.objects.select_for_update().get(pk=job.pk); require_manufacturer_job_access(actor,job)
     if job.status != ProductionJob.Status.IN_PRODUCTION: raise ValidationError("Production must be active before QC.")
     if job.milestones.exclude(status=ProductionMilestone.Status.COMPLETED).exists(): raise ValidationError("All production milestones must be completed before QC.")
     job.status=ProductionJob.Status.QC_PENDING; job.save(update_fields=["status","updated_at"]); record_audit_event(actor=actor,action="production_job.qc_requested",instance=job,request=request); return job
@@ -106,7 +105,7 @@ def request_qc(*, job, actor, request=None):
 
 @transaction.atomic
 def record_qc(*, job, actor, decision, checklist=None, notes="", request=None):
-    job=ProductionJob.objects.select_for_update().select_related("manufacturer","order__fulfillment").get(pk=job.pk); require_manufacturer_job_access(actor,job,MFR_QC_ROLES)
+    job=ProductionJob.objects.select_for_update().get(pk=job.pk); require_manufacturer_job_access(actor,job,MFR_QC_ROLES)
     if job.status != ProductionJob.Status.QC_PENDING: raise ValidationError("QC inspection requires a QC-pending job.")
     if decision not in dict(QCInspection.Decision.choices): raise ValidationError("Invalid QC decision.")
     inspection=QCInspection.objects.create(job=job,decision=decision,checklist=checklist or {},notes=notes,inspected_by=actor)
