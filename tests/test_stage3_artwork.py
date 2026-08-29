@@ -69,7 +69,7 @@ def test_designed_product_requires_approved_inputs_and_placement():
 @pytest.mark.django_db
 def test_ip_takedown_suspends_artwork_and_products():
     user=User.objects.create_user(username="artist",password="password123"); staff=User.objects.create_user(username="staff",password="password123",is_staff=True); org=active_designer(user); art,v=complete_artwork(org,user); v.status=ArtworkVersion.Status.APPROVED; v.save(); art.status=Artwork.Status.APPROVED; art.save(); garment,zone=approved_garment(org,user)
-    product=create_designed_product(organization=org,actor=user,garment_version=garment,artwork_version=v,title="Wave Tee"); add_product_placement(product=product,actor=user,decoration_zone=zone,transform={},production_method="print"); publish_designed_product(product=product,actor=user)
+    product=create_designed_product(organization=org,actor=user,garment_version=garment,artwork_version=v,title="Wave Tee"); add_product_placement(product=product,actor=user,decoration_zone=zone,transform={"x":0.5,"y":0.5,"scale":1},production_method="print"); publish_designed_product(product=product,actor=user)
     case=create_ip_case(actor=user,artwork=art,reporter_name="Claimant",reporter_email="c@example.com",claimant_rights="Copyright owner",allegation="Unauthorized use")
     moderate_ip_case(case=case,reviewer=staff,status=IPCase.Status.RESOLVED,resolution=IPCase.Resolution.TAKEDOWN,notes="Verified")
     art.refresh_from_db(); product.refresh_from_db(); assert art.status==Artwork.Status.SUSPENDED and product.status==DesignedProduct.Status.SUSPENDED
