@@ -9,6 +9,8 @@ envVarGroups:
         value: "0"
       - key: ENVIRONMENT
         value: production
+      - key: PRIVATE_MEDIA_STORAGE_MODE
+        value: s3
       - key: DJANGO_ALLOWED_HOSTS
         value: .onrender.com,localhost,127.0.0.1
       - key: DJANGO_CSRF_TRUSTED_ORIGINS
