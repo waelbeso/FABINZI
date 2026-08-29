@@ -134,8 +134,11 @@ def test_organization_verification_and_private_document_permissions(client):
     grant(operator, "view_mediaasset")
     evidence = client.get(reverse("fabinzi_admin:maneg-private-evidence", args=["verification", document.pk]))
     assert evidence.status_code == 200
-    assert evidence["Cache-Control"] == "private, no-store"
+    cache_directives = {directive.strip().lower() for directive in evidence["Cache-Control"].split(",")}
+    assert {"private", "no-store"}.issubset(cache_directives)
     assert evidence["X-Robots-Tag"] == "noindex, nofollow, noarchive"
+    assert evidence["Referrer-Policy"] == "no-referrer"
+    assert evidence["X-Content-Type-Options"] == "nosniff"
 
     response = client.post(reverse("fabinzi_admin:maneg-verification-detail", args=[application.pk]), {"decision": "approved", "review_notes": "Evidence verified"})
     assert response.status_code == 302

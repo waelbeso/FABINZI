@@ -110,6 +110,16 @@ def _form_with_hidden(driver, name, value):
     return driver.find_element(By.XPATH, f'//form[.//input[@type="hidden" and @name="{name}" and @value="{value}"]]')
 
 
+def _confirm_visible_action(driver, element, *, expected_text=None):
+    _click_element(driver, element)
+    alert = _wait(driver).until(EC.alert_is_present())
+    actual_text = alert.text
+    if expected_text is not None:
+        assert expected_text in actual_text
+    alert.accept()
+    return actual_text
+
+
 @pytest.mark.django_db(transaction=True)
 def test_maneg_control_center_real_chrome_a_to_l(client, live_server):
     if os.getenv("CI") != "true":
@@ -246,7 +256,11 @@ def test_maneg_control_center_real_chrome_a_to_l(client, live_server):
         assert _no_page_overflow(driver)
         _shot(driver, EXPECTED_SCREENSHOTS[1])
         user_form = _form_with_hidden(driver, "user_id", suspend_target.pk)
-        _click_element(driver, user_form.find_element(By.CSS_SELECTOR, 'button[type="submit"]'))
+        _confirm_visible_action(
+            driver,
+            user_form.find_element(By.CSS_SELECTOR, 'button[type="submit"]'),
+            expected_text="Suspend this account?",
+        )
         wait.until(lambda _d: not User.objects.get(pk=suspend_target.pk).is_active)
 
         driver.get(f"{live_server.url}/Maneg/organizations/?lang=en")
