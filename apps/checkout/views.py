@@ -7,7 +7,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from apps.integrations.models import IntegrationConfig
-from apps.storefront.models import ProductVariant, StoreProduct, StudioProject
+from apps.storefront.models import ProductVariant, StoreProduct, Storefront, StudioProject
+from apps.storefront.services import validate_studio_project
 from .models import CartItem, CheckoutSession, CustomerOrder, CustomerPurchase
 from .services import (
     add_cart_item,
@@ -38,12 +39,7 @@ def _positive_int(value, default=1):
 
 
 def _cart_context(cart):
-    items = cart.items.select_related(
-        "store_product",
-        "store_product__storefront",
-        "variant",
-        "studio_project",
-    ).prefetch_related("store_product__images__media_asset")
+    items = cart.items.select_related("store_product", "store_product__storefront", "variant", "studio_project").prefetch_related("store_product__images__media_asset")
     lines = []
     subtotal = Decimal("0.00")
     currency = None
@@ -66,23 +62,46 @@ def _checkout_lines(session):
 
 
 def _payment_methods():
-    configs = {
-        cfg.provider: cfg
-        for cfg in IntegrationConfig.objects.filter(
-            provider__in=[
-                IntegrationConfig.Provider.COD,
-                IntegrationConfig.Provider.PAYMOB,
-                IntegrationConfig.Provider.STRIPE,
-            ],
-            enabled=True,
-        )
-    }
+    configs = {cfg.provider: cfg for cfg in IntegrationConfig.objects.filter(provider__in=[IntegrationConfig.Provider.COD, IntegrationConfig.Provider.PAYMOB, IntegrationConfig.Provider.STRIPE], enabled=True)}
     methods = []
     if IntegrationConfig.Provider.COD in configs:
         methods.append(("cod", "Cash on Delivery", "الدفع عند الاستلام"))
-    # Browser online-payment widgets are intentionally not exposed until their
-    # provider-specific redirect/client-secret UX is complete. The API remains intact.
     return methods
+
+
+def _first_studio_needing_attention(*, cart=None, session=None):
+    if session is not None:
+        if session.cart_id:
+            cart = session.cart
+        elif session.studio_project_id:
+            project = session.studio_project
+            if project.status != StudioProject.Status.READY:
+                return project
+            try:
+                validate_studio_project(project)
+            except ValidationError:
+                return project
+            return None
+    if cart is None:
+        return None
+    items = cart.items.filter(kind=CartItem.Kind.STUDIO).select_related("studio_project")
+    for item in items:
+        project = item.studio_project
+        if not project or project.status != StudioProject.Status.READY:
+            return project
+        try:
+            validate_studio_project(project)
+        except ValidationError:
+            return project
+    return None
+
+
+def _studio_attention_message(request):
+    return _localized(
+        request,
+        "A saved customization needs attention before checkout. Open its Studio project from Cart, correct it, mark it Ready again, then retry checkout.",
+        "يوجد تخصيص محفوظ يحتاج إلى مراجعة قبل الدفع. افتح مشروع Studio من السلة، صحّحه، واجعله جاهزاً مرة أخرى ثم أعد محاولة الدفع.",
+    )
 
 
 @login_required
@@ -92,20 +111,13 @@ def add_product_to_cart(request, product_id):
         StoreProduct.objects.select_related("storefront", "designed_product").prefetch_related("designed_product__placements"),
         pk=product_id,
         status=StoreProduct.Status.PUBLISHED,
-        storefront__status=StoreProduct.Status.PUBLISHED,
+        storefront__status=Storefront.Status.PUBLISHED,
     )
     variant = get_object_or_404(ProductVariant, pk=request.POST.get("variant"), product=product, is_active=True)
     quantity = _positive_int(request.POST.get("quantity"))
     kind = CartItem.Kind.READY_DESIGNED if product.designed_product.placements.exists() else CartItem.Kind.PLAIN
     try:
-        add_cart_item(
-            customer=request.user,
-            product=product,
-            variant=variant,
-            quantity=quantity,
-            kind=kind,
-            request=request,
-        )
+        add_cart_item(customer=request.user, product=product, variant=variant, quantity=quantity, kind=kind, request=request)
     except (ValidationError, PermissionDenied) as exc:
         messages.error(request, str(exc))
         return redirect("public-store-product", store_slug=product.storefront.slug, product_slug=product.slug)
@@ -150,7 +162,10 @@ def cart_checkout_start(request):
     try:
         session = create_cart_checkout(cart=active_cart, actor=request.user, request=request)
     except (ValidationError, PermissionDenied) as exc:
-        messages.error(request, str(exc))
+        if _first_studio_needing_attention(cart=active_cart):
+            messages.error(request, _studio_attention_message(request))
+        else:
+            messages.error(request, str(exc))
         return redirect("cart")
     return redirect("checkout-detail", pk=session.pk)
 
@@ -161,29 +176,17 @@ def checkout_start(request, project_id):
     try:
         session = create_checkout(project=project, actor=request.user, request=request)
     except (ValidationError, PermissionDenied) as exc:
-        return render(request, "checkout/error.html", {"error": str(exc)}, status=400)
+        return render(request, "checkout/error.html", {"error": str(exc), "studio_attention_project": project}, status=400)
     return redirect("checkout-detail", pk=session.pk)
 
 
 @login_required
 def checkout_detail(request, pk):
-    session = get_object_or_404(
-        CheckoutSession.objects.select_related(
-            "cart",
-            "studio_project__product",
-            "studio_project__variant",
-        ),
-        pk=pk,
-    )
+    session = get_object_or_404(CheckoutSession.objects.select_related("cart", "studio_project__product", "studio_project__variant"), pk=pk)
     try:
         require_checkout_owner(request.user, session)
     except PermissionDenied:
-        return render(
-            request,
-            "checkout/error.html",
-            {"error": _localized(request, "Checkout access denied.", "غير مسموح بالوصول إلى صفحة الدفع.")},
-            status=403,
-        )
+        return render(request, "checkout/error.html", {"error": _localized(request, "Checkout access denied.", "غير مسموح بالوصول إلى صفحة الدفع.")}, status=403)
 
     if request.method == "POST":
         try:
@@ -208,22 +211,14 @@ def checkout_detail(request, pk):
                 if method not in allowed:
                     raise ValidationError(_localized(request, "Selected payment method is not currently available.", "طريقة الدفع المختارة غير متاحة حاليًا."))
                 if session.cart_id:
-                    purchase, _ = place_cart_purchase(
-                        session=session,
-                        actor=request.user,
-                        payment_method=method,
-                        request=request,
-                    )
+                    purchase, _ = place_cart_purchase(session=session, actor=request.user, payment_method=method, request=request)
                     return redirect("purchase-confirmation", pk=purchase.pk)
-                order, _ = place_order(
-                    session=session,
-                    actor=request.user,
-                    payment_method=method,
-                    request=request,
-                )
+                order, _ = place_order(session=session, actor=request.user, payment_method=method, request=request)
                 return redirect("order-detail", pk=order.pk)
             messages.success(request, _localized(request, "Delivery details saved.", "تم حفظ بيانات التوصيل."))
         except (ValidationError, PermissionDenied) as exc:
+            session.refresh_from_db()
+            attention = _first_studio_needing_attention(session=session)
             return render(
                 request,
                 "checkout/detail.html",
@@ -231,15 +226,12 @@ def checkout_detail(request, pk):
                     "checkout": session,
                     "lines": _checkout_lines(session),
                     "payment_methods": _payment_methods(),
-                    "error": str(exc),
+                    "error": _studio_attention_message(request) if attention else str(exc),
+                    "studio_attention_project": attention,
                 },
                 status=400,
             )
-    return render(
-        request,
-        "checkout/detail.html",
-        {"checkout": session, "lines": _checkout_lines(session), "payment_methods": _payment_methods()},
-    )
+    return render(request, "checkout/detail.html", {"checkout": session, "lines": _checkout_lines(session), "payment_methods": _payment_methods()})
 
 
 @login_required
@@ -250,10 +242,7 @@ def purchases(request):
 
 @login_required
 def purchase_confirmation(request, pk):
-    purchase = get_object_or_404(
-        CustomerPurchase.objects.prefetch_related("child_orders__item__store_product", "child_orders__item__variant"),
-        pk=pk,
-    )
+    purchase = get_object_or_404(CustomerPurchase.objects.prefetch_related("child_orders__item__store_product", "child_orders__item__variant"), pk=pk)
     try:
         require_purchase_owner(request.user, purchase)
     except PermissionDenied:
@@ -263,14 +252,7 @@ def purchase_confirmation(request, pk):
 
 @login_required
 def purchase_detail(request, pk):
-    purchase = get_object_or_404(
-        CustomerPurchase.objects.select_related("checkout").prefetch_related(
-            "child_orders__item__store_product__storefront",
-            "child_orders__item__variant",
-            "child_orders__fulfillment",
-        ),
-        pk=pk,
-    )
+    purchase = get_object_or_404(CustomerPurchase.objects.select_related("checkout").prefetch_related("child_orders__item__store_product__storefront", "child_orders__item__variant", "child_orders__fulfillment"), pk=pk)
     try:
         require_purchase_owner(request.user, purchase)
     except PermissionDenied:
@@ -280,7 +262,6 @@ def purchase_detail(request, pk):
 
 @login_required
 def orders(request):
-    # Customer-facing "Orders" now means the commercial parent purchase.
     return purchases(request)
 
 
