@@ -2,10 +2,28 @@ import logging
 
 from django.db import DatabaseError
 from django.shortcuts import render
+from django.utils.translation import activate
 
 from .models import MaintenanceWindow
+from .seo import INDEXABLE_URL_NAMES
 
 logger = logging.getLogger(__name__)
+
+
+class PublicLocaleMiddleware:
+    """Allow stable crawlable language alternates via ?lang=en|ar without mutating user preferences."""
+
+    SUPPORTED = {"en", "ar"}
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        language = request.GET.get("lang") if request.method in {"GET", "HEAD"} else None
+        if language in self.SUPPORTED:
+            activate(language)
+            request.LANGUAGE_CODE = language
+        return self.get_response(request)
 
 
 class SecurityHeadersMiddleware:
@@ -17,6 +35,10 @@ class SecurityHeadersMiddleware:
         response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
         response.headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
+
+        match = getattr(request, "resolver_match", None)
+        if not match or match.url_name not in INDEXABLE_URL_NAMES:
+            response.headers.setdefault("X-Robots-Tag", "noindex, nofollow, noarchive")
         return response
 
 
@@ -33,9 +55,6 @@ class MaintenanceModeMiddleware:
         try:
             window = MaintenanceWindow.current()
         except DatabaseError:
-            # Maintenance mode is operational metadata, not a dependency that
-            # should take the public site down if the database is starting,
-            # briefly unavailable, or migrations are still settling.
             logger.exception("Maintenance mode lookup failed; continuing without maintenance restriction")
             window = None
 
