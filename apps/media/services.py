@@ -127,12 +127,11 @@ def create_private_studio_image(*, upload, owner):
     )
 
 
-def private_media_response(asset):
-    if asset.access != MediaAsset.Access.PRIVATE:
-        raise ValidationError("This media asset is not private Studio media.")
+def stored_media_response(asset):
+    """Return an authorized storage handle/URL without deciding application-level access."""
     if asset.provider == MediaAsset.Provider.LOCAL_DEV:
         if private_media_storage_mode() != "local":
-            raise ProductionStorageUnavailable("Local private Studio media cannot be served in this environment")
+            raise ProductionStorageUnavailable("Local stored media cannot be served in this environment")
         return default_storage.open(asset.provider_asset_id, "rb")
     if asset.provider == MediaAsset.Provider.AMAZON_S3:
         integration = active_provider(IntegrationConfig.Provider.AMAZON_S3)
@@ -144,4 +143,10 @@ def private_media_response(asset):
             Params={"Bucket": bucket, "Key": asset.provider_asset_id},
             ExpiresIn=300,
         )
-    raise ValidationError("Private Studio media provider is not supported for direct viewing.")
+    raise ValidationError("Stored media provider is not supported for direct viewing.")
+
+
+def private_media_response(asset):
+    if asset.access != MediaAsset.Access.PRIVATE:
+        raise ValidationError("This media asset is not private media.")
+    return stored_media_response(asset)
