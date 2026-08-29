@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block content %}<section class="page-shell"><h1>My orders</h1>{% for order in orders %}<article class="card"><a href="{% url 'order-detail' order.pk %}">{{ order.number }}</a><p>{{ order.status }} · {{ order.total }} {{ order.currency }}</p></article>{% empty %}<p>No orders yet.</p>{% endfor %}</section>{% endblock %}

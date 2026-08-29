@@ -1,31 +1,42 @@
 # FABINZI
 
-FABINZI is a greenfield fashion design, manufacturing, marketplace, Store and Studio platform built with Django/DRF.
+FABINZI is a greenfield fashion platform connecting Designers, Manufacturers and Customers through controlled design, sourcing, storefront, customization, checkout and production workflows.
 
-## Current delivery status
-- Stage 0 — Engineering Foundation: COMPLETE
-- Stage 1 — Business Identity & Onboarding: COMPLETE
-- Stage 2 — Garment Design Domain: COMPLETE
-- Stage 3 — Artwork & Designed Products + IP Governance: COMPLETE
-- Stage 4 — Manufacturer Marketplace: COMPLETE
-- Stage 5 — Store & Studio: COMPLETE
+## Current implementation
+Stages 0–6 are implemented and CI-gated:
+- Stage 0 — Engineering Foundation
+- Stage 1 — Business Identity & Onboarding
+- Stage 2 — Garment Design
+- Stage 3 — Artwork & Designed Products + IP Governance
+- Stage 4 — Manufacturer Marketplace
+- Stage 5 — Store & Studio
+- Stage 6 — Checkout & Payments
 
-The domain boundaries remain explicit: Garment Design, Artwork, Designed Product and Customer Customization are separate concepts. Manufacturer is the manufacturing marketplace actor; printing and embroidery are capabilities, not actors.
+Stage 6 adds customer checkout, order snapshots, COD, optional Paymob/Stripe integrations, signed payment webhooks and stock reservation at confirmation. Manufacturing/fulfillment remains Stage 7.
 
-## Major web surfaces
+## Stack
+Python / Django / Django REST Framework / PostgreSQL / Celery / Redis.
+
+## Development
+Copy `.env.example` to `.env`, configure PostgreSQL and Redis, install `requirements.txt`, then run migrations and the Django server.
+
+```bash
+python manage.py migrate
+python manage.py runserver
+```
+
+## Primary surfaces
 - `/` public home
-- `/app/` signed-in application home
-- `/store/` public Designer stores and products
-- `/studio/` authenticated customer Studio projects
-- `/artwork/` approved Artwork marketplace
-- `/manufacturers/` public Manufacturer marketplace
-- `/designer/` Designer business portal
-- `/designer/store/` Designer Store management
-- `/manufacturer/` Manufacturer business portal
-- `/manufacturer/marketplace/` Manufacturer marketplace workspace
-- `/Maneg/` privileged FABINZI Control Center protected by OTP
+- `/store/` public Store marketplace
+- `/studio/` customer Studio
+- `/orders/` customer orders
+- `/artwork/` Artwork marketplace
+- `/manufacturers/` Manufacturer marketplace
+- `/designer/` Designer portal
+- `/manufacturer/` Manufacturer portal
+- `/Maneg/` privileged OTP-protected administration
 
-## Infrastructure
-Python/Django/DRF/PostgreSQL/Celery/Redis. Optional external integrations remain disabled until configured and tested. COD, Paymob/Stripe checkout and all actual order/payment execution are intentionally deferred to Stage 6. Manufacturing fulfillment is Stage 7 and finance/settlement is Stage 8.
+## Integrations
+COD is the default practical payment method. Paymob and Stripe remain disabled until explicitly configured and successfully tested in `/Maneg/`. Mailgun, Twilio, Amazon S3, Cloudflare Images and Sentry are also optional and disabled until configured, except the original seeded COD configuration.
 
-See `docs/STAGE_5_ACCEPTANCE.md` for the current acceptance boundary.
+No production secrets belong in source control.

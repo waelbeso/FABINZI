@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block content %}<section class="page-shell"><h1>Order {{ order.number }}</h1><p>Status: {{ order.status }}</p><p>{{ order.total }} {{ order.currency }} · {{ order.get_payment_method_display }}</p><h2>{{ order.item.title }}</h2><p>{{ order.item.sku }} · {{ order.item.quantity }} × {{ order.item.unit_price }}</p></section>{% endblock %}
