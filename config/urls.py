@@ -1,4 +1,6 @@
 from django.urls import include, path
+from two_factor.urls import urlpatterns as tf_urls
+
 from apps.accounts.views import app_home, profile_preferences
 from apps.platform_ops.views import healthz, home, placeholder_surface
 from apps.integrations.admin_site import fabinzi_admin_site
@@ -16,6 +18,6 @@ urlpatterns = [
     path("onboarding/<int:pk>/submit/", submit_onboarding, name="submit-onboarding"),
     path("healthz/", healthz, name="healthz"),
     path("api/v1/", include(("api.urls", "v1"), namespace="v1")),
-    path("account/", include(("two_factor.urls", "two_factor"), namespace="two_factor")),
+    path("", include(tf_urls)),
     path("Maneg/", fabinzi_admin_site.urls),
 ]
