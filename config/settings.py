@@ -12,7 +12,14 @@ environ.Env.read_env(BASE_DIR / ".env")
 
 SECRET_KEY = env("DJANGO_SECRET_KEY", default="dev-only-unsafe-secret")
 DEBUG = env.bool("DJANGO_DEBUG", default=False)
-ENVIRONMENT = env("ENVIRONMENT", default="development")
+ENVIRONMENT = env("ENVIRONMENT", default="development").strip().lower()
+_PRIVATE_MEDIA_LOCAL_ENVIRONMENTS = {"development", "dev", "test", "testing"}
+_private_media_default = "local" if ENVIRONMENT in _PRIVATE_MEDIA_LOCAL_ENVIRONMENTS else "s3"
+PRIVATE_MEDIA_STORAGE_MODE = env("PRIVATE_MEDIA_STORAGE_MODE", default=_private_media_default).strip().lower()
+if PRIVATE_MEDIA_STORAGE_MODE not in {"local", "s3"}:
+    raise ImproperlyConfigured("PRIVATE_MEDIA_STORAGE_MODE must be either 'local' or 's3'")
+if PRIVATE_MEDIA_STORAGE_MODE == "local" and ENVIRONMENT not in _PRIVATE_MEDIA_LOCAL_ENVIRONMENTS:
+    raise ImproperlyConfigured("Private local media storage is allowed only in development/test environments")
 ALLOWED_HOSTS = [h.strip() for h in env("DJANGO_ALLOWED_HOSTS", default="localhost,127.0.0.1").split(",") if h.strip()]
 FABINZI_PUBLIC_BASE_URL = env("FABINZI_PUBLIC_BASE_URL", default="http://localhost:8000").rstrip("/")
 _csrf_default = "" if DEBUG else FABINZI_PUBLIC_BASE_URL
