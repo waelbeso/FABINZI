@@ -2,11 +2,13 @@ import hashlib
 import uuid
 from pathlib import Path
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 
 from apps.integrations.models import IntegrationConfig
+from apps.organizations.models import Organization
+from apps.organizations.services import require_org_access
 from .models import MediaAsset
 from .services import (
     ProductionStorageUnavailable,
@@ -18,11 +20,43 @@ from .services import (
 DESIGNER_PRIVATE_FILE_MAX_BYTES = 50 * 1024 * 1024
 
 
+def designer_asset_organization_id(asset):
+    metadata = asset.metadata or {}
+    if not metadata.get("designer_private_upload"):
+        return None
+    try:
+        return int(metadata.get("organization_id"))
+    except (TypeError, ValueError):
+        return None
+
+
+def require_private_designer_asset(*, asset, organization, actor=None, purposes=None):
+    if asset.access != MediaAsset.Access.PRIVATE:
+        raise ValidationError("Designer workflow files must remain private.")
+    if (asset.metadata or {}).get("studio_private_upload"):
+        raise ValidationError("Customer Studio uploads cannot be used as Designer business files.")
+    if designer_asset_organization_id(asset) != organization.pk:
+        raise PermissionDenied("This private asset belongs to another Designer organization.")
+    if organization.kind != Organization.Kind.DESIGNER:
+        raise ValidationError("Designer private assets require a Designer organization.")
+    if actor is not None:
+        require_org_access(actor, organization)
+    if purposes:
+        purpose = str((asset.metadata or {}).get("purpose") or "")
+        allowed = set(purposes)
+        if purpose not in allowed:
+            raise ValidationError("This private asset is not valid for the requested Designer workflow.")
+    return asset
+
+
 def create_private_designer_asset(*, upload, owner, organization, purpose="technical"):
     if not getattr(owner, "is_authenticated", False):
         raise ValidationError("Authentication is required before uploading Designer files.")
-    if organization.kind != "designer":
+    if organization.kind != Organization.Kind.DESIGNER:
         raise ValidationError("Designer private assets require a Designer organization.")
+    # Authoritative service-level tenant check. Supplying an Organization object or ID
+    # from a view/API is never sufficient by itself.
+    require_org_access(owner, organization)
     if not upload:
         raise ValidationError("Choose a file to upload.")
     size = int(getattr(upload, "size", 0) or 0)
