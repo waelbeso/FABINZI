@@ -1,3 +1,4 @@
+import os
 from xml.etree import ElementTree as ET
 
 from django.db import connection
@@ -233,8 +234,22 @@ def handler500(request):
     return render(request, "errors/500.html", status=500)
 
 
+def _deployment_identity():
+    """Return only non-secret source identity supplied by the hosting runtime."""
+    branch = os.environ.get("RENDER_GIT_BRANCH", "").strip()
+    commit = os.environ.get("RENDER_GIT_COMMIT", "").strip()
+    service = os.environ.get("RENDER_SERVICE_NAME", "").strip()
+    if not any((branch, commit, service)):
+        return None
+    return {"branch": branch, "commit": commit, "service": service}
+
+
 def healthz(request):
-    return JsonResponse({"status": "ok", "service": "fabinzi"})
+    payload = {"status": "ok", "service": "fabinzi"}
+    deployment = _deployment_identity()
+    if deployment is not None:
+        payload["deployment"] = deployment
+    return JsonResponse(payload)
 
 
 def readyz(request):
