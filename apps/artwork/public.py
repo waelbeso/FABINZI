@@ -19,6 +19,17 @@ def public_metadata(version):
     return {key: metadata[key] for key in PUBLIC_METADATA_KEYS if key in metadata}
 
 
+def public_media_path(media):
+    if not media or media.access != media.Access.PUBLIC or not media.mime_type.startswith("image/"):
+        return ""
+    metadata = media.metadata or {}
+    for value in (metadata.get("public_url"), metadata.get("static_url"), media.provider_asset_id):
+        value = str(value or "").strip()
+        if value.startswith("/") or value.startswith("https://") or value.startswith("http://"):
+            return value
+    return ""
+
+
 def supported_methods(version):
     metadata = public_metadata(version)
     methods = []
@@ -61,7 +72,10 @@ def public_preview(version):
             media_asset__access="public",
             media_asset__mime_type__startswith="image/",
         ).select_related("media_asset")
-    return previews[0] if previews else None
+    for preview in previews:
+        if public_media_path(preview.media_asset):
+            return preview
+    return None
 
 
 def public_artwork_queryset():
@@ -85,6 +99,7 @@ def decorate_public_artwork(artwork):
     version = versions[0] if versions else None
     artwork.public_version = version
     artwork.public_preview = public_preview(version) if version else None
+    artwork.public_preview_url = public_media_path(artwork.public_preview.media_asset) if artwork.public_preview else ""
     artwork.public_methods = supported_methods(version) if version else []
     artwork.public_suitability = public_suitability(version) if version else ""
     artwork.public_product_types = public_product_types(version) if version else []
