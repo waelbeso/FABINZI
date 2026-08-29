@@ -1,4 +1,6 @@
 import os
+import re
+import unicodedata
 from decimal import Decimal
 from pathlib import Path
 
@@ -18,6 +20,7 @@ from apps.artwork.models import Artwork, ArtworkVersion, IPCase
 from apps.checkout.models import CustomerPurchase
 from apps.design.models import GarmentDesign, GarmentDesignVersion
 from apps.finance.models import FinanceAccount, LedgerEntry, PayoutProfile, SettlementRequest
+from apps.finance.services import account_balance
 from apps.integrations.models import IntegrationConfig
 from apps.organizations.models import Membership, OnboardingApplication, Organization
 from apps.platform_ops.models import MaintenanceWindow, PlatformAnnouncement
@@ -118,6 +121,26 @@ def _confirm_visible_action(driver, element, *, expected_text=None):
         assert expected_text in actual_text
     alert.accept()
     return actual_text
+
+
+def _decimal_values(text):
+    normalized = []
+    for char in text:
+        try:
+            normalized.append(str(unicodedata.decimal(char)))
+            continue
+        except (TypeError, ValueError):
+            pass
+        if char in {",", "\u066b"}:
+            normalized.append(".")
+        elif char in {"\u066c", "\u00a0", "\u202f"}:
+            continue
+        else:
+            normalized.append(char)
+    return {
+        Decimal(token)
+        for token in re.findall(r"-?\d+(?:\.\d+)?", "".join(normalized))
+    }
 
 
 @pytest.mark.django_db(transaction=True)
@@ -419,9 +442,46 @@ def test_maneg_control_center_real_chrome_a_to_l(client, live_server):
         _shot(driver, EXPECTED_SCREENSHOTS[15])
 
         driver.get(f"{live_server.url}/Maneg/finance/?lang=ar")
-        wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "500.00"))
-        assert driver.find_element(By.TAG_NAME, "html").get_attribute("dir") == "rtl"
-        assert "•••• 7788" in driver.page_source
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".finance-cards.mobile-only")))
+        html = driver.find_element(By.TAG_NAME, "html")
+        assert html.get_attribute("dir") == "rtl"
+        assert html.get_attribute("data-theme") == "dark"
+        assert "المالية والمدفوعات والتسويات" in driver.page_source
+
+        balance = account_balance(account)
+        assert balance["total"] == Decimal("500.00")
+        assert balance["available"] == Decimal("500.00")
+        assert balance["reserved"] == Decimal("150.00")
+        assert balance["withdrawable"] == Decimal("350.00")
+
+        account_card = wait.until(lambda d: next((
+            card for card in d.find_elements(By.CSS_SELECTOR, ".finance-cards.mobile-only .subcard")
+            if manufacturer_org.display_name in card.text and "متاح" in card.text and "قابل للسحب" in card.text
+        ), False))
+        account_values = _decimal_values(account_card.text)
+        assert manufacturer_org.display_name in account_card.text
+        assert "EGP" in account_card.text
+        assert "متاح" in account_card.text
+        assert "قابل للسحب" in account_card.text
+        assert balance["available"] in account_values
+        assert balance["withdrawable"] in account_values
+
+        settlement.refresh_from_db()
+        assert settlement.status == SettlementRequest.Status.APPROVED
+        settlement_card = wait.until(lambda d: next((
+            card for card in d.find_elements(By.XPATH, '//section[.//h2[contains(normalize-space(.), "طلبات التسوية")]]//article[contains(@class,"subcard")]')
+            if manufacturer_org.display_name in card.text
+        ), False))
+        assert settlement.amount in _decimal_values(settlement_card.text)
+        assert "EGP" in settlement_card.text
+        assert "معتمد" in settlement_card.text
+
+        payout_card = wait.until(lambda d: next((
+            card for card in d.find_elements(By.XPATH, '//section[.//h2[contains(normalize-space(.), "ملفات التحويل")]]//article[contains(@class,"subcard")]')
+            if manufacturer_org.display_name in card.text
+        ), False))
+        assert "•••• 7788" in payout_card.text
+        assert "موثّق" in payout_card.text
         assert _no_page_overflow(driver)
         _shot(driver, EXPECTED_SCREENSHOTS[16])
     finally:
