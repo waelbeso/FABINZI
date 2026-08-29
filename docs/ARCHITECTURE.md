@@ -1,69 +1,103 @@
-# FABINZI Architecture
+# FABINZI Web Architecture
 
-## Overview
+## Runtime shape
 
-FABINZI is a Django monolith with a versioned REST API, PostgreSQL persistence, Redis-compatible Celery transport, and responsive server-rendered web surfaces. The architecture intentionally keeps business domains separated while sharing a single authenticated account, organization, audit, notification, and integration foundation.
+FABINZI is a Django application with server-rendered responsive web surfaces and a versioned Django REST Framework boundary at `/api/v1/`. PostgreSQL is the transactional system of record. Redis-compatible transport supports Celery worker/Beat. Gunicorn serves Django in production and WhiteNoise serves collected static assets.
 
-## Core domains
+## Actors
 
-- `apps.accounts` — user account, language, and theme preference.
-- `apps.organizations` — Designer/Manufacturer organizations, onboarding, memberships, verification, and profiles.
-- `apps.design` — Garment Designs, versions, technical information, size charts, decoration zones, assets, and technical review.
-- `apps.artwork` — Artwork, versions, IP declarations, reviews, Designed Products, placements, and IP cases.
-- `apps.manufacturer_marketplace` — public Manufacturer listings, capabilities, RFQs, invitations, quotes, and selection.
-- `apps.storefront` — Designer storefront, products, variants, product imagery, Studio projects, and Customer Customization.
-- `apps.checkout` — checkout sessions, immutable order snapshots, COD/online payment attempts, and payment webhooks.
-- `apps.operations` — production assignment, milestones, QC, fulfillment records, and shipment tracking.
-- `apps.finance` — order finance snapshots, ledger, payout profiles, settlement requests, and adjustments.
-- `apps.notifications` — in-app notifications, preferences, delivery queue, and Celery delivery work.
-- `apps.integrations` — optional external provider configuration with encrypted secrets and Control Center test actions.
-- `apps.media` — provider-neutral media metadata references.
-- `apps.audit` — append-only audit events.
-- `apps.platform_ops` — public home, health/readiness, announcements, maintenance mode, security middleware, and public URL helpers.
+1. **Customer** — browses public catalog/artwork, optionally customizes eligible products, checks out, and views purchase/fulfillment state.
+2. **Designer organization** — manages creative/design/product/storefront work and manufacturing sourcing.
+3. **Manufacturer organization** — production partner that publishes capabilities, responds to RFQs/quotes, executes assigned production/QC/packing and records shipment/tracking through canonical fulfillment.
+4. **FABINZI Platform Administration** — OTP-protected `/Maneg/` operational and audit control surface.
 
-## Business identity
+A Manufacturer is not a catalog seller. Printing/embroidery are Manufacturer capabilities. Shipping is fulfillment. Customer Studio customization is optional.
 
-The four operating roles are:
+## Domain boundaries
 
-1. Customer
-2. Designer organization
-3. Manufacturer organization
-4. FABINZI Platform Administration
+- `apps.accounts` — account preferences and authentication identity.
+- `apps.organizations` — Designer/Manufacturer organizations, memberships, onboarding, verification and portal views.
+- `apps.design` — Garment Design/version/technical definitions and decoration zones.
+- `apps.artwork` — Artwork/version/IP workflow, Designed Products and placements.
+- `apps.manufacturer_marketplace` — Manufacturer public listings/capabilities, RFQ, invitation, quote and selection.
+- `apps.storefront` — storefront catalog, variants, imagery and Studio projects/customization.
+- `apps.checkout` — Cart, checkout, parent/child Commerce, payment attempts and webhook events.
+- `apps.operations` — ProductionJobs, milestones, QC and canonical FulfillmentRecord/tracking.
+- `apps.finance` — finance snapshots, ledger, earnings, payout profiles, settlement requests and adjustments.
+- `apps.notifications` — canonical in-app notifications plus optional external delivery queue/tasks.
+- `apps.integrations` — optional provider configuration with encrypted secrets and controlled connection tests.
+- `apps.media` — provider-neutral media metadata and authorized private-media delivery.
+- `apps.audit` — append-oriented audit events.
+- `apps.platform_ops` — public site/SEO/trust/error surfaces, health/readiness, maintenance/announcements and security middleware.
 
-Printing and embroidery are Manufacturer capabilities. Shipping is fulfillment. Customer customization is optional and remains distinct from Designer Artwork and Ready Designed Products.
+## Commerce architecture — locked
 
-## Request surfaces
+The accepted customer model is:
 
-Django `config/urls.py` exposes the web surfaces and mounts the versioned API at `/api/v1/`. The administrative Control Center is mounted at `/Maneg/` using an OTP-required AdminSite.
+```text
+Cart
+→ Checkout
+→ one Parent CustomerPurchase
 
-## Data and tenancy
+Each CartItem
+→ one CustomerOrder
+→ one OrderItem
+→ one ProductionJob
+→ one FulfillmentRecord
+```
 
-PostgreSQL is the system of record. Organization-owned records reference a Designer or Manufacturer `Organization`, and service-layer access checks use active membership plus role restrictions. Customer-owned Studio, checkout, order, and notification records remain scoped to the authenticated user.
+The parent purchase is the customer-facing commercial aggregate. Child orders carry operational line-level state. Checkout does not require a Manufacturer assignment.
 
-## Background processing
+## Manufacturer / fulfillment architecture — locked
 
-Celery uses `REDIS_URL` for broker and result backend. The worker executes asynchronous communication deliveries. Celery Beat schedules pending notification dispatch once per minute. Core in-app records do not depend on an external email/SMS provider being enabled.
+```text
+RFQ
+→ Quote
+→ Selection
+→ ProductionJob
+→ QC
+→ Packing
+→ Ready to Ship
+→ canonical FulfillmentRecord
+→ Shipment / Tracking
+```
 
-## Static and media
+There is no second shipment model or parallel fulfillment architecture.
 
-Static assets are collected to `STATIC_ROOT` and served by WhiteNoise in production. Arbitrary production media is represented through `MediaAsset` and optional provider integrations. Amazon S3 is the production file-storage path when enabled; Cloudflare Images is available for image-specific integration. Demo visual assets are committed SVG static files so Render's ephemeral local filesystem is not relied upon.
+## Tenancy and authorization
 
-## External integrations
+Organization-owned data is scoped to Designer/Manufacturer organizations and active memberships/roles. Customer-owned Studio, Cart, purchase/order and notification records are scoped to the authenticated customer. Private-media endpoints perform application authorization before exposing provider access. `/Maneg/` requires privileged staff identity plus OTP verification.
 
-The database-backed integration model supports COD, Paymob, Stripe, Mailgun, Twilio, Amazon S3, Cloudflare Images, and Sentry. Providers remain disabled until configured. Integration secrets are encrypted using `INTEGRATION_ENCRYPTION_KEY` and are not stored in source control.
+## Public/private web boundary
 
-## Public URL policy
+Public/indexable surfaces include the homepage, published storefront/product/artwork/manufacturer content and launch trust pages. Customer account, Cart/Checkout, Studio, Designer, Manufacturer, `/Maneg/`, API, health/readiness and private-media routes are excluded from public indexing through robots policy and application `X-Robots-Tag`/metadata.
 
-`FABINZI_PUBLIC_BASE_URL` is the authoritative public origin for server-generated absolute URLs. Same-origin browser traffic should use relative paths. This allows a future domain migration without rewriting application code and provides a clean base for future Flutter client configuration.
+Public metadata uses `FABINZI_PUBLIC_BASE_URL` for canonical URLs, sitemap, hreflang and social preview URLs.
 
-## Deployment topology
+## Static and private media
 
-The Render Blueprint defines:
+Collected static files use WhiteNoise compressed manifest storage in non-DEBUG deployments. Production private uploaded media is fail-closed to the S3 integration path; local private-media storage is allowed only in development/test. Media provider state is not inferred from the presence of adapters.
 
-- `fabinzi-web` — Django/Gunicorn web process.
-- `fabinzi-db` — persistent PostgreSQL.
-- `fabinzi-redis` — Render Key Value transport for Celery.
+## Async and notifications
+
+Celery uses `REDIS_URL` for broker and result backend. Worker settings use late acknowledgement, reject-on-worker-lost, retry-on-startup and task time limits. Beat schedules pending external notification dispatch every 60 seconds. In-app notifications remain canonical even when Mailgun/Twilio are disabled.
+
+## Integrations
+
+The integration model supports COD, Paymob, Stripe, Mailgun, Twilio, Amazon S3, Cloudflare Images and Sentry. Secrets are encrypted using `INTEGRATION_ENCRYPTION_KEY`. Adapter existence is not evidence that a provider is configured or healthy.
+
+## Deployment components
+
+The production Render Blueprint defines:
+
+- `fabinzi-web` — Docker/Gunicorn web service.
+- `fabinzi-db` — paid PostgreSQL 17 database.
+- `fabinzi-redis` — Redis-compatible Render Key Value transport.
 - `fabinzi-worker` — Celery worker.
 - `fabinzi-beat` — Celery Beat scheduler.
 
-The Flutter mobile applications are intentionally outside the current phase and will consume the accepted Django REST API later.
+The isolated QA Blueprint is separate and remains part of the deferred live-validation return documented in `DEFERRED_LIVE_E2E.md`.
+
+## API boundary
+
+The existing `/api/v1/` API shares the same business/service layer and persistence model as the SSR web product. This Production Launch Gate does not freeze the future Customer API contract and does not start Flutter work.
