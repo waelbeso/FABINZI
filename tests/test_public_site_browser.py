@@ -2,6 +2,7 @@ import json
 import os
 import time
 from pathlib import Path
+from urllib.request import urlopen
 
 import pytest
 from django.conf import settings
@@ -124,6 +125,9 @@ def test_public_and_customer_site_real_chrome_acceptance(client, live_server):
         assert vitals["lcp"] == 0 or vitals["lcp"] < 4000
         assert nav["ttfb"] < 1500
         _shot(driver, "08-home-desktop-light.png")
+        ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+        with urlopen(live_server.url + "/share/fabinzi-1200x630.png", timeout=10) as response:
+            (ARTIFACT_DIR / "13-social-share-1200x630.png").write_bytes(response.read())
 
         _login(driver, live_server, client, customer)
         driver.get(live_server.url + "/app/")
@@ -134,7 +138,6 @@ def test_public_and_customer_site_real_chrome_acceptance(client, live_server):
         assert driver.execute_script("return document.documentElement.scrollWidth <= window.innerWidth + 1")
         _shot(driver, "09-customer-home-desktop-light.png")
 
-        ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
         (ARTIFACT_DIR / "public-performance.json").write_text(json.dumps({"navigation": nav, "vitals": vitals}, indent=2), encoding="utf-8")
     finally:
         driver.quit()
