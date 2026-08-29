@@ -8,7 +8,9 @@ This repository intentionally does **not** preserve or depend on any previous FA
 
 ## Current status
 
-**Stage 0 — Engineering Foundation: implemented.** See `docs/STAGE_0_ACCEPTANCE.md`.
+**Stage 0 — Engineering Foundation: complete.** See `docs/STAGE_0_ACCEPTANCE.md`.
+
+The repository now contains the production-oriented Django/DRF foundation, PostgreSQL migrations, Redis/Celery wiring, branded MFA-protected `/Maneg/` Control Center, integration health framework, media abstraction, announcements/maintenance controls, audit foundation, notification foundation, CI, and backup/recovery baseline.
 
 ## Stack
 
@@ -37,7 +39,7 @@ Then open `http://127.0.0.1:8000/Maneg/`. Privileged administration is designed 
 
 ## Integration security
 
-Optional integrations are disabled by default. Provider credentials are not hard-coded. The integration model supports encrypted secret payloads and a provider-specific Test Connection action with safe diagnostics.
+Optional integrations are disabled by default. COD is seeded enabled as the initial practical payment method. Provider credentials are not hard-coded. The integration model supports encrypted write-only secret payloads and a provider-specific Test Connection action with safe diagnostics.
 
 ## Greenfield rule
 
