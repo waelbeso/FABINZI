@@ -43,3 +43,34 @@ def test_maintenance_keeps_health_available(client):
 def test_active_announcement_window():
     PlatformAnnouncement.objects.create(enabled=True, title_ar="تنبيه", title_en="Notice", message_ar="رسالة", message_en="Message", starts_at=timezone.now())
     assert PlatformAnnouncement.active().count() == 1
+
+
+def test_health_exposes_only_non_secret_render_source_identity(client, monkeypatch):
+    monkeypatch.setenv("RENDER_GIT_BRANCH", "work/global-live-e2e-qa")
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "0123456789abcdef0123456789abcdef01234567")
+    monkeypatch.setenv("RENDER_SERVICE_NAME", "fabinzi-qa-web")
+    monkeypatch.setenv("DJANGO_SECRET_KEY", "must-not-leak")
+    monkeypatch.setenv("INTEGRATION_ENCRYPTION_KEY", "must-not-leak-either")
+
+    response = client.get("/healthz/")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == {
+        "status": "ok",
+        "service": "fabinzi",
+        "deployment": {
+            "branch": "work/global-live-e2e-qa",
+            "commit": "0123456789abcdef0123456789abcdef01234567",
+            "service": "fabinzi-qa-web",
+        },
+    }
+    rendered = response.content.decode()
+    assert "must-not-leak" not in rendered
+
+
+def test_health_omits_deployment_identity_outside_supported_host_runtime(client, monkeypatch):
+    for key in ("RENDER_GIT_BRANCH", "RENDER_GIT_COMMIT", "RENDER_SERVICE_NAME"):
+        monkeypatch.delenv(key, raising=False)
+    response = client.get("/healthz/")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "service": "fabinzi"}
