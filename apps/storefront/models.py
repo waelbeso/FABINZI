@@ -196,6 +196,8 @@ class CustomizationElement(models.Model):
                 raise ValidationError({"media_asset": "Image customization requires image media."})
             if self.media_asset.access != self.media_asset.Access.PRIVATE:
                 raise ValidationError({"media_asset": "Customer customization images must remain private."})
+            if not (self.media_asset.metadata or {}).get("studio_private_upload"):
+                raise ValidationError({"media_asset": "Studio image must come from the protected customer upload flow."})
             if project and self.media_asset.uploaded_by_id != project.customer_id:
                 raise ValidationError({"media_asset": "Customer image must be owned by the Studio customer."})
             if not self.rights_confirmed:
