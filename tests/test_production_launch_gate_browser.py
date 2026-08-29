@@ -52,19 +52,31 @@ def _wait_ready(driver):
     WebDriverWait(driver, 12).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
 
 
-def _assert_healthy_document(driver):
+def _is_expected_top_level_404(driver, entry):
+    if entry.get("level") != "SEVERE" or entry.get("source") != "network":
+        return False
+    message = entry.get("message", "")
+    expected_prefix = f"{driver.current_url} - Failed to load resource:"
+    return message.startswith(expected_prefix) and "status of 404 (Not Found)" in message
+
+
+def _assert_healthy_document(driver, *, allow_expected_top_level_404=False):
     source = driver.page_source.lower()
     assert "traceback (most recent call last)" not in source
     assert "django debug" not in source
     assert driver.execute_script("return document.documentElement.scrollWidth <= window.innerWidth + 2")
     assert driver.find_elements(By.CSS_SELECTOR, 'img[src*="fabinzi-logo"]')
     severe = [entry for entry in driver.get_log("browser") if entry.get("level") == "SEVERE"]
+    if allow_expected_top_level_404:
+        expected_404 = [entry for entry in severe if _is_expected_top_level_404(driver, entry)]
+        assert len(expected_404) <= 1, expected_404
+        severe = [entry for entry in severe if entry not in expected_404]
     assert not severe, severe
 
 
-def _shot(driver, name):
+def _shot(driver, name, *, allow_expected_top_level_404=False):
     assert name in SCREENSHOTS
-    _assert_healthy_document(driver)
+    _assert_healthy_document(driver, allow_expected_top_level_404=allow_expected_top_level_404)
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
     assert driver.save_screenshot(str(ARTIFACT_DIR / name))
 
@@ -108,7 +120,7 @@ def test_production_launch_gate_real_chrome_evidence(client, live_server):
             driver.get(live_server.url + "/this-launch-route-does-not-exist/?lang=en")
             _wait_ready(driver)
             assert "This page is not here" in driver.page_source
-            _shot(driver, "09-404-desktop-en-light.png")
+            _shot(driver, "09-404-desktop-en-light.png", allow_expected_top_level_404=True)
 
         window = MaintenanceWindow.objects.create(
             enabled=True,
