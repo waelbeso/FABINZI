@@ -2,6 +2,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 
 from apps.audit.services import record_audit_event
+from apps.manufacturer_marketplace.models import ManufacturerCapability, ManufacturerListing
 from .models import Membership, Organization
 from .services import require_org_access
 
@@ -165,3 +166,87 @@ def secure_manufacturer_member_deactivate(*, membership, actor, request=None):
         request=request,
     )
     return membership
+
+
+def _manufacturer_listing(organization, actor):
+    if organization.kind != Organization.Kind.MANUFACTURER:
+        raise ValidationError("Manufacturer capabilities require a Manufacturer organization.")
+    require_org_access(
+        actor,
+        organization,
+        roles=[Membership.Role.OWNER, Membership.Role.MANAGER],
+    )
+    if organization.verification_status != Organization.VerificationStatus.ACTIVE:
+        raise ValidationError("Only an active Manufacturer organization may manage capabilities.")
+    listing, _ = ManufacturerListing.objects.get_or_create(organization=organization)
+    return listing
+
+
+@transaction.atomic
+def create_manufacturer_capability(
+    *, organization, actor, capability_type, name, description="", methods=None,
+    min_quantity=None, max_quantity=None, lead_time_days=None, request=None
+):
+    listing = _manufacturer_listing(organization, actor)
+    capability = ManufacturerCapability(
+        listing=listing,
+        capability_type=capability_type,
+        name=str(name or "").strip(),
+        description=str(description or "").strip(),
+        methods=methods or [],
+        min_quantity=min_quantity,
+        max_quantity=max_quantity,
+        lead_time_days=lead_time_days,
+        is_active=True,
+    )
+    capability.full_clean()
+    capability.save()
+    record_audit_event(
+        actor=actor,
+        action="manufacturer_marketplace.capability.added",
+        instance=capability,
+        metadata={"organization_id": organization.pk, "listing_id": listing.pk},
+        request=request,
+    )
+    return capability
+
+
+@transaction.atomic
+def update_manufacturer_capability(
+    *, capability, actor, data, request=None
+):
+    organization = capability.listing.organization
+    _manufacturer_listing(organization, actor)
+    editable = {
+        "capability_type", "name", "description", "methods",
+        "min_quantity", "max_quantity", "lead_time_days",
+    }
+    for field, value in data.items():
+        if field in editable:
+            setattr(capability, field, value)
+    capability.full_clean()
+    capability.save()
+    record_audit_event(
+        actor=actor,
+        action="manufacturer_marketplace.capability.updated",
+        instance=capability,
+        metadata={"organization_id": organization.pk},
+        request=request,
+    )
+    return capability
+
+
+@transaction.atomic
+def deactivate_manufacturer_capability(*, capability, actor, request=None):
+    organization = capability.listing.organization
+    _manufacturer_listing(organization, actor)
+    capability.is_active = False
+    capability.save(update_fields=["is_active"])
+    record_audit_event(
+        actor=actor,
+        action="manufacturer_marketplace.capability.deactivated",
+        instance=capability,
+        metadata={"organization_id": organization.pk},
+        request=request,
+    )
+    return capability
