@@ -14,6 +14,7 @@ from selenium.webdriver.support.ui import Select, WebDriverWait
 from apps.artwork.models import Artwork, ArtworkPlacement, ArtworkVersion, DesignedProduct
 from apps.checkout.models import CartItem, CustomerPurchase
 from apps.design.models import DecorationZone, GarmentDesign, GarmentDesignVersion
+from apps.integrations.models import IntegrationConfig
 from apps.media.models import MediaAsset
 from apps.organizations.models import Membership, Organization
 from apps.storefront.models import StudioProject
@@ -158,6 +159,8 @@ def test_real_chrome_mixed_customer_commerce_journey(client, live_server):
         pytest.skip("Real Chrome QA is CI-only.")
 
     customer = User.objects.create_user(username="chrome-commerce-customer", password="password12345", theme_preference="light")
+    IntegrationConfig.objects.filter(provider=IntegrationConfig.Provider.COD).update(enabled=True)
+    assert IntegrationConfig.objects.filter(provider=IntegrationConfig.Provider.COD, enabled=True).exists()
     plain, plain_variant, _ = _catalog("chromeplain")
     custom, custom_variant, custom_zone = _catalog("chromecustom", customization=True)
     ready, ready_variant, _ = _catalog("chromeready", ready_designed=True)
