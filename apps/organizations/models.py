@@ -61,6 +61,8 @@ class Membership(models.Model):
         indexes = [models.Index(fields=["user", "is_active"]), models.Index(fields=["organization", "role"])]
 
     def clean(self):
+        if not self.organization_id:
+            return
         designer_roles = {self.Role.OWNER, self.Role.MANAGER, self.Role.DESIGNER, self.Role.DESIGN_MANAGER, self.Role.ACCOUNTANT}
         manufacturer_roles = {self.Role.OWNER, self.Role.MANAGER, self.Role.PRODUCTION_MANAGER, self.Role.OPERATOR, self.Role.QC, self.Role.ACCOUNTANT}
         allowed = designer_roles if self.organization.kind == Organization.Kind.DESIGNER else manufacturer_roles
@@ -83,11 +85,11 @@ class DesignerProfile(models.Model):
     terms_accepted_at = models.DateTimeField(null=True, blank=True)
 
     def clean(self):
-        if self.organization.kind != Organization.Kind.DESIGNER:
+        if self.organization_id and self.organization.kind != Organization.Kind.DESIGNER:
             raise ValidationError("DesignerProfile requires a designer organization.")
 
     def __str__(self):
-        return self.studio_name or self.organization.display_name
+        return self.studio_name or (self.organization.display_name if self.organization_id else "Designer")
 
 
 class ManufacturerProfile(models.Model):
@@ -109,11 +111,11 @@ class ManufacturerProfile(models.Model):
     terms_accepted_at = models.DateTimeField(null=True, blank=True)
 
     def clean(self):
-        if self.organization.kind != Organization.Kind.MANUFACTURER:
+        if self.organization_id and self.organization.kind != Organization.Kind.MANUFACTURER:
             raise ValidationError("ManufacturerProfile requires a manufacturer organization.")
 
     def __str__(self):
-        return self.organization.display_name
+        return self.organization.display_name if self.organization_id else "Manufacturer"
 
 
 class OnboardingApplication(models.Model):
