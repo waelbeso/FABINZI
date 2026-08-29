@@ -1,3 +1,4 @@
+# Refreshed for the Global Live E2E execution checkpoint; reports presence only, never secret values.
 name: Live QA Capability Audit
 
 on:
