@@ -48,11 +48,11 @@ jobs:
           DJANGO_SECURE_SSL_REDIRECT: "true"
         run: python manage.py check --deploy
       - run: pytest -q
-      - name: Upload customer browser QA screenshots
+      - name: Upload Web Productization browser QA evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: customer-commerce-browser-qa
+          name: web-productization-browser-qa
           path: artifacts/browser-qa
           if-no-files-found: ignore
           retention-days: 14
