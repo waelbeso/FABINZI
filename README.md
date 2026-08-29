@@ -8,9 +8,10 @@ This repository intentionally does **not** preserve or depend on any previous FA
 
 ## Current status
 
-**Stage 0 — Engineering Foundation: complete.** See `docs/STAGE_0_ACCEPTANCE.md`.
+- **Stage 0 — Engineering Foundation: complete.** See `docs/STAGE_0_ACCEPTANCE.md`.
+- **Stage 1 — Designer & Manufacturer Onboarding: complete.** See `docs/STAGE_1_ACCEPTANCE.md`.
 
-The repository now contains the production-oriented Django/DRF foundation, PostgreSQL migrations, Redis/Celery wiring, branded MFA-protected `/Maneg/` Control Center, integration health framework, media abstraction, announcements/maintenance controls, audit foundation, notification foundation, CI, and backup/recovery baseline.
+Stage 1 adds tenant-aware Designer/Manufacturer organizations, self-service onboarding, business memberships and roles, verification workflows, branded Control Center review actions, notifications, audit events and DRF onboarding APIs.
 
 ## Stack
 
@@ -36,6 +37,8 @@ python manage.py runserver
 ```
 
 Then open `http://127.0.0.1:8000/Maneg/`. Privileged administration is designed to use two-factor authentication.
+
+Designer onboarding begins at `/designer/`. Manufacturer onboarding begins at `/manufacturer/`.
 
 ## Integration security
 

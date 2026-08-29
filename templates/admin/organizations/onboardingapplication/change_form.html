@@ -1,0 +1,9 @@
+{% extends "admin/change_form.html" %}
+{% block object-tools-items %}
+  {{ block.super }}
+  {% if original and original.status == "submitted" %}
+    <li><form method="post" action="{% url 'fabinzi_admin:organizations_onboardingapplication_approve' original.pk %}">{% csrf_token %}<input type="hidden" name="review_notes" value=""><button type="submit">Approve</button></form></li>
+    <li><form method="post" action="{% url 'fabinzi_admin:organizations_onboardingapplication_revision' original.pk %}">{% csrf_token %}<input type="text" name="review_notes" placeholder="Revision notes" required><button type="submit">Request revision</button></form></li>
+    <li><form method="post" action="{% url 'fabinzi_admin:organizations_onboardingapplication_reject' original.pk %}">{% csrf_token %}<input type="text" name="review_notes" placeholder="Rejection notes"><button type="submit">Reject</button></form></li>
+  {% endif %}
+{% endblock %}

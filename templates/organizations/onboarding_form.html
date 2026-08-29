@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}FABINZI · {{ portal_kind|title }} onboarding{% endblock %}
+{% block content %}
+<section class="surface shell">
+  <div class="eyebrow">FABINZI BUSINESS ONBOARDING</div>
+  <h1>{{ portal_kind|title }} onboarding</h1>
+  <p>Create your business profile, accept the platform terms, then submit it for FABINZI review.</p>
+  <form method="post" class="stack">
+    {% csrf_token %}
+    <div class="card"><h2>Business information</h2>{{ org_form.as_p }}</div>
+    <div class="card"><h2>{{ portal_kind|title }} profile</h2>{{ profile_form.as_p }}</div>
+    <button class="button" type="submit">Save onboarding draft</button>
+  </form>
+</section>
+{% endblock %}

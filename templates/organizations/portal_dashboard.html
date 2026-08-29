@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}FABINZI · {{ portal_kind|title }} Portal{% endblock %}
+{% block content %}
+<section class="surface shell">
+  <div class="eyebrow">{{ portal_kind|upper }} PORTAL</div>
+  <h1>{{ application.organization.display_name }}</h1>
+  <p>Application status: <strong>{{ application.get_status_display }}</strong></p>
+  <p>Verification status: <strong>{{ application.organization.get_verification_status_display }}</strong></p>
+  {% if application.review_notes %}<div class="card"><h2>FABINZI review notes</h2><p>{{ application.review_notes }}</p></div>{% endif %}
+  {% if application.status == "draft" or application.status == "revision_required" %}
+  <form method="post" action="{% url 'submit-onboarding' application.pk %}">
+    {% csrf_token %}
+    <button class="button" type="submit">Submit for review</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}
