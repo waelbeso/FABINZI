@@ -33,7 +33,7 @@ from apps.media.designer_services import create_private_designer_asset
 from apps.media.models import MediaAsset
 from apps.operations.models import FulfillmentRecord, ProductionJob
 from apps.organizations.models import DesignerProfile, Membership, OnboardingApplication, Organization
-from apps.storefront.models import StoreProduct
+from apps.storefront.models import StoreProduct, Storefront
 
 from .conftest import VALID_PNG
 
@@ -617,8 +617,8 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server):
         create_store_form.find_element(By.NAME, "name_en").send_keys("Atelier North Store")
         create_store_form.find_element(By.NAME, "name_ar").send_keys("متجر أتيليه نورث")
         _click_element(driver, create_store_form.find_element(By.CSS_SELECTOR, 'button[type="submit"]'))
-        wait.until(lambda _d: hasattr(org, "storefront"))
-        store = org.storefront
+        wait.until(lambda _d: Storefront.objects.filter(organization=org).exists())
+        store = Storefront.objects.get(organization=org)
 
         storefront_details = _section_by_heading(driver, "Storefront details")
         publish_store_form = _form_with_action(storefront_details, "publish")
