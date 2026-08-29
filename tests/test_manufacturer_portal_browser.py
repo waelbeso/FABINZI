@@ -13,11 +13,13 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select, WebDriverWait
 
+from apps.artwork.models import ArtworkPlacement
 from apps.design.models import DesignAsset
 from apps.finance.models import FinanceAccount, LedgerEntry, PayoutProfile, SettlementRequest
 from apps.manufacturer_marketplace.models import ManufacturerCapability, ManufacturerQuote
 from apps.operations.models import FulfillmentRecord, ProductionJob, ProductionMilestone, QCInspection
 from apps.organizations.models import Membership
+from apps.storefront.models import CustomizationElement
 
 from .test_manufacturer_portal_acceptance import assigned_job, invited_rfq, manufacturer, private_asset
 
@@ -118,6 +120,27 @@ def test_manufacturer_portal_real_chrome_a_to_h(client, live_server):
 
     _, _, _, rfq, invitation = invited_rfq(org, prefix="browser-rfq")
     production = assigned_job(org, prefix="browser-job")
+    size_row = production["garment"].size_rows.get(size_label="M")
+    size_row.measurements = {
+        "chest_cm": 52,
+        "length_cm": 70,
+        "custom_drop_mm": 147.25,
+    }
+    size_row.save(update_fields=["measurements"])
+    ArtworkPlacement.objects.create(
+        product=production["product"],
+        decoration_zone=production["zone"],
+        production_method="print",
+        transform={"x": 0.5, "y": 0.35, "scale": 0.4, "rotation": 0},
+    )
+    CustomizationElement.objects.create(
+        customization=production["customization"],
+        decoration_zone=production["zone"],
+        kind=CustomizationElement.Kind.TEXT,
+        text="Browser placement",
+        production_method="print",
+        transform={"x": 0.62, "y": 0.38, "scale": 0.27, "rotation": -12.5},
+    )
     tech_media = private_asset(production["owner"], "browser-tech-pack.pdf")
     DesignAsset.objects.create(
         version=production["garment"],
@@ -229,6 +252,11 @@ def test_manufacturer_portal_real_chrome_a_to_h(client, live_server):
         asset_link = driver.find_element(By.XPATH, '//a[.//strong[normalize-space(.)="Approved technical pack"]]')
         assert f"/manufacturer/production/{job.pk}/media/design/" in asset_link.get_attribute("href")
         assert "private-customer@example.test" not in driver.page_source
+        assert "Chest" in driver.page_source
+        assert "Custom drop" in driver.page_source
+        assert "&#x27;chest_cm&#x27;" not in driver.page_source
+        assert driver.find_element(By.CSS_SELECTOR, '[data-transform-source="designed-product"] [data-tech-key="x"] dd').text == "50%"
+        assert driver.find_element(By.CSS_SELECTOR, '[data-transform-source="studio"] [data-tech-key="x"] dd').text == "62%"
         assert _no_overflow(driver)
         _shot(driver, EXPECTED_SCREENSHOTS[8])
 
@@ -313,6 +341,9 @@ def test_manufacturer_portal_real_chrome_a_to_h(client, live_server):
         driver.get(f"{live_server.url}/manufacturer/production/{job.pk}/?org={org.pk}&lang=ar")
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".mfr-workspace")))
         assert driver.find_element(By.TAG_NAME, "html").get_attribute("dir") == "rtl"
+        assert "الصدر" in driver.page_source
+        assert driver.find_element(By.CSS_SELECTOR, '[data-transform-source="designed-product"] [data-tech-key="x"] dd').text == "50%"
+        assert driver.find_element(By.CSS_SELECTOR, '[data-transform-source="studio"] [data-tech-key="x"] dd').text == "62%"
         assert _no_overflow(driver)
         _shot(driver, EXPECTED_SCREENSHOTS[15])
 
