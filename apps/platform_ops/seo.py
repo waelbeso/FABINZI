@@ -57,10 +57,13 @@ def safe_json_ld(payload):
 
 
 def page_seo(*, title, description, image=None, page_type="website", json_ld=None):
+    uses_default_social_image = not image
     return {
         "title": title,
         "description": description,
         "image": media_url(image),
+        "image_width": 1200 if uses_default_social_image else None,
+        "image_height": 630 if uses_default_social_image else None,
         "type": page_type,
         "json_ld": safe_json_ld(json_ld) if json_ld else "",
     }
@@ -128,6 +131,8 @@ def seo_context(request):
         "seo_canonical": canonical,
         "seo_hreflang": hreflang,
         "seo_default_image": social_image,
+        "seo_default_image_width": 1200,
+        "seo_default_image_height": 630,
         "seo_public_base_url": settings.FABINZI_PUBLIC_BASE_URL,
         "seo_base_json_ld": safe_json_ld([organization_schema, website_schema]),
         "seo_is_indexable": indexable,
