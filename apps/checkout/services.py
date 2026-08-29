@@ -90,7 +90,7 @@ def place_order(*, session, actor, payment_method, request=None):
     session.status=CheckoutSession.Status.PLACED; session.placed_at=timezone.now(); session.subtotal=subtotal; session.shipping_amount=shipping; session.discount_amount=discount; session.total=total; session.currency=project.product.currency; session.save(update_fields=["status","placed_at","subtotal","shipping_amount","discount_amount","total","currency","updated_at"])
     attempt=PaymentAttempt.objects.create(order=order,provider=payment_method,amount=total,currency=order.currency,idempotency_key=f"{payment_method}-{order.number}")
     if payment_method == CustomerOrder.PaymentMethod.COD:
-        attempt.status=PaymentAttempt.Status.SUCCEEDED; attempt.completed_at=timezone.now(); attempt.provider_reference=f"COD-{order.number}"; attempt.save(update_fields=["status","completed_at","provider_reference","updated_at"]); confirm_order(order=order,actor=actor,request=request)
+        attempt.status=PaymentAttempt.Status.SUCCEEDED; attempt.completed_at=timezone.now(); attempt.provider_reference=f"COD-{order.number}"; attempt.save(update_fields=["status","completed_at","provider_reference","updated_at"]); order=confirm_order(order=order,actor=actor,request=request)
     record_audit_event(actor=actor,action="order.placed",instance=order,metadata={"payment_method":payment_method,"project_id":project.pk},request=request)
     return order,attempt
 
