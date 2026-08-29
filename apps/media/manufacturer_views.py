@@ -1,4 +1,5 @@
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
 from django.http import FileResponse, Http404, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 
@@ -28,7 +29,7 @@ def _job_for_actor(actor, job_id):
             job,
             roles=MANUFACTURER_TECHNICAL_VIEW_ROLES,
         )
-    except Exception as exc:
+    except PermissionDenied as exc:
         raise Http404 from exc
     return job
 
