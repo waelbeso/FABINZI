@@ -33,7 +33,7 @@ from apps.media.designer_services import create_private_designer_asset
 from apps.media.models import MediaAsset
 from apps.operations.models import FulfillmentRecord, ProductionJob
 from apps.organizations.models import DesignerProfile, Membership, OnboardingApplication, Organization
-from apps.storefront.models import StoreProduct, StoreProductImage
+from apps.storefront.models import StoreProduct
 
 from .conftest import VALID_PNG
 
@@ -109,7 +109,7 @@ def _approved_garment(owner, staff, org):
     DesignAsset.objects.create(version=version, kind=DesignAsset.Kind.TECH_PACK, media_asset=tech, label="Technical pack")
     DesignAsset.objects.create(version=version, kind=DesignAsset.Kind.PRODUCT_IMAGE, media_asset=product_image, label="Product reference")
     review_version(version=version, reviewer=staff, decision=TechnicalReview.Decision.APPROVED, notes="Technical definition approved for sourcing.")
-    return design, version, zone
+    return design, version, zone, product_image
 
 
 def _approved_artwork(owner, staff, org):
@@ -147,19 +147,6 @@ def _manufacturer(owner, name):
     return org
 
 
-def _public_media(owner):
-    return MediaAsset.objects.create(
-        provider=MediaAsset.Provider.LOCAL_DEV,
-        provider_asset_id="/share/fabinzi-1200x630.png",
-        original_filename="store-product.png",
-        mime_type="image/png",
-        size_bytes=10,
-        access=MediaAsset.Access.PUBLIC,
-        uploaded_by=owner,
-        metadata={"public_url": "/share/fabinzi-1200x630.png", "organization_id": owner.business_memberships.first().organization_id},
-    )
-
-
 def _create_order_visibility(customer, org, product, variant):
     checkout = CheckoutSession.objects.create(customer=customer, status="placed", subtotal=Decimal("650.00"), total=Decimal("650.00"), currency="EGP")
     order = CustomerOrder.objects.create(checkout=checkout, customer=customer, designer_organization=org, status="confirmed", payment_method="cod", subtotal=Decimal("650.00"), total=Decimal("650.00"), currency="EGP", shipping_snapshot={"city": "Cairo", "private_address": "not rendered"})
@@ -183,10 +170,9 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server):
     staff = User.objects.create_user(username="designer-browser-staff", password="password12345", is_staff=True)
     factory_user = User.objects.create_user(username="designer-browser-factory", password="password12345")
     org = _active_designer(owner)
-    approved_design, approved_garment, approved_zone = _approved_garment(owner, staff, org)
+    approved_design, approved_garment, approved_zone, public_media = _approved_garment(owner, staff, org)
     approved_artwork, approved_artwork_version, ip_case = _approved_artwork(owner, staff, org)
     factory = _manufacturer(factory_user, "Nile Works")
-    public_media = _public_media(owner)
 
     driver = _chrome()
     try:
@@ -205,14 +191,17 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server):
         _replace(driver.find_element(By.ID, "profile-studio-name"), "Atelier North Studio")
         _replace(driver.find_element(By.ID, "profile-city"), "New Cairo")
         _click(driver, By.CSS_SELECTOR, 'form button[type="submit"]')
-        wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Atelier North Studio"))
+        wait.until(lambda d: d.find_element(By.ID, "profile-studio-name").get_attribute("value") == "Atelier North Studio")
+        org.refresh_from_db(); org.designer_profile.refresh_from_db()
+        assert org.city == "New Cairo"
+        assert org.designer_profile.studio_name == "Atelier North Studio"
         _shot(driver, "02-designer-profile-desktop-en-light.png")
 
         driver.get(f"{live_server.url}/designer/team/?org={org.pk}&lang=en")
         wait.until(EC.presence_of_element_located((By.ID, "team-email")))
         driver.find_element(By.ID, "team-email").send_keys(collaborator.email)
         Select(driver.find_element(By.ID, "team-role")).select_by_value(Membership.Role.DESIGNER)
-        _click(driver, By.CSS_SELECTOR, 'form button[type="submit"]')
+        _click(driver, By.XPATH, '//button[contains(normalize-space(.), "Save member")]')
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), collaborator.email))
         assert Membership.objects.filter(organization=org, user=collaborator, role=Membership.Role.DESIGNER, is_active=True).exists()
         _shot(driver, "03-designer-team-desktop-en-light.png")
@@ -224,22 +213,25 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server):
         driver.find_element(By.ID, "id_title").send_keys("Browser Capsule Tee")
         driver.find_element(By.ID, "id_description").send_keys("Chrome-created garment design")
         driver.find_element(By.ID, "id_category").send_keys("apparel")
-        _click(driver, By.CSS_SELECTOR, 'form.designer-section button[type="submit"], form button[type="submit"]')
+        _click(driver, By.XPATH, '//button[contains(normalize-space(.), "Create design")]')
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Browser Capsule Tee"))
         browser_design = GarmentDesign.objects.get(organization=org, title="Browser Capsule Tee")
         browser_version = browser_design.versions.get()
         _replace(driver.find_element(By.ID, "version-summary"), "Browser production definition")
         _replace(driver.find_element(By.ID, "version-material"), "Organic cotton")
-        _replace(driver.find_element(By.ID, "version-specs"), '{"gsm": 200, "fit": "regular"}')
+        _replace(driver.find_element(By.ID, "version-specs"), "gsm = 200\nfit = regular")
         _click(driver, By.XPATH, '//button[contains(normalize-space(.), "Save technical definition")]')
-        wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Organic cotton"))
-        _click(driver, By.XPATH, '//summary[contains(normalize-space(.), "Add size")]')
+        wait.until(lambda d: d.find_element(By.ID, "version-material").get_attribute("value") == "Organic cotton")
+        browser_version.refresh_from_db()
+        assert browser_version.technical_specs == {"gsm": "200", "fit": "regular"}
+        _click(driver, By.XPATH, '//summary[contains(normalize-space(.), "Add size row")]')
         size_form = driver.find_element(By.XPATH, '//input[@name="size_label" and not(@value)]/ancestor::form')
         size_form.find_element(By.NAME, "size_label").send_keys("M")
-        size_form.find_element(By.NAME, "measurements").send_keys('{"chest_cm": 54, "length_cm": 73}')
+        size_form.find_element(By.NAME, "measurements").send_keys("chest_cm = 54\nlength_cm = 73")
         _click(driver, By.XPATH, '//input[@name="size_label" and not(@value)]/ancestor::form//button[@type="submit"]')
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "chest_cm"))
-        _click(driver, By.XPATH, '//summary[contains(normalize-space(.), "Add zone")]')
+        assert SizeChartRow.objects.filter(version=browser_version, size_label="M", measurements__chest_cm="54").exists()
+        _click(driver, By.XPATH, '//summary[contains(normalize-space(.), "Add Decoration Zone")]')
         zone_form = driver.find_element(By.XPATH, '//input[@name="name" and not(@value)]/ancestor::form')
         zone_form.find_element(By.NAME, "name").send_keys("Front print")
         Select(zone_form.find_element(By.NAME, "method")).select_by_value("print")
@@ -260,7 +252,11 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server):
         driver.get(f"{live_server.url}/designer/artworks/{approved_artwork.pk}/?org={org.pk}&lang=en")
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "North Wave"))
         assert "Approved" in driver.page_source
-        assert "/media/designer-private/" not in driver.page_source or "Private preview" in driver.page_source
+        private_media = [row.media_asset for row in approved_artwork_version.assets.select_related("media_asset") if row.media_asset.access == MediaAsset.Access.PRIVATE and not (row.media_asset.metadata or {}).get("artwork_public_derivative")]
+        assert private_media
+        assert "/media/designer-private/" in driver.page_source
+        assert all(media.provider_asset_id not in driver.page_source for media in private_media)
+        assert "Approved public preview" not in driver.page_source
         _shot(driver, "07-designer-artwork-desktop-en-light.png")
         ip_heading = driver.find_element(By.XPATH, '//*[self::h2 or self::h3][contains(normalize-space(.), "IP cases") or contains(normalize-space(.), "IP Cases")]')
         ActionChains(driver).scroll_to_element(ip_heading).perform()
@@ -273,7 +269,7 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server):
         driver.find_element(By.NAME, "description").send_keys("Approved garment and Artwork combination")
         Select(driver.find_element(By.NAME, "garment_version")).select_by_value(str(approved_garment.pk))
         Select(driver.find_element(By.NAME, "artwork_version")).select_by_value(str(approved_artwork_version.pk))
-        _click(driver, By.XPATH, '//button[contains(normalize-space(.), "Create Designed Product")]')
+        _click(driver, By.XPATH, '//button[contains(normalize-space(.), "Create product")]')
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "North Wave Tee"))
         designed = org.designed_products.get(title="North Wave Tee")
         if f"/designer/products/{designed.pk}/" not in driver.current_url:
@@ -308,7 +304,7 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server):
         _click(driver, By.XPATH, '//button[contains(normalize-space(.), "Open RFQ")]')
         rfq.refresh_from_db()
         invitation = rfq.invitations.get(manufacturer=factory)
-        quote = submit_quote(invitation=invitation, actor=factory_user, unit_price="120", setup_fee="500", sample_fee="100", shipping_estimate="250", currency="EGP", minimum_order_quantity=50, production_lead_days=12)
+        submit_quote(invitation=invitation, actor=factory_user, unit_price="120", setup_fee="500", sample_fee="100", shipping_estimate="250", currency="EGP", minimum_order_quantity=50, production_lead_days=12)
         driver.refresh()
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "120"))
         _click(driver, By.XPATH, '//button[contains(normalize-space(.), "Select this quote")]')
@@ -335,7 +331,7 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server):
         customization = driver.find_element(By.NAME, "customization_enabled")
         if not customization.is_selected():
             ActionChains(driver).move_to_element(customization).click().perform()
-        _click(driver, By.XPATH, '//button[contains(normalize-space(.), "Create Store Product")]')
+        _click(driver, By.XPATH, '//button[contains(normalize-space(.), "Create Store product")]')
         product = StoreProduct.objects.get(storefront=store, slug="north-wave-tee")
         if f"/designer/store/products/{product.pk}/" not in driver.current_url:
             driver.get(f"{live_server.url}/designer/store/products/{product.pk}/?org={org.pk}&lang=en")
@@ -347,16 +343,12 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server):
         _replace(variant_form.find_element(By.NAME, "stock_quantity"), "8")
         _click(driver, By.XPATH, '//input[@name="sku" and not(@value)]/ancestor::form//button[@type="submit"]')
         variant = product.variants.get(sku="NW-TEE-M")
-        # Attach an existing public media row via the visible public-image selector.
-        product.refresh_from_db()
         driver.refresh()
-        image_selects = driver.find_elements(By.NAME, "media_asset")
-        if image_selects:
-            Select(image_selects[-1]).select_by_value(str(public_media.pk))
-            _click(driver, By.XPATH, '//select[@name="media_asset"]/ancestor::form//button[@type="submit"]')
-        else:
-            StoreProductImage.objects.create(product=product, media_asset=public_media, alt_en="North Wave Tee", alt_ar="تيشيرت نورث ويف")
-            driver.refresh()
+        image_select = wait.until(EC.presence_of_element_located((By.NAME, "media_asset")))
+        Select(image_select).select_by_value(str(public_media.pk))
+        _click(driver, By.XPATH, '//select[@name="media_asset"]/ancestor::form//button[@type="submit"]')
+        product.refresh_from_db()
+        assert product.images.filter(media_asset=public_media).exists()
         _click(driver, By.XPATH, '//button[contains(normalize-space(.), "Publish product")]')
         product.refresh_from_db()
         assert product.status == StoreProduct.Status.PUBLISHED
