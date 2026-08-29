@@ -5,7 +5,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.artwork.models import ArtworkVersion, DesignedProduct
-from apps.artwork.public import supported_methods, version_eligible_for_zone
+from apps.artwork.public import public_media_path, supported_methods, version_eligible_for_zone
 from apps.audit.services import record_audit_event
 from apps.organizations.models import Membership, Organization
 from apps.organizations.services import require_org_access
@@ -128,12 +128,7 @@ def normalize_transform(transform=None):
     if not all(math.isfinite(value) for value in (x, y, scale, rotation)):
         raise ValidationError("Customization position contains invalid values.")
     rotation = ((rotation + 180.0) % 360.0) - 180.0
-    return {
-        "x": round(x, 5),
-        "y": round(y, 5),
-        "scale": round(scale, 5),
-        "rotation": round(rotation, 3),
-    }
+    return {"x": round(x, 5), "y": round(y, 5), "scale": round(scale, 5), "rotation": round(rotation, 3)}
 
 
 def validate_transform(transform):
@@ -166,8 +161,8 @@ def _resolve_production_method(zone, requested=None, *, artwork_version=None):
         if requested not in allowed:
             raise ValidationError("Selected production method is not available for this customization.")
         return requested
-    # Backward-compatible service default for legacy callers. The visual Studio
-    # presents an explicit choice whenever more than one real method is available.
+    # Historical elements created before production_method existed are preserved.
+    # Validation resolves a safe current method in memory without falsifying history.
     return allowed[0]
 
 
@@ -175,14 +170,9 @@ def element_source_url(element):
     if element.kind == CustomizationElement.Kind.IMAGE and element.media_asset_id:
         return f"/media/private/{element.media_asset_id}/"
     if element.kind == CustomizationElement.Kind.ARTWORK and element.artwork_version_id:
-        preview = element.artwork_version.assets.filter(
-            kind="preview",
-            media_asset__access="public",
-            media_asset__mime_type__startswith="image/",
-        ).select_related("media_asset").first()
+        preview = element.artwork_version.assets.filter(kind="preview", media_asset__access="public", media_asset__mime_type__startswith="image/").select_related("media_asset").first()
         if preview:
-            metadata = preview.media_asset.metadata or {}
-            return metadata.get("public_url") or metadata.get("static_url") or preview.media_asset.provider_asset_id
+            return public_media_path(preview.media_asset)
     return ""
 
 
@@ -210,6 +200,21 @@ def require_project_draft(actor, project):
     require_project_owner(actor, project)
     if project.status != StudioProject.Status.DRAFT:
         raise ValidationError("Ready or archived Studio projects are immutable.")
+
+
+@transaction.atomic
+def reopen_project_for_attention(*, project, actor, request=None):
+    require_project_owner(actor, project)
+    project = StudioProject.objects.select_for_update().get(pk=project.pk)
+    if project.status != StudioProject.Status.READY:
+        raise ValidationError("Only a Ready Studio project can be reopened for correction.")
+    if project.order_items.exists():
+        raise ValidationError("An ordered Studio project cannot be reopened.")
+    project.status = StudioProject.Status.DRAFT
+    project.ready_at = None
+    project.save(update_fields=["status", "ready_at", "updated_at"])
+    record_audit_event(actor=actor, action="studio.project.reopened", instance=project, metadata={"reason": "customer_attention"}, request=request)
+    return project
 
 
 @transaction.atomic
@@ -252,11 +257,7 @@ def _validate_element(element):
             raise ValidationError("Selected Artwork is no longer available for customization.")
         if not version_eligible_for_zone(version, element.decoration_zone, element.production_method):
             raise ValidationError("Selected Artwork is not eligible for this decoration zone and method.")
-    element.production_method = _resolve_production_method(
-        element.decoration_zone,
-        element.production_method,
-        artwork_version=element.artwork_version if element.kind == CustomizationElement.Kind.ARTWORK else None,
-    )
+    element.production_method = _resolve_production_method(element.decoration_zone, element.production_method, artwork_version=element.artwork_version if element.kind == CustomizationElement.Kind.ARTWORK else None)
     element.transform = validate_transform(element.transform)
     element.full_clean()
     return element
@@ -270,19 +271,7 @@ def add_customization_element(*, customization, actor, decoration_zone, kind, te
         raise ValidationError("Customization is disabled.")
     if decoration_zone.version_id != project.product.designed_product.garment_version_id:
         raise ValidationError("Selected decoration zone does not belong to this product.")
-    element = CustomizationElement(
-        customization=customization,
-        decoration_zone=decoration_zone,
-        kind=kind,
-        text=text,
-        media_asset=media_asset,
-        artwork_version=artwork_version,
-        production_method=production_method,
-        rights_confirmed=bool(rights_confirmed),
-        transform=normalize_transform(transform),
-        style=style or {},
-        sort_order=sort_order,
-    )
+    element = CustomizationElement(customization=customization, decoration_zone=decoration_zone, kind=kind, text=text, media_asset=media_asset, artwork_version=artwork_version, production_method=production_method, rights_confirmed=bool(rights_confirmed), transform=normalize_transform(transform), style=style or {}, sort_order=sort_order)
     _validate_element(element)
     element.save()
     record_audit_event(actor=actor, action="studio.element.created", instance=element, metadata={"project_id": project.pk, "kind": kind}, request=request)
@@ -314,7 +303,24 @@ def delete_customization_element(*, element, actor, request=None):
     record_audit_event(actor=actor, action="studio.element.removed", instance=project, metadata={"element_id": element_id}, request=request)
 
 
+def _fresh_project_for_validation(project):
+    if not project.pk:
+        raise ValidationError("Studio project must be saved before validation.")
+    return StudioProject.objects.select_related(
+        "customer",
+        "product__storefront",
+        "product__designed_product__garment_version",
+        "variant__product",
+    ).prefetch_related(
+        "customization__elements__decoration_zone",
+        "customization__elements__media_asset",
+        "customization__elements__artwork_version__artwork",
+        "customization__elements__artwork_version__assets__media_asset",
+    ).get(pk=project.pk)
+
+
 def validate_studio_project(project):
+    project = _fresh_project_for_validation(project)
     _validate_available_product(project.product, project.variant, project.quantity)
     if not project.product.customization_enabled:
         raise ValidationError("This product is no longer available for customization.")
@@ -322,29 +328,21 @@ def validate_studio_project(project):
         raise ValidationError("Choose an available product variant.")
     if not hasattr(project, "customization") or not project.customization.enabled:
         raise ValidationError("Start a customization before marking the project Ready.")
-    elements = list(
-        project.customization.elements.select_related(
-            "decoration_zone",
-            "media_asset",
-            "artwork_version__artwork",
-        ).prefetch_related("artwork_version__assets__media_asset")
-    )
+    elements = list(project.customization.elements.all())
     if not elements:
         raise ValidationError("Add Artwork, a private image, or text before marking the project Ready.")
     for element in elements:
         _validate_element(element)
-    return {
-        "valid": True,
-        "unit_price": project.variant.price,
-        "currency": project.product.currency,
-        "element_count": len(elements),
-    }
+    return {"valid": True, "unit_price": project.variant.price, "currency": project.product.currency, "element_count": len(elements)}
 
 
 @transaction.atomic
 def mark_project_ready(*, project, actor, request=None):
     require_project_draft(actor, project)
     result = validate_studio_project(project)
+    project.refresh_from_db(fields=["status", "ready_at"])
+    if project.status != StudioProject.Status.DRAFT:
+        raise ValidationError("Studio project is no longer editable.")
     project.status = StudioProject.Status.READY
     project.ready_at = timezone.now()
     project.save(update_fields=["status", "ready_at", "updated_at"])
