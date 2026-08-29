@@ -366,7 +366,7 @@ def test_maneg_control_center_real_chrome_a_to_l(client, live_server):
         Select(driver.find_element(By.NAME, "severity")).select_by_value("info")
         Select(driver.find_element(By.NAME, "audience")).select_by_value("all")
         assert driver.find_element(By.NAME, "starts_at").get_attribute("value")
-        _click(driver, By.CSS_SELECTOR, 'form.stack-form button[type="submit"]')
+        _click(driver, By.CSS_SELECTOR, "form.stack-form button.button")
         wait.until(lambda _d: PlatformAnnouncement.objects.filter(title_en="Browser service notice").exists())
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Browser service notice"))
         assert _no_page_overflow(driver)
@@ -382,7 +382,7 @@ def test_maneg_control_center_real_chrome_a_to_l(client, live_server):
         _replace(driver, driver.find_element(By.NAME, "message_en"), "Browser scheduled maintenance")
         _replace(driver, driver.find_element(By.NAME, "message_ar"), "صيانة مجدولة من المتصفح")
         assert driver.find_element(By.NAME, "starts_at").get_attribute("value")
-        _click(driver, By.CSS_SELECTOR, 'form.stack-form button[type="submit"]')
+        _click(driver, By.CSS_SELECTOR, "form.stack-form button.button")
         wait.until(lambda _d: MaintenanceWindow.objects.filter(message_en="Browser scheduled maintenance", enabled=True).exists())
         window = MaintenanceWindow.objects.get(message_en="Browser scheduled maintenance")
         assert client.get("/").status_code == 503
