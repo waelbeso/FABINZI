@@ -1,7 +1,7 @@
 from django.urls import include, path
 from two_factor.urls import urlpatterns as tf_urls
 from apps.accounts.views import app_home, profile_preferences
-from apps.artwork.views import artwork_marketplace, designer_artwork_detail, designer_artworks, designer_products
+from apps.artwork.views import artwork_detail, artwork_marketplace, designer_artwork_detail, designer_artworks, designer_products
 from apps.checkout.views import (
     add_product_to_cart,
     cart,
@@ -19,6 +19,7 @@ from apps.checkout.views import (
 from apps.design.views import design_detail, design_list
 from apps.finance.views import designer_finance, finance_dashboard, manufacturer_finance
 from apps.manufacturer_marketplace.views import designer_rfq_dashboard, manufacturer_marketplace, manufacturer_marketplace_dashboard, manufacturer_public_detail
+from apps.media.views import private_studio_media
 from apps.notifications.views import notification_center
 from apps.operations.views import designer_fulfillment, manufacturer_production, order_operations
 from apps.platform_ops.views import (
@@ -65,6 +66,7 @@ urlpatterns = [
     path("studio/", studio, name="studio"),
     path("studio/<int:pk>/", studio_project, name="studio-project"),
     path("studio/<int:project_id>/checkout/", checkout_start, name="checkout-start"),
+    path("media/private/<int:pk>/", private_studio_media, name="private-studio-media"),
     path("checkout/<int:pk>/", checkout_detail, name="checkout-detail"),
     path("purchases/", purchases, name="purchases"),
     path("purchases/<int:pk>/confirmation/", purchase_confirmation, name="purchase-confirmation"),
@@ -73,6 +75,7 @@ urlpatterns = [
     path("orders/<int:pk>/", order_detail, name="order-detail"),
     path("orders/<int:pk>/production/", order_operations, name="order-operations"),
     path("artwork/", artwork_marketplace, name="artwork"),
+    path("artwork/<int:pk>/", artwork_detail, name="artwork-detail"),
     path("manufacturers/", manufacturer_marketplace, name="manufacturer-marketplace"),
     path("manufacturers/<int:pk>/", manufacturer_public_detail, name="manufacturer-public-detail"),
     path("designer/", designer_portal, name="designer"),
