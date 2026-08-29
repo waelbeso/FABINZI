@@ -98,8 +98,8 @@ def test_unrelated_designer_source_and_unrelated_studio_upload_cannot_be_guessed
 
 @pytest.mark.django_db
 def test_foreign_manufacturer_cannot_mutate_production_or_packing():
-    operator, org, _, _ = manufacturer("tenant-job-owner", role=Membership.Role.PRODUCTION_MANAGER)
-    data = assigned_job(org, prefix="tenant-job")
+    operator, org, _, _ = manufacturer("tenant-job-manufacturer", role=Membership.Role.PRODUCTION_MANAGER)
+    data = assigned_job(org, prefix="tenant-job-design")
     foreign, _, _, _ = manufacturer("tenant-job-foreign", role=Membership.Role.PRODUCTION_MANAGER)
     with pytest.raises(PermissionDenied):
         start_production(job=data["job"], actor=foreign)
