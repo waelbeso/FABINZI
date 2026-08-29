@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% block title %}Fulfillment · FABINZI{% endblock %}{% block content %}<section class="card"><h1>Fulfillment</h1>{% for f in records %}<article><a href="/orders/{{ f.order_id }}/production/">Order {{ f.order.number }}</a> — {{ f.get_status_display }}</article>{% empty %}<p>No fulfillment records.</p>{% endfor %}</section>{% endblock %}

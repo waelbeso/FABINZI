@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% block title %}Production · FABINZI{% endblock %}{% block content %}<section class="card"><h1>Production jobs</h1>{% for job in jobs %}<article><a href="/orders/{{ job.order_id }}/production/">Order {{ job.order.number }}</a> — {{ job.get_status_display }}</article>{% empty %}<p>No assigned production jobs.</p>{% endfor %}</section>{% endblock %}

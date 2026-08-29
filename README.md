@@ -1,9 +1,9 @@
 # FABINZI
 
-FABINZI is a greenfield fashion platform connecting Designers, Manufacturers and Customers through controlled design, sourcing, storefront, customization, checkout and production workflows.
+FABINZI is a greenfield fashion platform connecting Designers, Manufacturers and Customers through controlled design, sourcing, storefront, customization, checkout, manufacturing and fulfillment workflows.
 
 ## Current implementation
-Stages 0–6 are implemented and CI-gated:
+Stages 0–7 are implemented and CI-gated:
 - Stage 0 — Engineering Foundation
 - Stage 1 — Business Identity & Onboarding
 - Stage 2 — Garment Design
@@ -11,8 +11,9 @@ Stages 0–6 are implemented and CI-gated:
 - Stage 4 — Manufacturer Marketplace
 - Stage 5 — Store & Studio
 - Stage 6 — Checkout & Payments
+- Stage 7 — Manufacturing & Fulfillment
 
-Stage 6 adds customer checkout, order snapshots, COD, optional Paymob/Stripe integrations, signed payment webhooks and stock reservation at confirmation. Manufacturing/fulfillment remains Stage 7.
+Stage 7 adds automatic operations initialization for confirmed orders, Manufacturer assignment from accepted sourcing selections, production milestones, QC, packing, shipment tracking and delivery events. Finance remains Stage 8.
 
 ## Stack
 Python / Django / Django REST Framework / PostgreSQL / Celery / Redis.
@@ -30,6 +31,8 @@ python manage.py runserver
 - `/store/` public Store marketplace
 - `/studio/` customer Studio
 - `/orders/` customer orders
+- `/designer/fulfillment/` Designer fulfillment operations
+- `/manufacturer/production/` Manufacturer production operations
 - `/artwork/` Artwork marketplace
 - `/manufacturers/` Manufacturer marketplace
 - `/designer/` Designer portal
