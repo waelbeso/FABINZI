@@ -6,6 +6,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -140,10 +141,64 @@ def _transform_with_pointer_controls(driver, db_element):
     return CustomizationElement.objects.get(pk=db_element.pk).transform
 
 
+def _wait_for_authoritative_ready(driver):
+    wait = _wait(driver)
+    wait.until(lambda d: d.execute_script("return document.readyState") == "complete")
+    editor = wait.until(EC.visibility_of_element_located((By.ID, "studio-editor")))
+    project_id = int(editor.get_attribute("data-project-id"))
+    wait.until(lambda _d: StudioProject.objects.get(pk=project_id).status == StudioProject.Status.DRAFT)
+    wait.until(lambda d: d.find_element(By.ID, "studio-save-state").get_attribute("data-state") == "saved")
+    wait.until(lambda d: "is-valid" in d.find_element(By.ID, "studio-validation").get_attribute("class").split())
+    ready = wait.until(EC.element_to_be_clickable((By.ID, "mark-ready")))
+    assert not ready.get_attribute("disabled")
+    return project_id
+
+
+def _studio_ready_diagnostics(driver, project_id):
+    project = StudioProject.objects.get(pk=project_id)
+    elements = []
+    for element in CustomizationElement.objects.filter(customization__project_id=project_id).select_related("media_asset"):
+        elements.append({
+            "id": element.pk,
+            "kind": element.kind,
+            "transform": dict(element.transform),
+            "media_access": element.media_asset.access if element.media_asset_id else None,
+            "rights_confirmed": element.rights_confirmed,
+        })
+    def dom_value(element_id, *, attr=None):
+        try:
+            node = driver.find_element(By.ID, element_id)
+            return node.get_attribute(attr) if attr else node.text.strip()
+        except Exception:
+            return "<missing>"
+    try:
+        ready = driver.find_element(By.ID, "mark-ready")
+        ready_enabled = ready.is_enabled()
+    except Exception:
+        ready_enabled = False
+    return {
+        "project_status": project.status,
+        "save_state": dom_value("studio-save-state", attr="data-state"),
+        "validation_class": dom_value("studio-validation", attr="class"),
+        "validation_title": dom_value("validation-title"),
+        "validation_text": dom_value("validation-list"),
+        "ready_enabled": ready_enabled,
+        "elements": elements,
+        "visible_body": driver.find_element(By.TAG_NAME, "body").text[-1200:],
+    }
+
+
 def _assert_exact_transform_after_reload(driver, expected, element_id):
     driver.refresh()
-    _wait(driver).until(EC.presence_of_element_located((By.CSS_SELECTOR, f'[data-element-id="{element_id}"]')))
-    node = driver.find_element(By.CSS_SELECTOR, f'[data-element-id="{element_id}"]')
+    wait = _wait(driver)
+    wait.until(lambda d: d.execute_script("return document.readyState") == "complete")
+    node = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, f'[data-element-id="{element_id}"]')))
+    wait.until(lambda d: {
+        "x": float(d.find_element(By.CSS_SELECTOR, f'[data-element-id="{element_id}"]').get_attribute("data-x")),
+        "y": float(d.find_element(By.CSS_SELECTOR, f'[data-element-id="{element_id}"]').get_attribute("data-y")),
+        "scale": float(d.find_element(By.CSS_SELECTOR, f'[data-element-id="{element_id}"]').get_attribute("data-scale")),
+        "rotation": float(d.find_element(By.CSS_SELECTOR, f'[data-element-id="{element_id}"]').get_attribute("data-rotation")),
+    } == expected)
     actual = {
         "x": float(node.get_attribute("data-x")),
         "y": float(node.get_attribute("data-y")),
@@ -151,11 +206,25 @@ def _assert_exact_transform_after_reload(driver, expected, element_id):
         "rotation": float(node.get_attribute("data-rotation")),
     }
     assert actual == expected
+    wait.until(lambda d: d.find_element(By.ID, "studio-save-state").get_attribute("data-state") == "saved")
+    wait.until(lambda d: "is-valid" in d.find_element(By.ID, "studio-validation").get_attribute("class").split())
+    ready = wait.until(EC.element_to_be_clickable((By.ID, "mark-ready")))
+    assert not ready.get_attribute("disabled")
+
+
+def _mark_ready(driver):
+    project_id = _wait_for_authoritative_ready(driver)
+    try:
+        _click(driver, By.ID, "mark-ready")
+        _wait(driver).until(lambda _d: StudioProject.objects.get(pk=project_id).status == StudioProject.Status.READY)
+        _wait(driver).until(EC.presence_of_element_located((By.ID, "add-studio-cart")))
+    except TimeoutException:
+        pytest.fail(f"Studio Ready transition did not complete: {_studio_ready_diagnostics(driver, project_id)}")
+    return project_id
 
 
 def _ready_and_cart(driver):
-    _click(driver, By.ID, "mark-ready")
-    _wait(driver).until(EC.presence_of_element_located((By.ID, "add-studio-cart")))
+    _mark_ready(driver)
     _click(driver, By.ID, "add-studio-cart")
     _wait(driver).until(EC.url_contains(reverse("cart")))
 
@@ -204,8 +273,7 @@ def test_artwork_marketplace_and_visual_studio_desktop_journeys(client, live_ser
         _assert_no_overflow(driver)
         _shot(driver, "19-studio-tablet-en-light.png")
         driver.set_window_size(1440, 1050)
-        _click(driver, By.ID, "mark-ready")
-        wait.until(EC.presence_of_element_located((By.ID, "add-studio-cart")))
+        _mark_ready(driver)
         _shot(driver, "16-studio-ready-desktop-en-light.png")
         _click(driver, By.ID, "add-studio-cart")
         wait.until(EC.url_contains(reverse("cart")))
