@@ -1,0 +1,91 @@
+name: Live Environment Audit
+
+on:
+  push:
+    branches:
+      - work/global-live-e2e-qa
+    paths:
+      - .github/workflows/live-environment-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Probe repository-declared Render candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/global-live-e2e-qa/live-environment-audit
+          out="artifacts/global-live-e2e-qa/live-environment-audit/public-probe.txt"
+          : > "$out"
+
+          probe() {
+            base="$1"
+            echo "===== ${base} =====" | tee -a "$out"
+            echo "dns:" | tee -a "$out"
+            getent ahosts "${base#https://}" 2>&1 | head -n 12 | tee -a "$out" || true
+            for path in /healthz/ /readyz/ /api/v1/health/ / /robots.txt /static/css/maneg-control-center.css; do
+              echo "--- ${path}" | tee -a "$out"
+              headers="$(mktemp)"
+              body="$(mktemp)"
+              code="$(curl --retry 2 --retry-delay 5 --connect-timeout 20 --max-time 90 -sS -L -D "$headers" -o "$body" -w '%{http_code}' "${base}${path}" || true)"
+              echo "http_status=${code}" | tee -a "$out"
+              sed -n '1,30p' "$headers" | tee -a "$out"
+              echo "body_sha256=$(sha256sum "$body" | awk '{print $1}')" | tee -a "$out"
+              echo "body_bytes=$(wc -c < "$body" | tr -d ' ')" | tee -a "$out"
+              if [[ "$path" != "/static/css/maneg-control-center.css" ]]; then
+                head -c 1000 "$body" | tr '\000' '?' | tee -a "$out" || true
+                echo | tee -a "$out"
+              fi
+              rm -f "$headers" "$body"
+            done
+          }
+
+          probe "https://fabinzi-web.onrender.com"
+          probe "https://fabinzi-prod-web.onrender.com"
+
+      - name: Record repository fingerprints
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="artifacts/global-live-e2e-qa/live-environment-audit/repository-fingerprints.txt"
+          : > "$out"
+          git fetch origin main feature/web-productization pre-flutter-web-qa --depth=100 || true
+          for ref in \
+            "origin/main" \
+            "origin/feature/web-productization" \
+            "origin/pre-flutter-web-qa" \
+            "HEAD"; do
+            if git rev-parse --verify "$ref" >/dev/null 2>&1; then
+              sha="$(git rev-parse "$ref")"
+              echo "===== ${ref} ${sha} =====" >> "$out"
+              for file in \
+                static/css/maneg-control-center.css \
+                static/js/studio-editor.js \
+                static/css/storefront.css; do
+                if git cat-file -e "${sha}:${file}" 2>/dev/null; then
+                  git show "${sha}:${file}" | sha256sum | awk -v f="$file" '{print f" "$1}' >> "$out"
+                else
+                  echo "$file MISSING" >> "$out"
+                fi
+              done
+            fi
+          done
+          cat "$out"
+
+      - name: Upload live environment audit evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: global-live-environment-audit
+          path: artifacts/global-live-e2e-qa/live-environment-audit
+          if-no-files-found: error
+          retention-days: 14
