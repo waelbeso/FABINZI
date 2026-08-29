@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.media.models import MediaAsset
-from .designer_services import secure_add_or_update_member, secure_deactivate_member
+from .designer_services import attach_designer_verification_document, secure_add_or_update_member, secure_deactivate_member
 from .models import Membership, OnboardingApplication, Organization, VerificationDocument
 from .serializers import DesignerCreateSerializer, ManufacturerCreateSerializer, MemberMutationSerializer, OnboardingApplicationSerializer, VerificationDocumentCreateSerializer
 from .services import create_designer_onboarding, create_manufacturer_onboarding, require_org_access, submit_application, update_onboarding
@@ -134,12 +134,30 @@ class VerificationDocumentAPIView(APIView):
 
     def post(self, request, application_id):
         application = get_object_or_404(OnboardingApplication.objects.select_related("organization"), pk=application_id)
-        require_org_access(request.user, application.organization, roles=[Membership.Role.OWNER, Membership.Role.MANAGER])
-        if application.status not in {OnboardingApplication.Status.DRAFT, OnboardingApplication.Status.REVISION_REQUIRED}:
-            return Response({"detail": "Verification documents cannot be changed in the current state."}, status=409)
         serializer = VerificationDocumentCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         asset = get_object_or_404(MediaAsset, pk=serializer.validated_data["media_asset_id"])
+
+        if application.organization.kind == Organization.Kind.DESIGNER:
+            try:
+                document = attach_designer_verification_document(
+                    application=application,
+                    actor=request.user,
+                    media_asset=asset,
+                    document_type=serializer.validated_data["document_type"],
+                    description=serializer.validated_data.get("description", ""),
+                    request=request,
+                )
+            except PermissionDenied as exc:
+                return Response({"detail": str(exc)}, status=403)
+            except ValidationError as exc:
+                return Response({"detail": exc.messages}, status=400)
+            return Response({"id": document.id, "document_type": document.document_type, "media_asset_id": document.media_asset_id}, status=201)
+
+        # Manufacturer onboarding behavior remains unchanged in this Designer-only checkpoint.
+        require_org_access(request.user, application.organization, roles=[Membership.Role.OWNER, Membership.Role.MANAGER])
+        if application.status not in {OnboardingApplication.Status.DRAFT, OnboardingApplication.Status.REVISION_REQUIRED}:
+            return Response({"detail": "Verification documents cannot be changed in the current state."}, status=409)
         if asset.access != MediaAsset.Access.PRIVATE:
             return Response({"detail": "Verification documents must use a private media asset."}, status=400)
         if asset.uploaded_by_id and asset.uploaded_by_id != request.user.id:
