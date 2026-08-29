@@ -79,14 +79,15 @@ def confirm_order(*, order, actor=None, request=None):
 @transaction.atomic
 def place_order(*, session, actor, payment_method, request=None):
     require_checkout_owner(actor,session)
-    session=CheckoutSession.objects.select_for_update().select_related("studio_project__product__storefront__organization","studio_project__variant").get(pk=session.pk)
+    session=CheckoutSession.objects.select_for_update().get(pk=session.pk)
     if session.status != CheckoutSession.Status.DRAFT: raise ValidationError("Checkout has already been placed.")
-    validate_shipping(session); project=session.studio_project; unit,subtotal,shipping,discount,total=_pricing(project)
+    project=StudioProject.objects.select_related("product__storefront__organization","variant").get(pk=session.studio_project_id)
+    validate_shipping(session); unit,subtotal,shipping,discount,total=_pricing(project)
     if payment_method not in dict(CustomerOrder.PaymentMethod.choices): raise ValidationError("Unsupported payment method.")
     get_payment_config(payment_method)
     order=CustomerOrder.objects.create(checkout=session,customer=session.customer,designer_organization=project.product.storefront.organization,status=CustomerOrder.Status.PENDING_PAYMENT,payment_method=payment_method,subtotal=subtotal,shipping_amount=shipping,discount_amount=discount,total=total,currency=project.product.currency,shipping_snapshot=_shipping_snapshot(session))
     OrderItem.objects.create(order=order,store_product=project.product,variant=project.variant,studio_project=project,sku=project.variant.sku,title=project.product.title_en,size=project.variant.size,color_name=project.variant.color_name,unit_price=unit,quantity=project.quantity,line_total=subtotal,customization_snapshot=_customization_snapshot(project))
-    session.status=CheckoutSession.Status.PLACED; session.placed_at=timezone.now(); session.subtotal=subtotal; session.total=total; session.save(update_fields=["status","placed_at","subtotal","total","updated_at"])
+    session.status=CheckoutSession.Status.PLACED; session.placed_at=timezone.now(); session.subtotal=subtotal; session.shipping_amount=shipping; session.discount_amount=discount; session.total=total; session.currency=project.product.currency; session.save(update_fields=["status","placed_at","subtotal","shipping_amount","discount_amount","total","currency","updated_at"])
     attempt=PaymentAttempt.objects.create(order=order,provider=payment_method,amount=total,currency=order.currency,idempotency_key=f"{payment_method}-{order.number}")
     if payment_method == CustomerOrder.PaymentMethod.COD:
         attempt.status=PaymentAttempt.Status.SUCCEEDED; attempt.completed_at=timezone.now(); attempt.provider_reference=f"COD-{order.number}"; attempt.save(update_fields=["status","completed_at","provider_reference","updated_at"]); confirm_order(order=order,actor=actor,request=request)
@@ -99,7 +100,7 @@ def initiate_online_payment(*, attempt, return_url=""):
     try: data=create_remote_payment(attempt,return_url=return_url)
     except Exception as exc:
         attempt.status=PaymentAttempt.Status.FAILED; attempt.failure_code=exc.__class__.__name__; attempt.failure_message="Payment provider initiation failed."; attempt.save(update_fields=["status","failure_code","failure_message","updated_at"]); raise ValidationError("Payment provider initiation failed.") from exc
-    attempt.provider_reference=data.get("reference",""); attempt.redirect_url=data.get("redirect_url",""); attempt.provider_payload={"client_secret":data.get("client_secret","")}; attempt.status=PaymentAttempt.Status.REQUIRES_ACTION; attempt.save(update_fields=["provider_reference","redirect_url","provider_payload","status","updated_at"]); return attempt
+    attempt.provider_reference=data.get("reference",""); attempt.redirect_url=data.get("redirect_url",""); attempt.provider_payload={"client_secret":data.get("client_secret","")}; attempt.status=PaymentAttempt.Status.REQUIRES_ACTION; attempt.failure_code=""; attempt.failure_message=""; attempt.save(update_fields=["provider_reference","redirect_url","provider_payload","status","failure_code","failure_message","updated_at"]); return attempt
 
 @transaction.atomic
 def process_webhook(*, provider, event_id, payload_hash, reference, success, failed, payload):
