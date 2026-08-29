@@ -40,6 +40,26 @@ def normalize_designed_product_transform(transform):
 
 
 @transaction.atomic
+def update_artwork_definition(*, artwork, version, actor, data, request=None):
+    require_artwork_draft(version, actor)
+    if version.artwork_id != artwork.pk:
+        raise ValidationError("Artwork Version does not belong to this Artwork.")
+    for field in ("title", "description", "tags"):
+        if field in data:
+            setattr(artwork, field, data[field])
+    artwork.full_clean()
+    artwork.save()
+    record_audit_event(
+        actor=actor,
+        action="artwork.updated",
+        instance=artwork,
+        metadata={"version_id": version.pk},
+        request=request,
+    )
+    return artwork
+
+
+@transaction.atomic
 def update_artwork_version_definition(*, version, actor, data, request=None):
     require_artwork_draft(version, actor)
     for field in ("color_profile", "production_notes", "metadata"):
