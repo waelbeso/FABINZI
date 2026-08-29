@@ -43,9 +43,37 @@ def require_private_designer_asset(*, asset, organization, actor=None, purposes=
         require_org_access(actor, organization)
     if purposes:
         purpose = str((asset.metadata or {}).get("purpose") or "")
-        allowed = set(purposes)
-        if purpose not in allowed:
+        if purpose not in set(purposes):
             raise ValidationError("This private asset is not valid for the requested Designer workflow.")
+    return asset
+
+
+def claim_or_require_private_designer_asset(*, asset, organization, actor, purpose="legacy_claimed"):
+    """Safely bind pre-Designer-Portal private uploads on first business attachment.
+
+    New uploads are always tenant-tagged at creation. This compatibility path only
+    accepts an unscoped PRIVATE asset owned by the same authenticated actor, rejects
+    Studio customer uploads, and permanently stamps the selected Designer tenant so
+    the asset cannot later cross organizations.
+    """
+    if (asset.metadata or {}).get("designer_private_upload"):
+        return require_private_designer_asset(asset=asset, organization=organization, actor=actor)
+    if asset.access != MediaAsset.Access.PRIVATE:
+        raise ValidationError("Designer workflow files must remain private.")
+    if (asset.metadata or {}).get("studio_private_upload"):
+        raise ValidationError("Customer Studio uploads cannot be used as Designer business files.")
+    require_org_access(actor, organization)
+    if asset.uploaded_by_id != getattr(actor, "pk", None):
+        raise PermissionDenied("This private asset is not owned by the current user.")
+    metadata = dict(asset.metadata or {})
+    metadata.update({
+        "designer_private_upload": True,
+        "organization_id": organization.pk,
+        "purpose": str(purpose or "legacy_claimed")[:80],
+        "legacy_designer_claim": True,
+    })
+    asset.metadata = metadata
+    asset.save(update_fields=["metadata"])
     return asset
 
 
@@ -54,8 +82,6 @@ def create_private_designer_asset(*, upload, owner, organization, purpose="techn
         raise ValidationError("Authentication is required before uploading Designer files.")
     if organization.kind != Organization.Kind.DESIGNER:
         raise ValidationError("Designer private assets require a Designer organization.")
-    # Authoritative service-level tenant check. Supplying an Organization object or ID
-    # from a view/API is never sufficient by itself.
     require_org_access(owner, organization)
     if not upload:
         raise ValidationError("Choose a file to upload.")
