@@ -137,7 +137,18 @@ def _sitemap_url(urlset, path, lastmod=None):
 def sitemap_xml(request):
     ET.register_namespace("xhtml", "http://www.w3.org/1999/xhtml")
     urlset = ET.Element("urlset", {"xmlns": "http://www.sitemaps.org/schemas/sitemap/0.9"})
-    for name in ("home", "store-marketplace", "artwork", "manufacturer-marketplace"):
+    for name in (
+        "home",
+        "store-marketplace",
+        "artwork",
+        "manufacturer-marketplace",
+        "about",
+        "terms",
+        "privacy",
+        "returns",
+        "shipping",
+        "support",
+    ):
         _sitemap_url(urlset, reverse(name))
 
     stores = Storefront.objects.filter(status=Storefront.Status.PUBLISHED).only("slug", "updated_at")

@@ -10,9 +10,12 @@ env = environ.Env(
 )
 environ.Env.read_env(BASE_DIR / ".env")
 
-SECRET_KEY = env("DJANGO_SECRET_KEY", default="dev-only-unsafe-secret")
+_DEV_SECRET = "dev-only-unsafe-secret"
+SECRET_KEY = env("DJANGO_SECRET_KEY", default=_DEV_SECRET)
 DEBUG = env.bool("DJANGO_DEBUG", default=False)
 ENVIRONMENT = env("ENVIRONMENT", default="development").strip().lower()
+if not DEBUG and SECRET_KEY == _DEV_SECRET:
+    raise ImproperlyConfigured("DJANGO_SECRET_KEY must be explicitly configured outside DEBUG mode")
 _PRIVATE_MEDIA_LOCAL_ENVIRONMENTS = {"development", "dev", "test", "testing"}
 _private_media_default = "local" if ENVIRONMENT in _PRIVATE_MEDIA_LOCAL_ENVIRONMENTS else "s3"
 PRIVATE_MEDIA_STORAGE_MODE = env("PRIVATE_MEDIA_STORAGE_MODE", default=_private_media_default).strip().lower()
@@ -22,8 +25,11 @@ if PRIVATE_MEDIA_STORAGE_MODE == "local" and ENVIRONMENT not in _PRIVATE_MEDIA_L
     raise ImproperlyConfigured("Private local media storage is allowed only in development/test environments")
 ALLOWED_HOSTS = [h.strip() for h in env("DJANGO_ALLOWED_HOSTS", default="localhost,127.0.0.1").split(",") if h.strip()]
 FABINZI_PUBLIC_BASE_URL = env("FABINZI_PUBLIC_BASE_URL", default="http://localhost:8000").rstrip("/")
+if not DEBUG and not FABINZI_PUBLIC_BASE_URL.startswith("https://"):
+    raise ImproperlyConfigured("FABINZI_PUBLIC_BASE_URL must use HTTPS outside DEBUG mode")
 _csrf_default = "" if DEBUG else FABINZI_PUBLIC_BASE_URL
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in env("DJANGO_CSRF_TRUSTED_ORIGINS", default=_csrf_default).split(",") if o.strip()]
+CSRF_FAILURE_VIEW = "apps.platform_ops.launch_views.csrf_failure"
 FABINZI_DEMO_SEED_ENABLED = env.bool("FABINZI_DEMO_SEED_ENABLED", default=False)
 DEMO_ADMIN_EMAIL = env("DEMO_ADMIN_EMAIL", default="demo.admin@fabinzi.example")
 DEMO_ADMIN_PASSWORD = env("DEMO_ADMIN_PASSWORD", default="")

@@ -1,1 +1,14 @@
-{% load static %}<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="{% static 'css/fabinzi.css' %}"><title>FABINZI Maintenance</title></head><body><main class="container maintenance"><img src="{% static 'brand/fabinzi-logo.svg' %}" alt="FABINZI" class="brand-logo"><h1>Maintenance in progress</h1><p>{{ maintenance.message_en }}</p><hr><h1 dir="rtl">الصيانة جارية</h1><p dir="rtl">{{ maintenance.message_ar }}</p></main></body></html>
+{% extends "base.html" %}{% load static i18n %}{% get_current_language as LANGUAGE_CODE %}
+{% block title %}{% if LANGUAGE_CODE == 'ar' %}صيانة FABINZI{% else %}FABINZI Maintenance{% endif %}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/launch-gate.css' %}">{% endblock %}
+{% block content %}
+<section class="error-shell" aria-labelledby="maintenance-title">
+  <div class="error-panel">
+    <div class="error-code">503</div>
+    <div class="eyebrow">FABINZI</div>
+    <h1 id="maintenance-title">{% if LANGUAGE_CODE == 'ar' %}نجري أعمال صيانة{% else %}Maintenance in progress{% endif %}</h1>
+    <p>{% if LANGUAGE_CODE == 'ar' %}{{ maintenance.message_ar }}{% else %}{{ maintenance.message_en }}{% endif %}</p>
+    <p class="trust-note">{% if LANGUAGE_CODE == 'ar' %}لا تزال نقاط الصحة والإدارة التشغيلية المصرح بها متاحة لفريق التشغيل. حاول فتح هذه الصفحة مرة أخرى بعد انتهاء نافذة الصيانة.{% else %}Authorized health and operational administration routes remain available to the operations team. Try this page again after the maintenance window has ended.{% endif %}</p>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "base.html" %}{% load static i18n %}{% get_current_language as LANGUAGE_CODE %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/launch-gate.css' %}">{% endblock %}
+{% block content %}
+<section class="trust-shell" aria-labelledby="trust-title">
+  <div class="trust-hero">
+    <div class="trust-kicker">{% if LANGUAGE_CODE == 'ar' %}معلومات الإطلاق العامة{% else %}Public launch information{% endif %}</div>
+    <h1 id="trust-title">{{ trust_page.title }}</h1>
+    <p class="trust-intro">{{ trust_page.intro }}</p>
+    <div class="trust-sections">
+      {% for heading, body in trust_page.sections %}
+      <section class="trust-section">
+        <h2>{{ heading }}</h2>
+        <p>{{ body }}</p>
+      </section>
+      {% endfor %}
+    </div>
+    {% if trust_page.key == 'terms' or trust_page.key == 'privacy' or trust_page.key == 'returns' %}
+    <p class="trust-note">{% if LANGUAGE_CODE == 'ar' %}ملاحظة إطلاق: هذا النص يصف سلوك المنتج الحالي ولا يدعي أنه تمت مراجعته أو اعتماده من مستشار قانوني. يجب على مشغل المنصة استكمال المراجعة القانونية المناسبة قبل الإطلاق العام في أي سوق.{% else %}Launch note: this text describes current product behavior and is not represented as reviewed or approved by legal counsel. The platform operator must complete appropriate legal review before public launch in any market.{% endif %}</p>
+    {% endif %}
+    <nav class="trust-links" aria-label="{% if LANGUAGE_CODE == 'ar' %}معلومات المنصة{% else %}Platform information{% endif %}">
+      <a href="{% url 'about' %}">{% if LANGUAGE_CODE == 'ar' %}عن FABINZI{% else %}About{% endif %}</a>
+      <a href="{% url 'terms' %}">{% if LANGUAGE_CODE == 'ar' %}الشروط{% else %}Terms{% endif %}</a>
+      <a href="{% url 'privacy' %}">{% if LANGUAGE_CODE == 'ar' %}الخصوصية{% else %}Privacy{% endif %}</a>
+      <a href="{% url 'returns' %}">{% if LANGUAGE_CODE == 'ar' %}الاسترداد والمرتجعات{% else %}Refunds & returns{% endif %}</a>
+      <a href="{% url 'shipping' %}">{% if LANGUAGE_CODE == 'ar' %}الشحن والتنفيذ{% else %}Shipping & fulfillment{% endif %}</a>
+      <a href="{% url 'support' %}">{% if LANGUAGE_CODE == 'ar' %}الدعم{% else %}Support{% endif %}</a>
+    </nav>
+  </div>
+</section>
+{% endblock %}

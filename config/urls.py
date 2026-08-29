@@ -24,6 +24,7 @@ from apps.media.manufacturer_views import manufacturer_production_media
 from apps.media.views import private_studio_media
 from apps.notifications.views import notification_center
 from apps.operations.views import order_operations
+from apps.platform_ops.launch_views import bad_request as public_handler400
 from apps.platform_ops.views import (
     apple_touch_icon,
     favicon,
@@ -88,6 +89,7 @@ urlpatterns = [
     path("icon-192.png", site_icon_192, name="site-icon-192"),
     path("icon-512.png", site_icon_512, name="site-icon-512"),
     path("share/fabinzi-1200x630.png", social_share_image, name="social-share-image"),
+    path("", include("apps.platform_ops.launch_urls")),
     path("app/", app_home, name="app-home"),
     path("app/settings/preferences/", profile_preferences, name="profile-preferences"),
     path("notifications/", notification_center, name="notifications"),
@@ -159,6 +161,7 @@ urlpatterns = [
     path("Maneg/", fabinzi_admin_site.urls),
 ]
 
+handler400 = public_handler400
 handler403 = public_handler403
 handler404 = public_handler404
 handler500 = public_handler500

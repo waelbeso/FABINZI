@@ -12,6 +12,12 @@ INDEXABLE_URL_NAMES = {
     "artwork-detail",
     "manufacturer-marketplace",
     "manufacturer-public-detail",
+    "about",
+    "terms",
+    "privacy",
+    "returns",
+    "shipping",
+    "support",
 }
 
 DEFAULT_DESCRIPTIONS = {
