@@ -8,7 +8,6 @@ from apps.artwork.public import decorate_public_artworks, public_artwork_queryse
 from apps.checkout.models import CartItem
 from apps.checkout.services import add_cart_item
 from apps.design.models import DecorationZone
-from apps.media.models import MediaAsset
 from apps.media.services import create_private_studio_image
 from .models import CustomizationElement, ProductVariant, StoreProduct, Storefront, StudioProject
 from .services import (
@@ -219,6 +218,8 @@ def studio_project(request, pk):
             zone.anchor_y = max(0.0, min(1.0, float(placement.get("y", .5))))
         except (TypeError, ValueError):
             zone.anchor_x, zone.anchor_y = .5, .5
+        zone.anchor_x_pct = round(zone.anchor_x * 100, 4)
+        zone.anchor_y_pct = round(zone.anchor_y * 100, 4)
         zone.allowed_methods = allowed_methods_for_zone(zone)
         if zone.max_width_mm and zone.max_height_mm:
             zone.workspace_ratio = float(zone.max_width_mm) / float(zone.max_height_mm)
