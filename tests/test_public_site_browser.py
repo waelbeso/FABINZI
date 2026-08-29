@@ -172,7 +172,9 @@ def test_public_and_customer_site_real_chrome_acceptance(client, live_server):
 
         driver.get(live_server.url + "/app/settings/preferences/")
         wait.until(EC.presence_of_element_located((By.ID, "preference-language")))
-        assert "Language & appearance" in driver.page_source
+        preferences_heading = driver.find_element(By.CSS_SELECTOR, ".account-settings-intro h1")
+        assert preferences_heading.is_displayed()
+        assert preferences_heading.text == "Language & appearance"
         _assert_dom_accessibility_baseline(driver)
 
         (ARTIFACT_DIR / "public-performance.json").write_text(json.dumps({"navigation": nav, "vitals": vitals}, indent=2), encoding="utf-8")
