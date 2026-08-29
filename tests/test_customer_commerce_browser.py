@@ -119,9 +119,18 @@ def _fill_checkout(driver):
 def _create_text_customization_visually(driver, live_server, custom, custom_variant, custom_zone):
     wait = _wait(driver)
     driver.get(_url(live_server, "public-store-product", custom.storefront.slug, custom.slug))
-    _user_click(driver, By.CSS_SELECTOR, f'a[href="{reverse("studio")}?product={custom.pk}"]')
+    wait.until(EC.presence_of_element_located((By.ID, "product-customize-link")))
+    Select(driver.find_element(By.ID, "variant")).select_by_value(str(custom_variant.pk))
+    quantity = driver.find_element(By.ID, "quantity")
+    quantity.clear(); quantity.send_keys("2")
+    _user_click(driver, By.ID, "product-customize-link")
     wait.until(EC.presence_of_element_located((By.ID, "studio-variant")))
-    Select(driver.find_element(By.ID, "studio-variant")).select_by_value(str(custom_variant.pk))
+    assert f"product={custom.pk}" in driver.current_url
+    assert f"variant={custom_variant.pk}" in driver.current_url
+    assert "quantity=2" in driver.current_url
+    assert custom.title_en in driver.page_source
+    assert Select(driver.find_element(By.ID, "studio-variant")).first_selected_option.get_attribute("value") == str(custom_variant.pk)
+    assert driver.find_element(By.ID, "studio-quantity").get_attribute("value") == "2"
     _user_click(driver, By.CSS_SELECTOR, 'form[aria-label="Start customization project"] button[type="submit"]')
     wait.until(EC.presence_of_element_located((By.ID, "studio-editor")))
 
@@ -136,6 +145,8 @@ def _create_text_customization_visually(driver, live_server, custom, custom_vari
     _user_click(driver, By.ID, "mark-ready")
     wait.until(EC.presence_of_element_located((By.ID, "add-studio-cart")))
     project = StudioProject.objects.get(customer__username="chrome-commerce-customer", product=custom)
+    assert project.variant_id == custom_variant.pk
+    assert project.quantity == 2
     _user_click(driver, By.ID, "add-studio-cart")
     wait.until(EC.url_contains(reverse("cart")))
     return project
