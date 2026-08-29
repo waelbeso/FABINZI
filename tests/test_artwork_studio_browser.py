@@ -250,10 +250,24 @@ def test_artwork_marketplace_and_visual_studio_desktop_journeys(client, live_ser
         before_invalid = dict(text_element.transform)
         x_input = driver.find_element(By.ID, "transform-x")
         x_input.send_keys(Keys.CONTROL, "a"); x_input.send_keys("0.98"); x_input.send_keys(Keys.TAB)
-        wait.until(lambda d: d.find_element(By.ID, "studio-validation").get_attribute("data-correction-required") == "true")
-        assert driver.find_element(By.ID, "studio-save-state").get_attribute("data-state") == "error"
-        text_element.refresh_from_db(); assert text_element.transform == before_invalid
+
+        # The rejected PATCH is authoritative. Synchronize first on the stable save error,
+        # then prove persistence and the visible last-valid restoration before inspecting UX copy.
+        wait.until(lambda d: d.find_element(By.ID, "studio-save-state").get_attribute("data-state") == "error")
+        text_element.refresh_from_db()
+        assert text_element.transform == before_invalid
+        restored_node = driver.find_element(By.CSS_SELECTOR, f'[data-element-id="{text_element.pk}"]')
+        for key, value in before_invalid.items():
+            assert float(restored_node.get_attribute(f"data-{key}")) == pytest.approx(float(value))
+        assert float(driver.find_element(By.ID, "transform-x").get_attribute("value")) == pytest.approx(float(before_invalid["x"]))
+
+        validation_panel = wait.until(EC.visibility_of_element_located((By.ID, "studio-validation")))
+        wait.until(lambda d: validation_panel.get_attribute("data-correction-required") == "true")
+        assert driver.find_element(By.ID, "validation-title").text.strip() == "Placement needs correction"
+        validation_text = driver.find_element(By.ID, "validation-list").text.strip()
+        assert validation_text
         _shot(driver, "15-studio-invalid-desktop-en-light.png")
+
         x_input = driver.find_element(By.ID, "transform-x")
         x_input.send_keys(Keys.CONTROL, "a"); x_input.send_keys("0.55"); x_input.send_keys(Keys.TAB)
         wait.until(lambda d: CustomizationElement.objects.get(pk=text_element.pk).transform["x"] == .55)
