@@ -33,6 +33,14 @@ from .services import (
 )
 
 
+def _as_bool(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 class VariantSerializer(serializers.ModelSerializer):
     price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
@@ -107,7 +115,7 @@ class StoreProductManageAPIView(APIView):
     def post(self, request, store_id):
         store = get_object_or_404(Storefront, pk=store_id)
         designed = get_object_or_404(DesignedProduct, pk=request.data.get("designed_product"))
-        product = create_store_product(storefront=store, actor=request.user, designed_product=designed, slug=request.data.get("slug", ""), title_en=request.data.get("title_en", ""), title_ar=request.data.get("title_ar", ""), description_en=request.data.get("description_en", ""), description_ar=request.data.get("description_ar", ""), base_price=request.data.get("base_price"), currency=request.data.get("currency", "EGP"), customization_enabled=bool(request.data.get("customization_enabled", False)), fulfillment_mode=request.data.get("fulfillment_mode", StoreProduct.FulfillmentMode.MADE_TO_ORDER), lead_time_days=request.data.get("lead_time_days"), request=request)
+        product = create_store_product(storefront=store, actor=request.user, designed_product=designed, slug=request.data.get("slug", ""), title_en=request.data.get("title_en", ""), title_ar=request.data.get("title_ar", ""), description_en=request.data.get("description_en", ""), description_ar=request.data.get("description_ar", ""), base_price=request.data.get("base_price"), currency=request.data.get("currency", "EGP"), customization_enabled=_as_bool(request.data.get("customization_enabled", False)), fulfillment_mode=request.data.get("fulfillment_mode", StoreProduct.FulfillmentMode.MADE_TO_ORDER), lead_time_days=request.data.get("lead_time_days"), request=request)
         return Response(StoreProductSerializer(product).data, status=201)
 
 
@@ -142,23 +150,20 @@ class StudioProjectSerializer(serializers.ModelSerializer):
     def get_elements(self, obj):
         if not hasattr(obj, "customization"):
             return []
-        return [
-            {
-                "id": element.pk,
-                "kind": element.kind,
-                "decoration_zone": element.decoration_zone_id,
-                "text": element.text,
-                "media_asset": element.media_asset_id,
-                "artwork_version": element.artwork_version_id,
-                "artwork_title": element.artwork_version.artwork.title if element.artwork_version_id else None,
-                "designer": element.artwork_version.artwork.organization.display_name if element.artwork_version_id else None,
-                "production_method": element.production_method,
-                "transform": element.transform,
-                "style": element.style,
-                "source_url": element_source_url(element),
-            }
-            for element in obj.customization.elements.select_related("decoration_zone", "media_asset", "artwork_version__artwork__organization")
-        ]
+        return [{
+            "id": element.pk,
+            "kind": element.kind,
+            "decoration_zone": element.decoration_zone_id,
+            "text": element.text,
+            "media_asset": element.media_asset_id,
+            "artwork_version": element.artwork_version_id,
+            "artwork_title": element.artwork_version.artwork.title if element.artwork_version_id else None,
+            "designer": element.artwork_version.artwork.organization.display_name if element.artwork_version_id else None,
+            "production_method": element.production_method,
+            "transform": element.transform,
+            "style": element.style,
+            "source_url": element_source_url(element),
+        } for element in obj.customization.elements.select_related("decoration_zone", "media_asset", "artwork_version__artwork__organization")]
 
 
 class StudioProjectsAPIView(APIView):
@@ -205,23 +210,31 @@ class CustomizationElementAPIView(APIView):
     def post(self, request, project_id):
         project = get_object_or_404(StudioProject, pk=project_id)
         customization = enable_customization(project=project, actor=request.user, request=request)
-        media = get_object_or_404(MediaAsset, pk=request.data.get("media_asset")) if request.data.get("media_asset") else None
-        artwork_version = get_object_or_404(ArtworkVersion, pk=request.data.get("artwork_version")) if request.data.get("artwork_version") else None
-        element = add_customization_element(
-            customization=customization,
-            actor=request.user,
-            decoration_zone=get_object_or_404(DecorationZone, pk=request.data.get("decoration_zone")),
-            kind=request.data.get("kind"),
-            text=request.data.get("text", ""),
-            media_asset=media,
-            artwork_version=artwork_version,
-            production_method=request.data.get("production_method", ""),
-            rights_confirmed=bool(request.data.get("rights_confirmed", False)),
-            transform=request.data.get("transform", {}),
-            style=request.data.get("style", {}),
-            sort_order=request.data.get("sort_order", 0),
-            request=request,
-        )
+        media = None
+        if request.data.get("media_asset"):
+            media = get_object_or_404(MediaAsset, pk=request.data.get("media_asset"), access=MediaAsset.Access.PRIVATE, uploaded_by=request.user, metadata__studio_private_upload=True)
+        artwork_version = None
+        if request.data.get("artwork_version"):
+            artwork_version = get_object_or_404(ArtworkVersion, pk=request.data.get("artwork_version"), status=ArtworkVersion.Status.APPROVED, artwork__status="approved")
+        zone = get_object_or_404(DecorationZone, pk=request.data.get("decoration_zone"), version=project.product.designed_product.garment_version)
+        try:
+            element = add_customization_element(
+                customization=customization,
+                actor=request.user,
+                decoration_zone=zone,
+                kind=request.data.get("kind"),
+                text=request.data.get("text", ""),
+                media_asset=media,
+                artwork_version=artwork_version,
+                production_method=request.data.get("production_method", ""),
+                rights_confirmed=_as_bool(request.data.get("rights_confirmed", False)),
+                transform=request.data.get("transform", {}),
+                style=request.data.get("style", {}),
+                sort_order=request.data.get("sort_order", 0),
+                request=request,
+            )
+        except ValidationError as exc:
+            return Response({"detail": exc.messages}, status=400)
         return Response(StudioProjectSerializer(project).data, status=201)
 
 
@@ -231,14 +244,7 @@ class CustomizationElementDetailAPIView(APIView):
         require_project_owner(request.user, project)
         element = get_object_or_404(CustomizationElement, pk=element_id, customization__project=project)
         try:
-            element = update_customization_element(
-                element=element,
-                actor=request.user,
-                transform=request.data.get("transform") if "transform" in request.data else None,
-                production_method=request.data.get("production_method") if "production_method" in request.data else None,
-                text=request.data.get("text") if "text" in request.data else None,
-                request=request,
-            )
+            element = update_customization_element(element=element, actor=request.user, transform=request.data.get("transform") if "transform" in request.data else None, production_method=request.data.get("production_method") if "production_method" in request.data else None, text=request.data.get("text") if "text" in request.data else None, request=request)
         except ValidationError as exc:
             return Response({"detail": exc.messages}, status=400)
         return Response({"id": element.pk, "transform": element.transform, "production_method": element.production_method, "text": element.text})
@@ -264,4 +270,8 @@ class StudioValidationAPIView(APIView):
 
 class StudioReadyAPIView(APIView):
     def post(self, request, project_id):
-        return Response(StudioProjectSerializer(mark_project_ready(project=get_object_or_404(StudioProject, pk=project_id), actor=request.user, request=request)).data)
+        try:
+            project = mark_project_ready(project=get_object_or_404(StudioProject, pk=project_id), actor=request.user, request=request)
+        except ValidationError as exc:
+            return Response({"detail": exc.messages}, status=400)
+        return Response(StudioProjectSerializer(project).data)
