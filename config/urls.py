@@ -1,7 +1,7 @@
 from django.urls import include, path
 from two_factor.urls import urlpatterns as tf_urls
 from apps.accounts.views import app_home, profile_preferences
-from apps.artwork.views import artwork_detail, artwork_marketplace, designer_artwork_detail, designer_artworks, designer_products
+from apps.artwork.views import artwork_detail, artwork_marketplace
 from apps.checkout.views import (
     add_product_to_cart,
     cart,
@@ -16,12 +16,12 @@ from apps.checkout.views import (
     purchase_detail,
     purchases,
 )
-from apps.design.views import design_detail, design_list
-from apps.finance.views import designer_finance, finance_dashboard, manufacturer_finance
-from apps.manufacturer_marketplace.views import designer_rfq_dashboard, manufacturer_marketplace, manufacturer_marketplace_dashboard, manufacturer_public_detail
+from apps.finance.views import finance_dashboard, manufacturer_finance
+from apps.manufacturer_marketplace.views import manufacturer_marketplace, manufacturer_marketplace_dashboard, manufacturer_public_detail
+from apps.media.designer_views import private_designer_media
 from apps.media.views import private_studio_media
 from apps.notifications.views import notification_center
-from apps.operations.views import designer_fulfillment, manufacturer_production, order_operations
+from apps.operations.views import manufacturer_production, order_operations
 from apps.platform_ops.views import (
     apple_touch_icon,
     favicon,
@@ -39,9 +39,26 @@ from apps.platform_ops.views import (
     social_share_image,
 )
 from apps.integrations.admin_site import fabinzi_admin_site
-from apps.organizations.views import designer_portal, edit_onboarding, manufacturer_portal, submit_onboarding
+from apps.organizations.designer_views import (
+    designer_artwork_detail,
+    designer_artworks,
+    designer_design_detail,
+    designer_design_list,
+    designer_finance,
+    designer_fulfillment,
+    designer_portal,
+    designer_product_detail,
+    designer_products,
+    designer_profile,
+    designer_rfq_detail,
+    designer_rfqs,
+    designer_store,
+    designer_store_product,
+    designer_team,
+)
+from apps.organizations.views import edit_onboarding, manufacturer_portal, submit_onboarding
 from apps.storefront.studio_views import studio, studio_project
-from apps.storefront.views import designer_store_dashboard, public_product, public_storefront, store_marketplace
+from apps.storefront.views import public_product, public_storefront, store_marketplace
 
 urlpatterns = [
     path("", home, name="home"),
@@ -68,6 +85,7 @@ urlpatterns = [
     path("studio/<int:pk>/", studio_project, name="studio-project"),
     path("studio/<int:project_id>/checkout/", checkout_start, name="checkout-start"),
     path("media/private/<int:pk>/", private_studio_media, name="private-studio-media"),
+    path("media/designer-private/<int:pk>/", private_designer_media, name="private-designer-media"),
     path("checkout/<int:pk>/", checkout_detail, name="checkout-detail"),
     path("purchases/", purchases, name="purchases"),
     path("purchases/<int:pk>/confirmation/", purchase_confirmation, name="purchase-confirmation"),
@@ -79,16 +97,23 @@ urlpatterns = [
     path("artwork/<int:pk>/", artwork_detail, name="artwork-detail"),
     path("manufacturers/", manufacturer_marketplace, name="manufacturer-marketplace"),
     path("manufacturers/<int:pk>/", manufacturer_public_detail, name="manufacturer-public-detail"),
+
     path("designer/", designer_portal, name="designer"),
-    path("designer/designs/", design_list, name="designer-design-list"),
-    path("designer/designs/<int:pk>/", design_detail, name="designer-design-detail"),
+    path("designer/profile/", designer_profile, name="designer-profile"),
+    path("designer/team/", designer_team, name="designer-team"),
+    path("designer/designs/", designer_design_list, name="designer-design-list"),
+    path("designer/designs/<int:pk>/", designer_design_detail, name="designer-design-detail"),
     path("designer/artworks/", designer_artworks, name="designer-artworks"),
     path("designer/artworks/<int:pk>/", designer_artwork_detail, name="designer-artwork-detail"),
     path("designer/products/", designer_products, name="designer-products"),
-    path("designer/rfqs/", designer_rfq_dashboard, name="designer-rfqs"),
-    path("designer/store/", designer_store_dashboard, name="designer-store"),
+    path("designer/products/<int:pk>/", designer_product_detail, name="designer-product-detail"),
+    path("designer/rfqs/", designer_rfqs, name="designer-rfqs"),
+    path("designer/rfqs/<int:pk>/", designer_rfq_detail, name="designer-rfq-detail"),
+    path("designer/store/", designer_store, name="designer-store"),
+    path("designer/store/products/<int:pk>/", designer_store_product, name="designer-store-product"),
     path("designer/fulfillment/", designer_fulfillment, name="designer-fulfillment"),
     path("designer/finance/", designer_finance, name="designer-finance"),
+
     path("manufacturer/", manufacturer_portal, name="manufacturer"),
     path("manufacturer/marketplace/", manufacturer_marketplace_dashboard, name="manufacturer-marketplace-dashboard"),
     path("manufacturer/production/", manufacturer_production, name="manufacturer-production"),
