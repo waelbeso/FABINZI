@@ -27,6 +27,13 @@ jobs:
           root="artifacts/global-live-e2e-qa/live-environment-audit"
           mkdir -p "$root/probes"
 
+          qa_base="$(awk '/key: FABINZI_PUBLIC_BASE_URL/{getline; sub(/^[[:space:]]*value:[[:space:]]*/, ""); print; exit}' render-qa.yaml)"
+          if [[ -z "$qa_base" || "$qa_base" != https://* ]]; then
+            echo "::error::Unable to derive an HTTPS QA base URL from render-qa.yaml"
+            exit 1
+          fi
+          printf '%s\n' "$qa_base" > "$root/repository-declared-qa-base-url.txt"
+
           probe_one() {
             base="$1"
             path="$2"
@@ -46,7 +53,8 @@ jobs:
 
           export -f probe_one
           export root
-          for base in https://fabinzi-web.onrender.com https://fabinzi-prod-web.onrender.com; do
+          bases=("$qa_base" "https://fabinzi-web.onrender.com" "https://fabinzi-prod-web.onrender.com")
+          for base in "${bases[@]}"; do
             host="${base#https://}"
             {
               echo "===== ${base} ====="
@@ -60,7 +68,7 @@ jobs:
 
           out="$root/public-probe.txt"
           : > "$out"
-          for base in https://fabinzi-web.onrender.com https://fabinzi-prod-web.onrender.com; do
+          for base in "${bases[@]}"; do
             host="${base#https://}"
             cat "$root/dns-${host}.txt" >> "$out"
             for path in /healthz/ /readyz/ /api/v1/health/ / /robots.txt /static/css/maneg-control-center.css; do
