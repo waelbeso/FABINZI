@@ -1,0 +1,34 @@
+{% extends 'base.html' %}{% load static %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/artwork-studio.css' %}">{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="{% url 'artwork' %}">{% if request.LANGUAGE_CODE == 'ar' %}الأعمال الفنية{% else %}Artwork{% endif %}</a><span>/</span><span>{{ artwork.title }}</span></nav>
+<section class="artwork-detail-layout">
+  <div class="artwork-detail-visual">
+    <div class="artwork-detail-canvas">{% if preview_url %}<img src="{{ preview_url }}" alt="{{ artwork.title }}">{% else %}<div class="artwork-fallback"><strong>F</strong><small>FABINZI Artwork</small></div>{% endif %}</div>
+  </div>
+  <div class="stack">
+    <div>
+      <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}عمل فني معتمد{% else %}Approved Artwork{% endif %}</div>
+      <h1 class="page-title">{{ artwork.title }}</h1>
+      <p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}من تصميم{% else %}Created by{% endif %} <strong>{{ artwork.organization.display_name }}</strong></p>
+      {% if artwork.description %}<p>{{ artwork.description }}</p>{% endif %}
+    </div>
+    {% if artwork.tags %}<div class="tag-row">{% for tag in artwork.tags %}<a class="creative-tag" href="{% url 'artwork' %}?tag={{ tag|urlencode }}">{{ tag }}</a>{% endfor %}</div>{% endif %}
+    <div class="surface artwork-facts">
+      <div class="artwork-fact"><span>{% if request.LANGUAGE_CODE == 'ar' %}الاستخدام في التخصيص{% else %}Customization use{% endif %}</span><strong>{% if can_customize %}{% if request.LANGUAGE_CODE == 'ar' %}متاح على منتجات مؤهلة{% else %}Available on eligible products{% endif %}{% else %}{% if request.LANGUAGE_CODE == 'ar' %}لا توجد أهلية إنتاج مؤكدة حالياً{% else %}No confirmed production eligibility yet{% endif %}{% endif %}</strong></div>
+      {% if method_labels %}<div class="artwork-fact"><span>{% if request.LANGUAGE_CODE == 'ar' %}طرق الإنتاج المدعومة{% else %}Supported production{% endif %}</span><strong>{{ method_labels|join:' · ' }}</strong></div>{% endif %}
+      {% if artwork.public_suitability %}<div class="artwork-fact"><span>{% if request.LANGUAGE_CODE == 'ar' %}معلومات الاستخدام{% else %}Use guidance{% endif %}</span><strong>{{ artwork.public_suitability }}</strong></div>{% endif %}
+      {% if artwork.public_product_types %}<div class="artwork-fact"><span>{% if request.LANGUAGE_CODE == 'ar' %}أنواع المنتجات{% else %}Product types{% endif %}</span><strong>{{ artwork.public_product_types|join:' · ' }}</strong></div>{% endif %}
+      {% if version.ip_declaration %}<div class="artwork-fact"><span>{% if request.LANGUAGE_CODE == 'ar' %}أساس الحقوق المعلن{% else %}Declared rights basis{% endif %}</span><strong>{{ version.ip_declaration.get_rights_basis_display }} · {{ version.ip_declaration.rights_holder_name }}</strong></div>{% endif %}
+    </div>
+    <section id="use-artwork" class="surface stack">
+      <div><div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}استخدم هذا العمل{% else %}Use this Artwork{% endif %}</div><h2 class="section-title">{% if request.LANGUAGE_CODE == 'ar' %}اختر منتجاً مؤهلاً وافتح Studio{% else %}Choose an eligible product and open Studio{% endif %}</h2></div>
+      {% if eligible_products %}
+      <div class="eligible-products">{% for product in eligible_products %}<a class="eligible-product" href="{% url 'studio' %}?product={{ product.id }}&artwork={{ version.id }}"><div class="eligible-product__media">{% with image=product.images.first %}{% if image %}<img src="{{ image.media_asset.metadata.public_url|default:image.media_asset.provider_asset_id }}" alt="">{% else %}<div class="product-placeholder">F</div>{% endif %}{% endwith %}</div><div><h3>{% if request.LANGUAGE_CODE == 'ar' and product.title_ar %}{{ product.title_ar }}{% else %}{{ product.title_en }}{% endif %}</h3><span class="muted">{% if request.LANGUAGE_CODE == 'ar' %}افتح في Studio{% else %}Open in Studio{% endif %} →</span></div></a>{% endfor %}</div>
+      {% else %}<div class="empty-state"><h3>{% if request.LANGUAGE_CODE == 'ar' %}لا يوجد منتج متوافق متاح الآن{% else %}No compatible product is available right now{% endif %}</h3><p>{% if request.LANGUAGE_CODE == 'ar' %}لن نعرض زر تخصيص ما لم تتوافق طريقة إنتاج العمل مع منطقة زخرفة حقيقية في منتج منشور قابل للتخصيص.{% else %}FABINZI only offers customization when this Artwork's real production method matches a real decoration zone on a published customizable product.{% endif %}</p><a class="button button--ghost" href="{% url 'store-marketplace' %}">{% if request.LANGUAGE_CODE == 'ar' %}تصفح المتجر{% else %}Browse Shop{% endif %}</a></div>{% endif %}
+    </section>
+    <div class="page-actions"><a class="button button--ghost" href="{% url 'artwork' %}">{% if request.LANGUAGE_CODE == 'ar' %}المزيد من الأعمال الفنية{% else %}Explore more Artwork{% endif %}</a>{% if artwork.organization.storefront and artwork.organization.storefront.status == 'published' %}<a class="button button--ghost" href="{% url 'public-storefront' artwork.organization.storefront.slug %}">{% if request.LANGUAGE_CODE == 'ar' %}استكشف المصمم{% else %}Explore Designer{% endif %}</a>{% endif %}</div>
+  </div>
+</section>
+{% if related_artworks %}<section class="section"><div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}من نفس المصمم{% else %}More from this Designer{% endif %}</div><div class="artwork-market-grid">{% for item in related_artworks %}<article class="artwork-market-card"><a class="artwork-market-card__visual" href="{% url 'artwork-detail' item.id %}">{% if item.public_preview %}<img loading="lazy" src="{{ item.public_preview.media_asset.metadata.public_url|default:item.public_preview.media_asset.provider_asset_id }}" alt="{{ item.title }}">{% else %}<div class="artwork-fallback"><strong>F</strong></div>{% endif %}</a><div class="artwork-market-card__body"><h2><a href="{% url 'artwork-detail' item.id %}">{{ item.title }}</a></h2><div class="artwork-attribution">{{ item.organization.display_name }}</div></div></article>{% endfor %}</div></section>{% endif %}
+{% endblock %}
