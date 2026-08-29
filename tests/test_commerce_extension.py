@@ -12,8 +12,8 @@ from apps.design.models import DecorationZone, GarmentDesign, GarmentDesignVersi
 from apps.integrations.models import IntegrationConfig
 from apps.media.models import MediaAsset
 from apps.organizations.models import Membership, Organization
-from apps.storefront.models import StudioProject
-from apps.storefront.services import add_product_image, add_variant, create_store_product, create_storefront, create_studio_project, enable_customization, mark_project_ready, publish_store_product, publish_storefront
+from apps.storefront.models import CustomizationElement, StudioProject
+from apps.storefront.services import add_customization_element, add_product_image, add_variant, create_store_product, create_storefront, create_studio_project, enable_customization, mark_project_ready, publish_store_product, publish_storefront
 
 User = get_user_model()
 
@@ -25,7 +25,7 @@ def make_catalog(prefix, *, customization=False):
     design = GarmentDesign.objects.create(organization=org, title=f"{prefix} Tee", status=GarmentDesign.Status.APPROVED, created_by=owner)
     version = GarmentDesignVersion.objects.create(design=design, version_number=1, status=GarmentDesignVersion.Status.APPROVED, created_by=owner)
     if customization:
-        DecorationZone.objects.create(version=version, name="Front", method=DecorationZone.Method.BOTH, placement={"x": .2, "y": .2, "width": .6, "height": .6})
+        DecorationZone.objects.create(version=version, name="Front", method=DecorationZone.Method.BOTH, placement={"x": .2, "y": .2, "width": .6, "height": .6}, max_width_mm=240, max_height_mm=300)
     artwork = Artwork.objects.create(organization=org, title=f"{prefix} Artwork", status="approved", created_by=owner)
     artwork_version = ArtworkVersion.objects.create(artwork=artwork, version_number=1, status="approved", created_by=owner)
     designed = DesignedProduct.objects.create(organization=org, garment_version=version, artwork_version=artwork_version, title=f"{prefix} Designed", status=DesignedProduct.Status.PUBLISHED, created_by=owner)
@@ -45,8 +45,17 @@ def fill_shipping(session, customer):
 
 def ready_studio(customer, product, variant):
     project = create_studio_project(customer=customer, product=product, variant=variant, quantity=1)
-    if product.customization_enabled:
-        enable_customization(project=project, actor=customer)
+    customization = enable_customization(project=project, actor=customer)
+    zone = product.designed_product.garment_version.decoration_zones.first()
+    add_customization_element(
+        customization=customization,
+        actor=customer,
+        decoration_zone=zone,
+        kind=CustomizationElement.Kind.TEXT,
+        text="FABINZI",
+        production_method=DecorationZone.Method.PRINT,
+        transform={"x": .5, "y": .5, "scale": .3, "rotation": 0},
+    )
     mark_project_ready(project=project, actor=customer)
     return project
 
