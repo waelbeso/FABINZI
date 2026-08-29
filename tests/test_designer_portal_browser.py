@@ -195,7 +195,7 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server):
 
         # A. Dashboard + profile + team use visible portal controls.
         driver.get(f"{live_server.url}/designer/?org={org.pk}&lang=en")
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".designer-shell")))
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".designer-workspace")))
         assert "Designer workspace" in driver.page_source
         assert _no_overflow(driver)
         _shot(driver, "01-designer-dashboard-desktop-en-light.png")
@@ -388,7 +388,7 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server):
         # G1. Tablet English regression.
         driver.set_window_size(820, 1180)
         driver.get(f"{live_server.url}/designer/?org={org.pk}&lang=en")
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".designer-shell")))
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".designer-workspace")))
         assert _no_overflow(driver)
         _shot(driver, "14-designer-dashboard-tablet-en-light.png")
 
