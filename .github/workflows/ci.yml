@@ -50,12 +50,6 @@ jobs:
           DJANGO_CSRF_TRUSTED_ORIGINS: https://fabinzi.example
           DJANGO_SECURE_SSL_REDIRECT: "true"
         run: python manage.py check --deploy
-      - name: Diagnose Studio invalid-placement isolation
-        run: |
-          for attempt in 1 2 3; do
-            echo "=== isolated Studio Chrome attempt ${attempt}/3 ==="
-            pytest -q tests/test_artwork_studio_browser.py::test_artwork_marketplace_and_visual_studio_desktop_journeys || echo "::warning::isolated Studio attempt ${attempt} failed"
-          done
       - run: pytest -q
       - name: Upload Web Productization browser QA evidence
         if: always()
