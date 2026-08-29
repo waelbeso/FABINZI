@@ -21,13 +21,36 @@ from apps.finance.views import designer_finance, finance_dashboard, manufacturer
 from apps.manufacturer_marketplace.views import designer_rfq_dashboard, manufacturer_marketplace, manufacturer_marketplace_dashboard, manufacturer_public_detail
 from apps.notifications.views import notification_center
 from apps.operations.views import designer_fulfillment, manufacturer_production, order_operations
-from apps.platform_ops.views import healthz, home, readyz
+from apps.platform_ops.views import (
+    apple_touch_icon,
+    favicon,
+    handler403 as public_handler403,
+    handler404 as public_handler404,
+    handler500 as public_handler500,
+    healthz,
+    home,
+    readyz,
+    robots_txt,
+    site_icon_192,
+    site_icon_512,
+    site_manifest,
+    sitemap_xml,
+    social_share_image,
+)
 from apps.integrations.admin_site import fabinzi_admin_site
 from apps.organizations.views import designer_portal, edit_onboarding, manufacturer_portal, submit_onboarding
 from apps.storefront.views import designer_store_dashboard, public_product, public_storefront, store_marketplace, studio, studio_project
 
 urlpatterns = [
     path("", home, name="home"),
+    path("robots.txt", robots_txt, name="robots-txt"),
+    path("sitemap.xml", sitemap_xml, name="sitemap-xml"),
+    path("site.webmanifest", site_manifest, name="site-manifest"),
+    path("favicon.ico", favicon, name="favicon"),
+    path("apple-touch-icon.png", apple_touch_icon, name="apple-touch-icon"),
+    path("icon-192.png", site_icon_192, name="site-icon-192"),
+    path("icon-512.png", site_icon_512, name="site-icon-512"),
+    path("share/fabinzi-1200x630.png", social_share_image, name="social-share-image"),
     path("app/", app_home, name="app-home"),
     path("app/settings/preferences/", profile_preferences, name="profile-preferences"),
     path("notifications/", notification_center, name="notifications"),
@@ -75,3 +98,7 @@ urlpatterns = [
     path("", include(tf_urls)),
     path("Maneg/", fabinzi_admin_site.urls),
 ]
+
+handler403 = public_handler403
+handler404 = public_handler404
+handler500 = public_handler500
