@@ -14,7 +14,7 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,34 +24,57 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p artifacts/global-live-e2e-qa/live-environment-audit
-          out="artifacts/global-live-e2e-qa/live-environment-audit/public-probe.txt"
-          : > "$out"
+          root="artifacts/global-live-e2e-qa/live-environment-audit"
+          mkdir -p "$root/probes"
 
-          probe() {
+          probe_one() {
             base="$1"
-            echo "===== ${base} =====" | tee -a "$out"
-            echo "dns:" | tee -a "$out"
-            getent ahosts "${base#https://}" 2>&1 | head -n 12 | tee -a "$out" || true
-            for path in /healthz/ /readyz/ /api/v1/health/ / /robots.txt /static/css/maneg-control-center.css; do
-              echo "--- ${path}" | tee -a "$out"
-              headers="$(mktemp)"
-              body="$(mktemp)"
-              code="$(curl --retry 2 --retry-delay 5 --connect-timeout 20 --max-time 90 -sS -L -D "$headers" -o "$body" -w '%{http_code}' "${base}${path}" || true)"
-              echo "http_status=${code}" | tee -a "$out"
-              sed -n '1,30p' "$headers" | tee -a "$out"
-              echo "body_sha256=$(sha256sum "$body" | awk '{print $1}')" | tee -a "$out"
-              echo "body_bytes=$(wc -c < "$body" | tr -d ' ')" | tee -a "$out"
-              if [[ "$path" != "/static/css/maneg-control-center.css" ]]; then
-                head -c 1000 "$body" | tr '\000' '?' | tee -a "$out" || true
-                echo | tee -a "$out"
-              fi
-              rm -f "$headers" "$body"
-            done
+            path="$2"
+            key="$(printf '%s%s' "$base" "$path" | sha256sum | cut -c1-16)"
+            headers="$root/probes/${key}.headers"
+            body="$root/probes/${key}.body"
+            meta="$root/probes/${key}.meta"
+            code="$(curl --connect-timeout 10 --max-time 35 -sS -L -D "$headers" -o "$body" -w '%{http_code}' "${base}${path}" || true)"
+            {
+              echo "base=${base}"
+              echo "path=${path}"
+              echo "http_status=${code}"
+              echo "body_sha256=$(sha256sum "$body" | awk '{print $1}')"
+              echo "body_bytes=$(wc -c < "$body" | tr -d ' ')"
+            } > "$meta"
           }
 
-          probe "https://fabinzi-web.onrender.com"
-          probe "https://fabinzi-prod-web.onrender.com"
+          export -f probe_one
+          export root
+          for base in https://fabinzi-web.onrender.com https://fabinzi-prod-web.onrender.com; do
+            host="${base#https://}"
+            {
+              echo "===== ${base} ====="
+              getent ahosts "$host" 2>&1 | head -n 12 || true
+            } > "$root/dns-${host}.txt"
+            for path in /healthz/ /readyz/ /api/v1/health/ / /robots.txt /static/css/maneg-control-center.css; do
+              probe_one "$base" "$path" &
+            done
+          done
+          wait
+
+          out="$root/public-probe.txt"
+          : > "$out"
+          for base in https://fabinzi-web.onrender.com https://fabinzi-prod-web.onrender.com; do
+            host="${base#https://}"
+            cat "$root/dns-${host}.txt" >> "$out"
+            for path in /healthz/ /readyz/ /api/v1/health/ / /robots.txt /static/css/maneg-control-center.css; do
+              key="$(printf '%s%s' "$base" "$path" | sha256sum | cut -c1-16)"
+              echo "--- ${path}" >> "$out"
+              cat "$root/probes/${key}.meta" >> "$out"
+              sed -n '1,30p' "$root/probes/${key}.headers" >> "$out"
+              if [[ "$path" != "/static/css/maneg-control-center.css" ]]; then
+                head -c 1000 "$root/probes/${key}.body" | tr '\000' '?' >> "$out" || true
+                echo >> "$out"
+              fi
+            done
+          done
+          cat "$out"
 
       - name: Record repository fingerprints
         shell: bash
