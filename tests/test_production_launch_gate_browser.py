@@ -40,6 +40,7 @@ def _chrome(width=1440, height=1000, language="en-US,en"):
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument(f"--window-size={width},{height}")
     options.add_experimental_option("prefs", {"intl.accept_languages": language})
+    options.set_capability("goog:loggingPrefs", {"browser": "ALL"})
     return webdriver.Chrome(options=options)
 
 
@@ -57,6 +58,8 @@ def _assert_healthy_document(driver):
     assert "django debug" not in source
     assert driver.execute_script("return document.documentElement.scrollWidth <= window.innerWidth + 2")
     assert driver.find_elements(By.CSS_SELECTOR, 'img[src*="fabinzi-logo"]')
+    severe = [entry for entry in driver.get_log("browser") if entry.get("level") == "SEVERE"]
+    assert not severe, severe
 
 
 def _shot(driver, name):
@@ -125,6 +128,7 @@ def test_production_launch_gate_real_chrome_evidence(client, live_server):
     mobile = _chrome(width=390, height=844, language="ar,en")
     try:
         mobile.get(live_server.url + "/")
+        mobile.get_log("browser")
         mobile.execute_script("localStorage.setItem('fabinzi-theme','dark')")
         mobile.get(_url(live_server, "home", language="ar"))
         _wait_ready(mobile)
@@ -139,6 +143,7 @@ def test_production_launch_gate_real_chrome_evidence(client, live_server):
     private = _chrome()
     try:
         _login_browser(private, live_server, client, user)
+        private.get_log("browser")
         private.get(_url(live_server, "app-home"))
         _wait_ready(private)
         robots = private.find_element(By.CSS_SELECTOR, 'meta[name="robots"]').get_attribute("content")
