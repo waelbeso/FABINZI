@@ -1,1 +1,47 @@
-{% extends 'base.html' %}{% block content %}<h1>Artwork Marketplace</h1><p>Approved artwork available on FABINZI.</p>{% for artwork in artworks %}<article><h2>{{ artwork.title }}</h2><p>{{ artwork.description }}</p><small>{{ artwork.organization.display_name }}</small></article>{% empty %}<p>No approved artwork yet.</p>{% endfor %}{% endblock %}
+{% extends 'base.html' %}{% load static %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/artwork-studio.css' %}">{% endblock %}
+{% block content %}
+<section class="creative-market-hero">
+  <div>
+    <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}سوق FABINZI الإبداعي{% else %}FABINZI Creative Marketplace{% endif %}</div>
+    <h1 class="display">{% if request.LANGUAGE_CODE == 'ar' %}اكتشف عملاً فنياً. اجعله جزءاً من منتجك.{% else %}Discover artwork. Make it part of your product.{% endif %}</h1>
+    <p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}أعمال فنية معتمدة من مصممين حقيقيين، مع معلومات الاستخدام والإنتاج فقط عندما تكون مدعومة فعلياً ببيانات FABINZI.{% else %}Approved creative work from real Designers, with customization and production guidance only where FABINZI has real supporting data.{% endif %}</p>
+  </div>
+  <div class="creative-market-hero__art" aria-hidden="true"><span>F</span></div>
+</section>
+
+<form class="artwork-filter-bar" method="get" role="search" aria-label="{% if request.LANGUAGE_CODE == 'ar' %}البحث وتصفية الأعمال الفنية{% else %}Search and filter Artwork{% endif %}">
+  <div class="artwork-filter-grid">
+    <div class="field"><label for="art-q">{% if request.LANGUAGE_CODE == 'ar' %}بحث{% else %}Search{% endif %}</label><input class="input" id="art-q" name="q" value="{{ search_query }}" placeholder="{% if request.LANGUAGE_CODE == 'ar' %}العنوان أو المصمم{% else %}Title or Designer{% endif %}"></div>
+    <div class="field"><label for="art-designer">{% if request.LANGUAGE_CODE == 'ar' %}المصمم{% else %}Designer{% endif %}</label><select class="select" id="art-designer" name="designer"><option value="">{% if request.LANGUAGE_CODE == 'ar' %}كل المصممين{% else %}All Designers{% endif %}</option>{% for d in filter_designers %}<option value="{{ d.id }}" {% if selected_designer == d.id|stringformat:'s' %}selected{% endif %}>{{ d.display_name }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="art-method">{% if request.LANGUAGE_CODE == 'ar' %}طريقة الإنتاج{% else %}Production method{% endif %}</label><select class="select" id="art-method" name="method"><option value="">{% if request.LANGUAGE_CODE == 'ar' %}كل الطرق{% else %}All methods{% endif %}</option><option value="print" {% if selected_method == 'print' %}selected{% endif %}>{% if request.LANGUAGE_CODE == 'ar' %}طباعة{% else %}Print{% endif %}</option><option value="embroidery" {% if selected_method == 'embroidery' %}selected{% endif %}>{% if request.LANGUAGE_CODE == 'ar' %}تطريز{% else %}Embroidery{% endif %}</option></select></div>
+    {% if filter_tags %}<div class="field"><label for="art-tag">{% if request.LANGUAGE_CODE == 'ar' %}الوسم{% else %}Tag{% endif %}</label><select class="select" id="art-tag" name="tag"><option value="">{% if request.LANGUAGE_CODE == 'ar' %}كل الوسوم{% else %}All tags{% endif %}</option>{% for value in filter_tags %}<option value="{{ value }}" {% if selected_tag == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></div>{% endif %}
+    {% if filter_product_types %}<div class="field"><label for="art-type">{% if request.LANGUAGE_CODE == 'ar' %}نوع المنتج{% else %}Product type{% endif %}</label><select class="select" id="art-type" name="product_type"><option value="">{% if request.LANGUAGE_CODE == 'ar' %}كل الأنواع{% else %}All types{% endif %}</option>{% for value in filter_product_types %}<option value="{{ value }}" {% if selected_product_type == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></div>{% endif %}
+    <div class="field"><label for="art-sort">{% if request.LANGUAGE_CODE == 'ar' %}الترتيب{% else %}Sort{% endif %}</label><select class="select" id="art-sort" name="sort"><option value="newest" {% if sort == 'newest' %}selected{% endif %}>{% if request.LANGUAGE_CODE == 'ar' %}الأحدث{% else %}Newest{% endif %}</option><option value="alphabetical" {% if sort == 'alphabetical' %}selected{% endif %}>{% if request.LANGUAGE_CODE == 'ar' %}أبجدي{% else %}Alphabetical{% endif %}</option></select></div>
+    <button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}اعرض النتائج{% else %}Show results{% endif %}</button>
+  </div>
+</form>
+
+{% if artworks %}
+<section class="artwork-market-grid" aria-label="{% if request.LANGUAGE_CODE == 'ar' %}الأعمال الفنية{% else %}Artwork{% endif %}">
+  {% for artwork in artworks %}
+  <article class="artwork-market-card">
+    <a class="artwork-market-card__visual" href="{% url 'artwork-detail' artwork.id %}">
+      {% if artwork.public_preview %}<img loading="lazy" src="{{ artwork.public_preview.media_asset.metadata.public_url|default:artwork.public_preview.media_asset.provider_asset_id }}" alt="{{ artwork.title }}">
+      {% else %}<div class="artwork-fallback"><strong>F</strong><small>FABINZI Artwork</small></div>{% endif %}
+      {% if artwork.public_methods %}<span class="artwork-market-card__methods">{% for method in artwork.public_methods %}<span class="artwork-method">{% if method == 'print' %}{% if request.LANGUAGE_CODE == 'ar' %}طباعة{% else %}Print{% endif %}{% else %}{% if request.LANGUAGE_CODE == 'ar' %}تطريز{% else %}Embroidery{% endif %}{% endif %}</span>{% endfor %}</span>{% endif %}
+    </a>
+    <div class="artwork-market-card__body">
+      <div><h2><a href="{% url 'artwork-detail' artwork.id %}">{{ artwork.title }}</a></h2><div class="artwork-attribution">{% if request.LANGUAGE_CODE == 'ar' %}من تصميم{% else %}By{% endif %} {{ artwork.organization.display_name }}</div></div>
+      {% if artwork.tags %}<div class="tag-row">{% for tag in artwork.tags|slice:':4' %}<span class="creative-tag">{{ tag }}</span>{% endfor %}</div>{% endif %}
+      {% if artwork.public_suitability %}<p class="muted">{{ artwork.public_suitability }}</p>{% endif %}
+      <div class="artwork-market-card__actions"><a class="button button--ghost button--sm" href="{% url 'artwork-detail' artwork.id %}">{% if request.LANGUAGE_CODE == 'ar' %}عرض العمل{% else %}View Artwork{% endif %}</a>{% if artwork.public_methods %}<a class="button button--sm" href="{% url 'artwork-detail' artwork.id %}#use-artwork">{% if request.LANGUAGE_CODE == 'ar' %}استخدمه في Studio{% else %}Use in Studio{% endif %}</a>{% endif %}</div>
+    </div>
+  </article>
+  {% endfor %}
+</section>
+{% if page_obj.has_other_pages %}<nav class="page-actions section--tight" aria-label="Pagination">{% if page_obj.has_previous %}<a class="button button--ghost" href="{% querystring page=page_obj.previous_page_number %}">{% if request.LANGUAGE_CODE == 'ar' %}السابق{% else %}Previous{% endif %}</a>{% endif %}<span class="muted">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>{% if page_obj.has_next %}<a class="button button--ghost" href="{% querystring page=page_obj.next_page_number %}">{% if request.LANGUAGE_CODE == 'ar' %}التالي{% else %}Next{% endif %}</a>{% endif %}</nav>{% endif %}
+{% else %}
+<section class="creative-empty"><div class="creative-empty__canvas" aria-hidden="true">F</div><div><div class="eyebrow">{% if search_query or selected_method or selected_tag or selected_designer %}{% if request.LANGUAGE_CODE == 'ar' %}لا توجد نتائج{% else %}No matches{% endif %}{% else %}{% if request.LANGUAGE_CODE == 'ar' %}المعرض قيد التكوين{% else %}The gallery is taking shape{% endif %}{% endif %}</div><h2 class="section-title">{% if request.LANGUAGE_CODE == 'ar' %}لا توجد أعمال فنية عامة مطابقة الآن.{% else %}No matching public Artwork is available right now.{% endif %}</h2><p class="muted">{% if request.LANGUAGE_CODE == 'ar' %}يظهر هنا فقط العمل الفني المعتمد فعلياً. جرّب إزالة عوامل التصفية أو عد لاحقاً.{% else %}Only genuinely approved public Artwork appears here. Clear the filters or check back later.{% endif %}</p><a class="button button--ghost" href="{% url 'artwork' %}">{% if request.LANGUAGE_CODE == 'ar' %}إزالة التصفية{% else %}Clear filters{% endif %}</a></div></section>
+{% endif %}
+{% endblock %}
