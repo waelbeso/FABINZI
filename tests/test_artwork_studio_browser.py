@@ -81,6 +81,9 @@ def _click(driver, by, locator):
 
 def _shot(driver, name):
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+    if name in {"10-artwork-marketplace-desktop-en-light.png", "23-private-upload-absent-marketplace-desktop-en-light.png"}:
+        card = _wait(driver).until(EC.visibility_of_element_located((By.CSS_SELECTOR, ".artwork-market-card")))
+        ActionChains(driver).scroll_to_element(card).pause(.12).perform()
     assert driver.save_screenshot(str(ARTIFACT_DIR / name))
 
 
@@ -170,7 +173,6 @@ def test_artwork_marketplace_and_visual_studio_desktop_journeys(client, live_ser
         _login(driver, live_server, client, customer)
         wait = _wait(driver)
 
-        # Journey A — Marketplace search/filter -> detail -> Use in Studio.
         driver.get(_url(live_server, "artwork"))
         wait.until(EC.presence_of_element_located((By.ID, "art-q")))
         search = driver.find_element(By.ID, "art-q"); search.clear(); search.send_keys("Northstar Lines")
@@ -191,7 +193,6 @@ def test_artwork_marketplace_and_visual_studio_desktop_journeys(client, live_ser
         assert driver.find_element(By.ID, "selected-artwork-version").get_attribute("value") == str(data["version"].pk)
         _shot(driver, "13-studio-marketplace-selected-desktop-en-light.png")
 
-        # Journey B — real Marketplace Artwork, Pointer Events, persistence, Ready, existing Cart.
         project, art_element = _add_preselected_marketplace_artwork(driver, data)
         persisted = _transform_with_pointer_controls(driver, art_element)
         assert persisted["x"] != .5 and persisted["scale"] != .35 and persisted["rotation"] != 0
@@ -211,7 +212,6 @@ def test_artwork_marketplace_and_visual_studio_desktop_journeys(client, live_ser
         assert CartItem.objects.filter(cart__customer=customer, studio_project=project, kind=CartItem.Kind.STUDIO).exists()
         _shot(driver, "17-customized-cart-desktop-en-light.png")
 
-        # Journey C — private upload + rights + transform + persistence + Cart + remains private.
         driver.get(_url(live_server, "public-store-product", data["store"].slug, data["product"].slug))
         _click(driver, By.ID, "product-customize-link")
         private_project = _start_project_from_studio_entry(driver, data)
@@ -235,7 +235,6 @@ def test_artwork_marketplace_and_visual_studio_desktop_journeys(client, live_ser
         assert private_element.media_asset.provider_asset_id not in driver.page_source
         _shot(driver, "23-private-upload-absent-marketplace-desktop-en-light.png")
 
-        # Journey D — invalid placement is rejected visibly, correction saves, Ready succeeds.
         driver.get(_url(live_server, "public-store-product", data["store"].slug, data["product"].slug))
         _click(driver, By.ID, "product-customize-link")
         invalid_project = _start_project_from_studio_entry(driver, data)
