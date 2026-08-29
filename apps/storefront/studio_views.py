@@ -19,6 +19,7 @@ from .services import (
     enable_customization,
     mark_project_ready,
     normalize_transform,
+    reopen_project_for_attention,
     require_project_owner,
     update_studio_project,
     validate_studio_project,
@@ -91,7 +92,7 @@ def _validation_context(project, request):
             elif not hasattr(project, "customization") or not project.customization.elements.exists():
                 issues = ["أضف عملاً فنياً أو صورة خاصة أو نصاً إلى منطقة زخرفة."]
             else:
-                issues = ["يوجد عنصر يحتاج مراجعة في الموضع أو طريقة الإنتاج أو أهلية المصدر."]
+                issues = ["يوجد عنصر أو حالة منتج تحتاج مراجعة قبل الطلب."]
         else:
             issues = exc.messages
         return {"valid": False, "issues": issues, "unit_price": project.variant.price if project.variant_id else project.product.base_price, "currency": project.product.currency}
@@ -108,9 +109,7 @@ def studio(request):
     if request.GET.get("product"):
         product = get_object_or_404(
             StoreProduct.objects.select_related("storefront", "designed_product").prefetch_related("variants", "images__media_asset"),
-            pk=request.GET["product"],
-            status=StoreProduct.Status.PUBLISHED,
-            storefront__status=Storefront.Status.PUBLISHED,
+            pk=request.GET["product"], status=StoreProduct.Status.PUBLISHED, storefront__status=Storefront.Status.PUBLISHED,
         )
         if not product.customization_enabled:
             messages.error(request, _localized(request, "This product is not customizable. You can still buy it directly.", "هذا المنتج غير قابل للتخصيص، ويمكنك شراؤه مباشرة."))
@@ -119,13 +118,7 @@ def studio(request):
             preferred_artwork = get_object_or_404(ArtworkVersion, pk=request.GET["artwork"], status=ArtworkVersion.Status.APPROVED, artwork__status="approved")
 
     if request.method == "POST":
-        product = get_object_or_404(
-            StoreProduct,
-            pk=request.POST.get("product"),
-            status=StoreProduct.Status.PUBLISHED,
-            storefront__status=Storefront.Status.PUBLISHED,
-            customization_enabled=True,
-        )
+        product = get_object_or_404(StoreProduct, pk=request.POST.get("product"), status=StoreProduct.Status.PUBLISHED, storefront__status=Storefront.Status.PUBLISHED, customization_enabled=True)
         variant = get_object_or_404(ProductVariant, pk=request.POST.get("variant"), product=product, is_active=True)
         try:
             project = create_studio_project(customer=request.user, product=product, variant=variant, quantity=_positive_int(request.POST.get("quantity")), request=request)
@@ -139,17 +132,7 @@ def studio(request):
         messages.success(request, _localized(request, "Studio project created. Your work will be saved to this project.", "تم إنشاء مشروع Studio وسيتم حفظ عملك داخل هذا المشروع."))
         return redirect(target)
 
-    return render(
-        request,
-        "storefront/studio.html",
-        {
-            "projects": projects,
-            "product": product,
-            "preferred_artwork": preferred_artwork,
-            "preferred_variant": preferred_variant,
-            "preferred_quantity": preferred_quantity,
-        },
-    )
+    return render(request, "storefront/studio.html", {"projects": projects, "product": product, "preferred_artwork": preferred_artwork, "preferred_variant": preferred_variant, "preferred_quantity": preferred_quantity})
 
 
 @login_required
@@ -166,7 +149,10 @@ def studio_project(request, pk):
     if request.method == "POST":
         action = request.POST.get("action")
         try:
-            if action == "update_project":
+            if action == "reopen":
+                reopen_project_for_attention(project=project, actor=request.user, request=request)
+                messages.success(request, _localized(request, "Studio project reopened for correction. Existing elements were preserved.", "تمت إعادة فتح مشروع Studio للتصحيح مع الحفاظ على العناصر الحالية."))
+            elif action == "update_project":
                 variant = get_object_or_404(ProductVariant, pk=request.POST.get("variant"), product=project.product, is_active=True)
                 update_studio_project(project=project, actor=request.user, variant=variant, quantity=_positive_int(request.POST.get("quantity")), customer_notes=request.POST.get("customer_notes", ""), request=request)
                 messages.success(request, _localized(request, "Product choices saved.", "تم حفظ اختيارات المنتج."))
@@ -221,22 +207,8 @@ def studio_project(request, pk):
         zone.anchor_x_pct = round(zone.anchor_x * 100, 4)
         zone.anchor_y_pct = round(zone.anchor_y * 100, 4)
         zone.allowed_methods = allowed_methods_for_zone(zone)
-        if zone.max_width_mm and zone.max_height_mm:
-            zone.workspace_ratio = float(zone.max_width_mm) / float(zone.max_height_mm)
-        else:
-            zone.workspace_ratio = 1.0
+        zone.workspace_ratio = float(zone.max_width_mm) / float(zone.max_height_mm) if zone.max_width_mm and zone.max_height_mm else 1.0
 
     marketplace = _marketplace_for_product(project.product, request.GET.get("art_q", "").strip())
     validation = _validation_context(project, request)
-    return render(
-        request,
-        "storefront/studio_project.html",
-        {
-            "project": project,
-            "zones": zones,
-            "elements": elements,
-            "marketplace_artworks": marketplace,
-            "preferred_artwork_id": preferred_artwork_id,
-            "validation": validation,
-        },
-    )
+    return render(request, "storefront/studio_project.html", {"project": project, "zones": zones, "elements": elements, "marketplace_artworks": marketplace, "preferred_artwork_id": preferred_artwork_id, "validation": validation})
