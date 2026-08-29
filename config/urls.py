@@ -40,7 +40,8 @@ from apps.platform_ops.views import (
 )
 from apps.integrations.admin_site import fabinzi_admin_site
 from apps.organizations.views import designer_portal, edit_onboarding, manufacturer_portal, submit_onboarding
-from apps.storefront.views import designer_store_dashboard, public_product, public_storefront, store_marketplace, studio, studio_project
+from apps.storefront.studio_views import studio, studio_project
+from apps.storefront.views import designer_store_dashboard, public_product, public_storefront, store_marketplace
 
 urlpatterns = [
     path("", home, name="home"),
