@@ -30,7 +30,7 @@ def _creative_catalog(prefix="visualqa"):
     owner = User.objects.create_user(username=f"{prefix}-owner", password="password12345")
     org = Organization.objects.create(kind=Organization.Kind.DESIGNER, display_name="Northstar Creative", email=f"{prefix}@creative.test", verification_status=Organization.VerificationStatus.ACTIVE, created_by=owner)
     Membership.objects.create(organization=org, user=owner, role=Membership.Role.OWNER)
-    design = GarmentDesign.objects.create(organization=org, title="Essential Tee", status=GarmentDesign.Status.APPROVED, created_by=owner)
+    design = GarmentDesign.objects.create(organization=org, title="Essential Tee", category="apparel", status=GarmentDesign.Status.APPROVED, created_by=owner)
     garment = GarmentDesignVersion.objects.create(design=design, version_number=1, status=GarmentDesignVersion.Status.APPROVED, created_by=owner)
     zone = DecorationZone.objects.create(version=garment, name="Front Center", method=DecorationZone.Method.BOTH, placement={"x": .50, "y": .38}, max_width_mm=260, max_height_mm=300)
     artwork = Artwork.objects.create(organization=org, title="Northstar Lines", description="Geometric line artwork for supported apparel decoration.", tags=["geometric", "line"], status=Artwork.Status.APPROVED, created_by=owner)
@@ -213,7 +213,7 @@ def test_artwork_marketplace_and_visual_studio_desktop_journeys(client, live_ser
 
         # Journey C — private upload + rights + transform + persistence + Cart + remains private.
         driver.get(_url(live_server, "public-store-product", data["store"].slug, data["product"].slug))
-        _click(driver, By.CSS_SELECTOR, f'a[href="{reverse("studio")}?product={data["product"].pk}"]')
+        _click(driver, By.ID, "product-customize-link")
         private_project = _start_project_from_studio_entry(driver, data)
         _click(driver, By.CSS_SELECTOR, '[data-studio-tab="upload"]')
         wait.until(EC.visibility_of_element_located((By.ID, "private-upload-form")))
@@ -223,7 +223,7 @@ def test_artwork_marketplace_and_visual_studio_desktop_journeys(client, live_ser
         _click(driver, By.ID, "rights-confirmed")
         assert driver.find_element(By.ID, "rights-confirmed").is_selected()
         _click(driver, By.CSS_SELECTOR, "#private-upload-form button[type='submit']")
-        private_node = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-studio-element][data-kind="image"]')))
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-studio-element][data-kind="image"]')))
         private_element = CustomizationElement.objects.get(customization__project=private_project, kind=CustomizationElement.Kind.IMAGE)
         assert private_element.media_asset.access == MediaAsset.Access.PRIVATE and private_element.rights_confirmed is True
         private_persisted = _transform_with_pointer_controls(driver, private_element)
@@ -233,10 +233,11 @@ def test_artwork_marketplace_and_visual_studio_desktop_journeys(client, live_ser
         driver.get(_url(live_server, "artwork"))
         assert private_element.media_asset.original_filename not in driver.page_source
         assert private_element.media_asset.provider_asset_id not in driver.page_source
+        _shot(driver, "23-private-upload-absent-marketplace-desktop-en-light.png")
 
         # Journey D — invalid placement is rejected visibly, correction saves, Ready succeeds.
         driver.get(_url(live_server, "public-store-product", data["store"].slug, data["product"].slug))
-        _click(driver, By.CSS_SELECTOR, f'a[href="{reverse("studio")}?product={data["product"].pk}"]')
+        _click(driver, By.ID, "product-customize-link")
         invalid_project = _start_project_from_studio_entry(driver, data)
         _click(driver, By.CSS_SELECTOR, '[data-studio-tab="text"]')
         wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, '[data-studio-pane="text"]')))
@@ -244,7 +245,7 @@ def test_artwork_marketplace_and_visual_studio_desktop_journeys(client, live_ser
         Select(driver.find_element(By.ID, "text-zone")).select_by_value(str(data["zone"].pk))
         Select(driver.find_element(By.ID, "text-method")).select_by_value("print")
         _click(driver, By.CSS_SELECTOR, '[data-studio-pane="text"] button[type="submit"]')
-        text_node = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-studio-element][data-kind="text"]')))
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-studio-element][data-kind="text"]')))
         text_element = CustomizationElement.objects.get(customization__project=invalid_project, kind=CustomizationElement.Kind.TEXT)
         _click(driver, By.CSS_SELECTOR, f'[data-element-id="{text_element.pk}"]')
         before_invalid = dict(text_element.transform)
