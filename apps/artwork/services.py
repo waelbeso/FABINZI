@@ -82,7 +82,7 @@ def set_ip_declaration(*, version, actor, rights_basis, rights_holder_name, thir
 
 def validate_artwork_ready(version):
     try:
-        declaration = version.ip_declaration
+        declaration = IPDeclaration.objects.get(version=version)
     except IPDeclaration.DoesNotExist:
         raise ValidationError("IP rights declaration is required.")
     if not declaration.accepts_ip_policy:
