@@ -7,7 +7,7 @@ from django.shortcuts import render
 from django.urls import reverse
 
 from apps.artwork.models import Artwork, ArtworkAsset, ArtworkVersion
-from apps.manufacturer_marketplace.models import ManufacturerListing
+from apps.manufacturer_marketplace.models import ManufacturerCapability, ManufacturerListing
 from apps.organizations.models import Organization
 from apps.storefront.models import StoreProduct, Storefront
 from .brand_assets import favicon_ico, icon_png, social_share_png
@@ -47,19 +47,36 @@ def _public_home_data():
     )
     for artwork in artworks:
         artwork.public_preview = None
+        artwork.public_suitability = None
         for version in getattr(artwork, "approved_versions", []):
             previews = getattr(version, "public_previews", [])
-            if previews:
+            if artwork.public_preview is None and previews:
                 artwork.public_preview = previews[0]
+            # Suitability/use copy is only public when explicitly marked as such
+            # in an approved version. We never infer it from internal notes.
+            if artwork.public_suitability is None:
+                suitability = (version.metadata or {}).get("public_suitability")
+                if isinstance(suitability, str) and suitability.strip():
+                    artwork.public_suitability = suitability.strip()
+                elif isinstance(suitability, list):
+                    clean = [str(item).strip() for item in suitability if str(item).strip()]
+                    if clean:
+                        artwork.public_suitability = " · ".join(clean[:3])
+            if artwork.public_preview is not None and artwork.public_suitability is not None:
                 break
 
+    public_capabilities = ManufacturerCapability.objects.filter(is_active=True).order_by(
+        "capability_type", "name"
+    )
     manufacturers = (
         ManufacturerListing.objects.filter(
             status=ManufacturerListing.Status.PUBLISHED,
             organization__verification_status=Organization.VerificationStatus.ACTIVE,
         )
         .select_related("organization")
-        .prefetch_related("capabilities")
+        .prefetch_related(
+            Prefetch("capabilities", queryset=public_capabilities, to_attr="public_capabilities")
+        )
         .order_by("organization__display_name")[:4]
     )
     return {
