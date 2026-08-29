@@ -105,6 +105,7 @@ def robots_txt(request):
         "Disallow: /purchases/",
         "Disallow: /orders/",
         "Disallow: /studio/",
+        "Disallow: /media/private/",
         "Disallow: /notifications/",
         "Disallow: /designer/",
         "Disallow: /manufacturer/",
@@ -152,6 +153,13 @@ def sitemap_xml(request):
             reverse("public-store-product", args=[product.storefront.slug, product.slug]),
             product.updated_at,
         )
+
+    artworks = Artwork.objects.filter(
+        status=Artwork.Status.APPROVED,
+        versions__status=ArtworkVersion.Status.APPROVED,
+    ).distinct().only("id", "updated_at")
+    for artwork in artworks.iterator():
+        _sitemap_url(urlset, reverse("artwork-detail", args=[artwork.pk]), artwork.updated_at)
 
     manufacturers = ManufacturerListing.objects.filter(
         status=ManufacturerListing.Status.PUBLISHED,
