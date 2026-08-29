@@ -1,11 +1,15 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.paginator import Paginator
+from django.db.models import Exists, OuterRef, Q
 from django.shortcuts import get_object_or_404, redirect, render
 
+from apps.artwork.models import ArtworkPlacement
 from apps.checkout.models import CartItem
 from apps.checkout.services import add_cart_item
 from apps.organizations.models import Membership, Organization
+from apps.platform_ops.seo import absolute_url, media_url, page_seo
 from .models import CustomizationElement, ProductVariant, StoreProduct, Storefront, StudioProject
 from .services import (
     add_customization_element,
@@ -30,13 +34,87 @@ def _positive_int(value, default=1):
     return value if value > 0 else default
 
 
+def _asset_url(asset):
+    if not asset:
+        return None
+    metadata = asset.metadata or {}
+    return metadata.get("public_url") or asset.provider_asset_id
+
+
 def store_marketplace(request):
+    ready_placements = ArtworkPlacement.objects.filter(product_id=OuterRef("designed_product_id"))
+    products = (
+        StoreProduct.objects.filter(
+            status=StoreProduct.Status.PUBLISHED,
+            storefront__status=Storefront.Status.PUBLISHED,
+        )
+        .select_related("storefront", "storefront__organization", "designed_product")
+        .prefetch_related("images__media_asset", "variants", "designed_product__placements")
+        .annotate(is_ready_designed=Exists(ready_placements))
+    )
+
+    q = request.GET.get("q", "").strip()
+    collection = request.GET.get("collection", "all")
+    fulfillment = request.GET.get("fulfillment", "all")
+    sort = request.GET.get("sort", "featured")
+    if q:
+        products = products.filter(
+            Q(title_en__icontains=q)
+            | Q(title_ar__icontains=q)
+            | Q(description_en__icontains=q)
+            | Q(description_ar__icontains=q)
+            | Q(storefront__name_en__icontains=q)
+            | Q(storefront__name_ar__icontains=q)
+        )
+    if collection == "customizable":
+        products = products.filter(customization_enabled=True)
+    elif collection == "ready":
+        products = products.filter(is_ready_designed=True)
+    elif collection == "plain":
+        products = products.filter(customization_enabled=False, is_ready_designed=False)
+    else:
+        collection = "all"
+    if fulfillment in StoreProduct.FulfillmentMode.values:
+        products = products.filter(fulfillment_mode=fulfillment)
+    else:
+        fulfillment = "all"
+
+    orderings = {
+        "featured": ("-featured", "-published_at", "-updated_at"),
+        "newest": ("-published_at", "-updated_at"),
+        "price_asc": ("base_price", "title_en"),
+        "price_desc": ("-base_price", "title_en"),
+        "title": ("title_en",),
+    }
+    if sort not in orderings:
+        sort = "featured"
+    products = products.order_by(*orderings[sort])
+    page_obj = Paginator(products, 12).get_page(request.GET.get("page"))
     stores = (
         Storefront.objects.filter(status=Storefront.Status.PUBLISHED)
         .select_related("organization", "logo")
-        .prefetch_related("products__images__media_asset", "products__variants")
+        .order_by("-published_at", "name_en")[:6]
     )
-    return render(request, "storefront/store_marketplace.html", {"stores": stores})
+    title = _localized(request, "تسوّق منتجات المصممين | FABINZI", "تسوّق منتجات المصممين | FABINZI") if False else _localized(request, "Shop designer products | FABINZI", "تسوّق منتجات المصممين | FABINZI")
+    description = _localized(
+        request,
+        "Browse published FABINZI products using real product, variant, price and fulfillment data.",
+        "تصفح منتجات FABINZI المنشورة باستخدام بيانات المنتج والمتغير والسعر والتنفيذ الفعلية.",
+    )
+    return render(
+        request,
+        "storefront/store_marketplace.html",
+        {
+            "stores": stores,
+            "page_obj": page_obj,
+            "products": page_obj.object_list,
+            "search_query": q,
+            "collection": collection,
+            "fulfillment": fulfillment,
+            "sort": sort,
+            "page_seo": page_seo(title=title, description=description),
+        },
+    )
 
 
 def public_storefront(request, slug):
@@ -50,7 +128,31 @@ def public_storefront(request, slug):
         .select_related("designed_product")
         .prefetch_related("images__media_asset", "variants", "designed_product__placements")
     )
-    return render(request, "storefront/storefront_detail.html", {"store": store, "products": products})
+    name = _localized(request, store.name_en, store.name_ar or store.name_en)
+    about = _localized(request, store.about_en, store.about_ar or store.about_en)
+    logo = _asset_url(store.logo)
+    schema = {
+        "@context": "https://schema.org",
+        "@type": "CollectionPage",
+        "name": name,
+        "description": about or f"{name} on FABINZI",
+        "url": absolute_url(request.path),
+        "isPartOf": {"@type": "WebSite", "name": "FABINZI", "url": absolute_url("/")},
+    }
+    return render(
+        request,
+        "storefront/storefront_detail.html",
+        {
+            "store": store,
+            "products": products,
+            "page_seo": page_seo(
+                title=f"{name} | FABINZI",
+                description=about or _localized(request, "Published designer storefront on FABINZI.", "متجر مصمم منشور على FABINZI."),
+                image=logo,
+                json_ld=schema,
+            ),
+        },
+    )
 
 
 def public_product(request, store_slug, product_slug):
@@ -67,8 +169,36 @@ def public_product(request, store_slug, product_slug):
         slug=product_slug,
         status=StoreProduct.Status.PUBLISHED,
     )
-    variants = product.variants.filter(is_active=True)
+    variants = list(product.variants.filter(is_active=True))
     is_ready_designed = product.designed_product.placements.exists()
+    primary_image = product.images.first()
+    image_url = _asset_url(primary_image.media_asset) if primary_image else None
+    name = _localized(request, product.title_en, product.title_ar or product.title_en)
+    description = _localized(request, product.description_en, product.description_ar or product.description_en)
+    prices = [variant.price for variant in variants] or [product.base_price]
+    available = any(variant.stock_quantity is None or variant.stock_quantity > 0 for variant in variants)
+    schema = {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": name,
+        "description": description or name,
+        "url": absolute_url(request.path),
+        "sku": variants[0].sku if len(variants) == 1 else None,
+        "image": [media_url(image_url)] if image_url else [media_url(None)],
+        "brand": {"@type": "Brand", "name": product.storefront.organization.display_name},
+        "offers": {
+            "@type": "AggregateOffer" if len(prices) > 1 else "Offer",
+            "priceCurrency": product.currency,
+            "lowPrice": str(min(prices)),
+            "highPrice": str(max(prices)),
+            "price": str(prices[0]),
+            "offerCount": len(variants),
+            "availability": "https://schema.org/InStock" if available else "https://schema.org/OutOfStock",
+            "url": absolute_url(request.path),
+        },
+    }
+    schema["offers"] = {key: value for key, value in schema["offers"].items() if value is not None}
+    schema = {key: value for key, value in schema.items() if value is not None}
     return render(
         request,
         "storefront/product_detail.html",
@@ -76,7 +206,14 @@ def public_product(request, store_slug, product_slug):
             "product": product,
             "variants": variants,
             "is_ready_designed": is_ready_designed,
-            "primary_image": product.images.first(),
+            "primary_image": primary_image,
+            "page_seo": page_seo(
+                title=f"{name} | FABINZI",
+                description=description or _localized(request, "Published designer product on FABINZI.", "منتج مصمم منشور على FABINZI."),
+                image=image_url,
+                page_type="product",
+                json_ld=schema,
+            ),
         },
     )
 
