@@ -16,7 +16,7 @@ INSTALLED_APPS = [
     "django.contrib.messages", "django.contrib.staticfiles", "django.contrib.sites", "rest_framework",
     "django_otp", "django_otp.plugins.otp_totp", "django_otp.plugins.otp_static", "two_factor",
     "apps.accounts", "apps.audit", "apps.integrations", "apps.media", "apps.notifications", "apps.platform_ops",
-    "apps.organizations", "apps.design", "apps.artwork",
+    "apps.organizations", "apps.design", "apps.artwork", "apps.manufacturer_marketplace",
 ]
 
 MIDDLEWARE = [
@@ -53,10 +53,7 @@ USE_TZ = True
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
-STORAGES = {
-    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage" if DEBUG else "whitenoise.storage.CompressedManifestStaticFilesStorage"},
-}
+STORAGES = {"default":{"BACKEND":"django.core.files.storage.FileSystemStorage"},"staticfiles":{"BACKEND":"django.contrib.staticfiles.storage.StaticFilesStorage" if DEBUG else "whitenoise.storage.CompressedManifestStaticFilesStorage"}}
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 REST_FRAMEWORK = {"DEFAULT_AUTHENTICATION_CLASSES":["rest_framework.authentication.SessionAuthentication"],"DEFAULT_PERMISSION_CLASSES":["rest_framework.permissions.IsAuthenticated"],"DEFAULT_VERSIONING_CLASS":"rest_framework.versioning.NamespaceVersioning"}
 REDIS_URL = env("REDIS_URL", default="redis://localhost:6379/0")
@@ -68,21 +65,20 @@ CELERY_TASK_TIME_LIMIT = 300
 CELERY_TASK_SOFT_TIME_LIMIT = 270
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 INTEGRATION_ENCRYPTION_KEY = env("INTEGRATION_ENCRYPTION_KEY", default="")
-if not DEBUG and not INTEGRATION_ENCRYPTION_KEY:
-    raise ImproperlyConfigured("INTEGRATION_ENCRYPTION_KEY is required outside DEBUG mode")
+if not DEBUG and not INTEGRATION_ENCRYPTION_KEY: raise ImproperlyConfigured("INTEGRATION_ENCRYPTION_KEY is required outside DEBUG mode")
 SENTRY_ENABLED = env.bool("SENTRY_ENABLED", default=False)
 SENTRY_DSN = env("SENTRY_DSN", default="")
 if SENTRY_ENABLED and SENTRY_DSN:
     import sentry_sdk
-    sentry_sdk.init(dsn=SENTRY_DSN, environment=ENVIRONMENT, send_default_pii=False, traces_sample_rate=0.05)
-SESSION_COOKIE_HTTPONLY = True
-CSRF_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SECURE = not DEBUG
-CSRF_COOKIE_SECURE = not DEBUG
-SECURE_SSL_REDIRECT = not DEBUG
-SECURE_HSTS_SECONDS = 31536000 if not DEBUG else 0
-SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
-SECURE_HSTS_PRELOAD = not DEBUG
-X_FRAME_OPTIONS = "DENY"
-SECURE_REFERRER_POLICY = "same-origin"
-FABINZI_ADMIN_PATH = "/Maneg/"
+    sentry_sdk.init(dsn=SENTRY_DSN,environment=ENVIRONMENT,send_default_pii=False,traces_sample_rate=0.05)
+SESSION_COOKIE_HTTPONLY=True
+CSRF_COOKIE_HTTPONLY=True
+SESSION_COOKIE_SECURE=not DEBUG
+CSRF_COOKIE_SECURE=not DEBUG
+SECURE_SSL_REDIRECT=not DEBUG
+SECURE_HSTS_SECONDS=31536000 if not DEBUG else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS=not DEBUG
+SECURE_HSTS_PRELOAD=not DEBUG
+X_FRAME_OPTIONS="DENY"
+SECURE_REFERRER_POLICY="same-origin"
+FABINZI_ADMIN_PATH="/Maneg/"

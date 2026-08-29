@@ -5,47 +5,20 @@ from rest_framework.views import APIView
 
 from apps.artwork.api import ArtworkAssetAPIView, ArtworkDetailAPIView, ArtworkListCreateAPIView, ArtworkPublicAPIView, ArtworkRevisionAPIView, ArtworkReviewAPIView, ArtworkVersionDetailAPIView, DesignedProductListCreateAPIView, IPCaseCreateAPIView, IPCaseEvidenceAPIView, IPCaseModerateAPIView, IPDeclarationAPIView, ProductPlacementAPIView, PublishDesignedProductAPIView, SubmitArtworkVersionAPIView
 from apps.design.api import CreateRevisionAPIView, DecorationZoneAPIView, DesignAssetAPIView, GarmentDesignDetailAPIView, GarmentDesignListCreateAPIView, SizeRowAPIView, SubmitVersionAPIView, TechnicalReviewAPIView, VersionDetailAPIView
+from apps.manufacturer_marketplace.api import CancelRFQAPIView, CapabilityAPIView, DeclineInvitationAPIView, ManufacturerInvitationsAPIView, ManufacturerListingAPIView, OpenRFQAPIView, PortfolioAssetAPIView, PublicManufacturerDetailAPIView, PublicManufacturerListAPIView, PublishListingAPIView, RFQListCreateAPIView, RFQQuotesAPIView, SelectQuoteAPIView, SubmitQuoteAPIView
 from apps.organizations.api import DesignerOnboardingAPIView, ManufacturerOnboardingAPIView, OrganizationMemberDetailAPIView, OrganizationMembersAPIView, SubmitOnboardingAPIView, VerificationDocumentAPIView
 
 
 class ApiHealthView(APIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
-    def get(self, request):
-        return Response({"status": "ok", "service": "fabinzi", "api": "v1"})
+    permission_classes=[AllowAny]; authentication_classes=[]
+    def get(self,request): return Response({"status":"ok","service":"fabinzi","api":"v1"})
 
-
-app_name = "v1"
-urlpatterns = [
-    path("health/", ApiHealthView.as_view(), name="health"),
-    path("onboarding/designer/", DesignerOnboardingAPIView.as_view(), name="designer-onboarding"),
-    path("onboarding/manufacturer/", ManufacturerOnboardingAPIView.as_view(), name="manufacturer-onboarding"),
-    path("onboarding/<int:pk>/submit/", SubmitOnboardingAPIView.as_view(), name="submit-onboarding"),
-    path("onboarding/<int:application_id>/documents/", VerificationDocumentAPIView.as_view(), name="onboarding-document"),
-    path("businesses/<int:organization_id>/members/", OrganizationMembersAPIView.as_view(), name="business-members"),
-    path("businesses/<int:organization_id>/members/<int:membership_id>/", OrganizationMemberDetailAPIView.as_view(), name="business-member-detail"),
-    path("designs/", GarmentDesignListCreateAPIView.as_view(), name="design-list-create"),
-    path("designs/<int:pk>/", GarmentDesignDetailAPIView.as_view(), name="design-detail"),
-    path("designs/<int:pk>/revisions/", CreateRevisionAPIView.as_view(), name="design-revision"),
-    path("design-versions/<int:version_id>/", VersionDetailAPIView.as_view(), name="design-version-detail"),
-    path("design-versions/<int:version_id>/submit/", SubmitVersionAPIView.as_view(), name="design-version-submit"),
-    path("design-versions/<int:version_id>/sizes/", SizeRowAPIView.as_view(), name="design-version-size"),
-    path("design-versions/<int:version_id>/decoration-zones/", DecorationZoneAPIView.as_view(), name="design-version-zone"),
-    path("design-versions/<int:version_id>/assets/", DesignAssetAPIView.as_view(), name="design-version-asset"),
-    path("design-versions/<int:version_id>/review/", TechnicalReviewAPIView.as_view(), name="design-version-review"),
-    path("artworks/public/", ArtworkPublicAPIView.as_view(), name="artwork-public"),
-    path("artworks/", ArtworkListCreateAPIView.as_view(), name="artwork-list-create"),
-    path("artworks/<int:pk>/", ArtworkDetailAPIView.as_view(), name="artwork-detail"),
-    path("artworks/<int:pk>/revisions/", ArtworkRevisionAPIView.as_view(), name="artwork-revision"),
-    path("artwork-versions/<int:version_id>/", ArtworkVersionDetailAPIView.as_view(), name="artwork-version-detail"),
-    path("artwork-versions/<int:version_id>/assets/", ArtworkAssetAPIView.as_view(), name="artwork-version-asset"),
-    path("artwork-versions/<int:version_id>/ip-declaration/", IPDeclarationAPIView.as_view(), name="artwork-version-ip"),
-    path("artwork-versions/<int:version_id>/submit/", SubmitArtworkVersionAPIView.as_view(), name="artwork-version-submit"),
-    path("artwork-versions/<int:version_id>/review/", ArtworkReviewAPIView.as_view(), name="artwork-version-review"),
-    path("designed-products/", DesignedProductListCreateAPIView.as_view(), name="designed-product-list-create"),
-    path("designed-products/<int:product_id>/placements/", ProductPlacementAPIView.as_view(), name="designed-product-placement"),
-    path("designed-products/<int:product_id>/publish/", PublishDesignedProductAPIView.as_view(), name="designed-product-publish"),
-    path("ip-cases/", IPCaseCreateAPIView.as_view(), name="ip-case-create"),
-    path("ip-cases/<int:case_id>/evidence/", IPCaseEvidenceAPIView.as_view(), name="ip-case-evidence"),
-    path("ip-cases/<int:case_id>/moderate/", IPCaseModerateAPIView.as_view(), name="ip-case-moderate"),
+app_name="v1"
+urlpatterns=[
+path("health/",ApiHealthView.as_view(),name="health"),
+path("onboarding/designer/",DesignerOnboardingAPIView.as_view(),name="designer-onboarding"),path("onboarding/manufacturer/",ManufacturerOnboardingAPIView.as_view(),name="manufacturer-onboarding"),path("onboarding/<int:pk>/submit/",SubmitOnboardingAPIView.as_view(),name="submit-onboarding"),path("onboarding/<int:application_id>/documents/",VerificationDocumentAPIView.as_view(),name="onboarding-document"),path("businesses/<int:organization_id>/members/",OrganizationMembersAPIView.as_view(),name="business-members"),path("businesses/<int:organization_id>/members/<int:membership_id>/",OrganizationMemberDetailAPIView.as_view(),name="business-member-detail"),
+path("designs/",GarmentDesignListCreateAPIView.as_view(),name="design-list-create"),path("designs/<int:pk>/",GarmentDesignDetailAPIView.as_view(),name="design-detail"),path("designs/<int:pk>/revisions/",CreateRevisionAPIView.as_view(),name="design-revision"),path("design-versions/<int:version_id>/",VersionDetailAPIView.as_view(),name="design-version-detail"),path("design-versions/<int:version_id>/submit/",SubmitVersionAPIView.as_view(),name="design-version-submit"),path("design-versions/<int:version_id>/sizes/",SizeRowAPIView.as_view(),name="design-version-size"),path("design-versions/<int:version_id>/decoration-zones/",DecorationZoneAPIView.as_view(),name="design-version-zone"),path("design-versions/<int:version_id>/assets/",DesignAssetAPIView.as_view(),name="design-version-asset"),path("design-versions/<int:version_id>/review/",TechnicalReviewAPIView.as_view(),name="design-version-review"),
+path("artworks/public/",ArtworkPublicAPIView.as_view(),name="artwork-public"),path("artworks/",ArtworkListCreateAPIView.as_view(),name="artwork-list-create"),path("artworks/<int:pk>/",ArtworkDetailAPIView.as_view(),name="artwork-detail"),path("artworks/<int:pk>/revisions/",ArtworkRevisionAPIView.as_view(),name="artwork-revision"),path("artwork-versions/<int:version_id>/",ArtworkVersionDetailAPIView.as_view(),name="artwork-version-detail"),path("artwork-versions/<int:version_id>/assets/",ArtworkAssetAPIView.as_view(),name="artwork-version-asset"),path("artwork-versions/<int:version_id>/ip-declaration/",IPDeclarationAPIView.as_view(),name="artwork-version-ip"),path("artwork-versions/<int:version_id>/submit/",SubmitArtworkVersionAPIView.as_view(),name="artwork-version-submit"),path("artwork-versions/<int:version_id>/review/",ArtworkReviewAPIView.as_view(),name="artwork-version-review"),path("designed-products/",DesignedProductListCreateAPIView.as_view(),name="designed-product-list-create"),path("designed-products/<int:product_id>/placements/",ProductPlacementAPIView.as_view(),name="designed-product-placement"),path("designed-products/<int:product_id>/publish/",PublishDesignedProductAPIView.as_view(),name="designed-product-publish"),path("ip-cases/",IPCaseCreateAPIView.as_view(),name="ip-case-create"),path("ip-cases/<int:case_id>/evidence/",IPCaseEvidenceAPIView.as_view(),name="ip-case-evidence"),path("ip-cases/<int:case_id>/moderate/",IPCaseModerateAPIView.as_view(),name="ip-case-moderate"),
+path("manufacturers/public/",PublicManufacturerListAPIView.as_view(),name="manufacturer-public-list"),path("manufacturers/public/<int:pk>/",PublicManufacturerDetailAPIView.as_view(),name="manufacturer-public-detail"),path("manufacturers/<int:organization_id>/listing/",ManufacturerListingAPIView.as_view(),name="manufacturer-listing"),path("manufacturer-listings/<int:listing_id>/publish/",PublishListingAPIView.as_view(),name="manufacturer-listing-publish"),path("manufacturer-listings/<int:listing_id>/capabilities/",CapabilityAPIView.as_view(),name="manufacturer-capability"),path("manufacturer-listings/<int:listing_id>/portfolio/",PortfolioAssetAPIView.as_view(),name="manufacturer-portfolio"),
+path("rfqs/",RFQListCreateAPIView.as_view(),name="rfq-list-create"),path("rfqs/<int:rfq_id>/open/",OpenRFQAPIView.as_view(),name="rfq-open"),path("rfqs/<int:rfq_id>/quotes/",RFQQuotesAPIView.as_view(),name="rfq-quotes"),path("rfqs/<int:rfq_id>/cancel/",CancelRFQAPIView.as_view(),name="rfq-cancel"),path("manufacturers/<int:organization_id>/rfq-invitations/",ManufacturerInvitationsAPIView.as_view(),name="manufacturer-rfq-invitations"),path("rfq-invitations/<int:invitation_id>/quote/",SubmitQuoteAPIView.as_view(),name="rfq-submit-quote"),path("rfq-invitations/<int:invitation_id>/decline/",DeclineInvitationAPIView.as_view(),name="rfq-decline"),path("manufacturer-quotes/<int:quote_id>/select/",SelectQuoteAPIView.as_view(),name="manufacturer-quote-select"),
 ]
