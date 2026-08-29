@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 from django.conf import settings
+from django.contrib.auth.models import AnonymousUser
 from django.test import RequestFactory
 from django.urls import reverse
 from django.utils import timezone
@@ -65,12 +66,14 @@ def test_branded_error_and_csrf_surfaces_do_not_expose_reason(client):
     factory = RequestFactory()
     request = factory.get("/bad-request/?lang=en")
     request.LANGUAGE_CODE = "en"
+    request.user = AnonymousUser()
     response = bad_request(request)
     assert response.status_code == 400
     assert b"FABINZI" in response.content
 
     request = factory.post("/checkout/")
     request.LANGUAGE_CODE = "en"
+    request.user = AnonymousUser()
     csrf = csrf_failure(request, reason="SECRET INTERNAL CSRF DIAGNOSTIC")
     assert csrf.status_code == 403
     assert b"FABINZI" in csrf.content
