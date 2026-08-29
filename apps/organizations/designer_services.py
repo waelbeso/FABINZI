@@ -2,7 +2,8 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 
 from apps.audit.services import record_audit_event
-from .models import Membership, Organization
+from apps.media.designer_services import require_private_designer_asset
+from .models import Membership, OnboardingApplication, Organization, VerificationDocument
 from .services import require_org_access
 
 
@@ -118,3 +119,30 @@ def secure_deactivate_member(*, membership, actor, request=None):
         request=request,
     )
     return membership
+
+
+@transaction.atomic
+def attach_designer_verification_document(*, application, actor, media_asset, document_type, description="", request=None):
+    organization = application.organization
+    if organization.kind != Organization.Kind.DESIGNER:
+        raise ValidationError("This attachment path is for Designer verification documents only.")
+    require_org_access(actor, organization, roles=[Membership.Role.OWNER, Membership.Role.MANAGER])
+    if application.status not in {OnboardingApplication.Status.DRAFT, OnboardingApplication.Status.REVISION_REQUIRED}:
+        raise ValidationError("Verification documents cannot be changed in the current state.")
+    require_private_designer_asset(asset=media_asset, organization=organization, actor=actor)
+    document = VerificationDocument(
+        application=application,
+        media_asset=media_asset,
+        document_type=document_type,
+        description=description,
+    )
+    document.full_clean()
+    document.save()
+    record_audit_event(
+        actor=actor,
+        action="onboarding.verification_document.attached",
+        instance=document,
+        metadata={"organization_id": organization.pk, "media_asset_id": media_asset.pk},
+        request=request,
+    )
+    return document
