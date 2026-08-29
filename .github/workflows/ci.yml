@@ -75,3 +75,11 @@ jobs:
           path: artifacts/manufacturer-browser-qa
           if-no-files-found: error
           retention-days: 14
+      - name: Upload /Maneg/ Control Center browser QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maneg-control-center-browser-qa
+          path: artifacts/maneg-browser-qa
+          if-no-files-found: error
+          retention-days: 14
