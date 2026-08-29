@@ -29,7 +29,15 @@ _AR = {
     "twilio": "Twilio", "amazon_s3": "Amazon S3", "cloudflare_images": "Cloudflare Images", "sentry": "Sentry",
 }
 
-_SENSITIVE = ("password", "secret", "token", "credential", "authorization", "api_key", "apikey", "webhook", "dsn", "database_url", "redis_url", "encryption")
+_SENSITIVE = (
+    "password", "secret", "token", "credential", "authorization", "api_key", "apikey",
+    "webhook", "dsn", "database_url", "redis_url", "encryption", "private_key", "access_key",
+)
+
+
+def _sensitive_key(value):
+    key = str(value or "").lower()
+    return any(token in key for token in _SENSITIVE)
 
 
 @register.filter(name="maneg_label")
@@ -61,7 +69,7 @@ def mask_email(value):
     return (local[:1] or "•") + "•••@" + domain
 
 
-def _safe_value(value):
+def _safe_scalar(value):
     if value is None:
         return "—"
     if isinstance(value, bool):
@@ -75,18 +83,29 @@ def _safe_value(value):
 def _flatten(data, prefix=""):
     rows = []
     if not isinstance(data, dict):
-        return [{"key": prefix or "value", "value": _safe_value(data)}]
+        return [{"key": prefix or "value", "value": _safe_scalar(data)}]
     for key, value in data.items():
         key_text = str(key)
         full = f"{prefix}.{key_text}" if prefix else key_text
-        if any(token in key_text.lower() for token in _SENSITIVE):
-            rows.append({"key": full.replace("_", " "), "value": "Hidden"})
+        label = full.replace("_", " ")
+        if _sensitive_key(key_text):
+            rows.append({"key": label, "value": "Hidden"})
         elif isinstance(value, dict):
             rows.extend(_flatten(value, full))
         elif isinstance(value, (list, tuple)):
-            rows.append({"key": full.replace("_", " "), "value": ", ".join(_safe_value(v) for v in value[:12])})
+            safe_parts = []
+            for index, item in enumerate(value[:12]):
+                if isinstance(item, dict):
+                    nested = _flatten(item, f"{full}[{index}]")
+                    rows.extend(nested)
+                elif isinstance(item, (list, tuple)):
+                    safe_parts.append("[structured data]")
+                else:
+                    safe_parts.append(_safe_scalar(item))
+            if safe_parts:
+                rows.append({"key": label, "value": ", ".join(safe_parts)})
         else:
-            rows.append({"key": full.replace("_", " "), "value": _safe_value(value)})
+            rows.append({"key": label, "value": _safe_scalar(value)})
     return rows
 
 
