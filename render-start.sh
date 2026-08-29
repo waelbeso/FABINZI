@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 
+python manage.py reconcile_migration_state
 python manage.py migrate --noinput
 python manage.py collectstatic --noinput
 exec gunicorn config.wsgi:application \
