@@ -60,6 +60,17 @@ def _is_expected_top_level_404(driver, entry):
     return message.startswith(expected_prefix) and "status of 404 (Not Found)" in message
 
 
+def _assert_only_intentional_maintenance_503(driver):
+    severe = [entry for entry in driver.get_log("browser") if entry.get("level") == "SEVERE"]
+    assert len(severe) == 1, severe
+    entry = severe[0]
+    assert entry.get("source") == "network", entry
+    message = entry.get("message", "")
+    expected_prefix = f"{driver.current_url} - Failed to load resource:"
+    assert message.startswith(expected_prefix), entry
+    assert "status of 503 (Service Unavailable)" in message, entry
+
+
 def _assert_healthy_document(driver, *, allow_expected_top_level_404=False):
     source = driver.page_source.lower()
     assert "traceback (most recent call last)" not in source
@@ -132,6 +143,7 @@ def test_production_launch_gate_real_chrome_evidence(client, live_server):
         driver.get(_url(live_server, "terms"))
         _wait_ready(driver)
         assert "Maintenance in progress" in driver.page_source
+        _assert_only_intentional_maintenance_503(driver)
         _shot(driver, "10-maintenance-desktop-en-light.png")
         window.delete()
     finally:
