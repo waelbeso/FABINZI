@@ -9,8 +9,10 @@ envVarGroups:
         value: "0"
       - key: ENVIRONMENT
         value: production
+      - key: PRIVATE_MEDIA_STORAGE_MODE
+        value: s3
       - key: DJANGO_ALLOWED_HOSTS
-        value: .onrender.com,localhost,127.0.0.1
+        value: .onrender.com
       - key: DJANGO_CSRF_TRUSTED_ORIGINS
         value: https://*.onrender.com
       - key: DJANGO_SECURE_SSL_REDIRECT
@@ -60,22 +62,6 @@ services:
           type: keyvalue
           name: fabinzi-redis
           property: connectionString
-      - key: DEMO_ADMIN_EMAIL
-        sync: false
-      - key: DEMO_ADMIN_PASSWORD
-        sync: false
-      - key: DEMO_DESIGNER_EMAIL
-        sync: false
-      - key: DEMO_DESIGNER_PASSWORD
-        sync: false
-      - key: DEMO_MANUFACTURER_EMAIL
-        sync: false
-      - key: DEMO_MANUFACTURER_PASSWORD
-        sync: false
-      - key: DEMO_CUSTOMER_EMAIL
-        sync: false
-      - key: DEMO_CUSTOMER_PASSWORD
-        sync: false
 
   - type: worker
     name: fabinzi-worker
