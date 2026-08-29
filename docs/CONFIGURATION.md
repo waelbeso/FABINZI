@@ -1,65 +1,59 @@
 # FABINZI Configuration
 
-## Core runtime variables
+Configuration is environment-specific. Secrets never belong in Git, templates, browser JavaScript, screenshots, or public documentation.
 
-| Variable | Purpose | Production requirement |
-| --- | --- | --- |
-| `DJANGO_SECRET_KEY` | Django cryptographic signing secret | Required |
-| `DJANGO_DEBUG` | Django debug mode | Must be `false` |
-| `ENVIRONMENT` | Environment label used by monitoring | Set to `production` |
-| `DJANGO_ALLOWED_HOSTS` | Comma-separated allowed hosts | Required |
-| `DJANGO_CSRF_TRUSTED_ORIGINS` | Comma-separated trusted HTTPS origins | Required for deployed browser forms/API session auth |
-| `DJANGO_SECURE_SSL_REDIRECT` | HTTPS enforcement | `true` in production |
-| `FABINZI_PUBLIC_BASE_URL` | Single authoritative public origin for generated absolute URLs | Required |
-| `DATABASE_URL` | PostgreSQL connection string | Required |
-| `REDIS_URL` | Redis/Valkey connection string for Celery | Required when worker/Beat are deployed |
-| `INTEGRATION_ENCRYPTION_KEY` | Encryption secret for database-backed provider credentials | Required outside DEBUG |
-| `DEFAULT_LANGUAGE` | Default UI language | Optional, default `en` |
-| `TIME_ZONE` | Application time zone | Optional, default `Africa/Cairo` |
-| `API_ANON_RATE` | DRF anonymous throttle rate | Optional |
-| `API_USER_RATE` | DRF authenticated throttle rate | Optional |
+## REQUIRED — production runtime
 
-## Public URL configuration
+| Variable | Requirement |
+| --- | --- |
+| `DJANGO_SECRET_KEY` | Explicit secret; production startup rejects the development fallback. |
+| `DJANGO_DEBUG` | `false` / `0`. |
+| `ENVIRONMENT` | `production`. |
+| `PRIVATE_MEDIA_STORAGE_MODE` | `s3` for production private media. |
+| `DJANGO_ALLOWED_HOSTS` | Actual production hostnames only. |
+| `DJANGO_CSRF_TRUSTED_ORIGINS` | Actual trusted HTTPS browser origins. |
+| `DJANGO_SECURE_SSL_REDIRECT` | `true` / `1`. |
+| `FABINZI_PUBLIC_BASE_URL` | Canonical HTTPS public origin; non-HTTPS is rejected outside DEBUG. |
+| `DATABASE_URL` | PostgreSQL connection string. |
+| `REDIS_URL` | Redis-compatible broker/result backend used by Celery. |
+| `INTEGRATION_ENCRYPTION_KEY` | Stable encryption key for provider secrets; required outside DEBUG. |
 
-Set exactly one canonical origin:
+`FABINZI_PUBLIC_BASE_URL` is the single origin used for generated absolute URLs, canonical metadata, sitemap entries and social metadata. Same-origin browser API calls use relative URLs.
 
-```text
-FABINZI_PUBLIC_BASE_URL=https://fabinzi-web.onrender.com
-```
+## OPTIONAL — core runtime
 
-Do not scatter the deployment domain through application code. Server-generated absolute URLs should use `apps.platform_ops.public_urls.absolute_public_url()`. Same-origin browser calls should use relative `/api/v1/...` paths.
+- `DEFAULT_LANGUAGE` — default `en`.
+- `TIME_ZONE` — default `Africa/Cairo`.
+- `API_ANON_RATE` — DRF anonymous throttle rate.
+- `API_USER_RATE` — DRF authenticated throttle rate.
+- `SENTRY_ENABLED` — enables bootstrap Sentry initialization when a DSN is also present.
+- `SENTRY_DSN` — optional deployment-level Sentry DSN.
 
-When the public domain changes later, update the environment variable and corresponding host/CSRF configuration rather than editing code.
+Optional does not mean “enabled by default.” Provider availability must be determined from actual deployment configuration.
 
-## Sentry
+## INTEGRATION-SPECIFIC
 
-Bootstrap variables:
+Database-backed `IntegrationConfig` supports:
 
-- `SENTRY_ENABLED`
-- `SENTRY_DSN`
+- COD — internal payment option; no third-party credential.
+- Paymob — optional online payment provider.
+- Stripe — optional online payment provider.
+- Mailgun — optional email delivery.
+- Twilio — optional SMS delivery.
+- Amazon S3 — production private object storage path.
+- Cloudflare Images — optional image provider.
+- Sentry — optional monitoring integration metadata.
 
-The platform also contains database-backed integration configuration for Sentry. Keep monitoring disabled until a valid DSN and intended policy are configured.
+Provider secrets are encrypted with `INTEGRATION_ENCRYPTION_KEY`. A provider must not be described as configured, sandbox-ready or production-ready merely because its adapter exists. `/Maneg/` Test Connection should be used only against credentials intentionally configured by the account owner.
 
-## Payment, communications, and media integrations
+## QA-ONLY / DEMO-ONLY
 
-Paymob, Stripe, Mailgun, Twilio, Amazon S3, Cloudflare Images, and integration-level Sentry settings are stored in the existing `IntegrationConfig` model and managed through `/Maneg/` where supported.
+The guarded dataset uses:
 
-Provider secrets must never be committed to `.env.example`, `render.yaml`, source code, or public documentation.
-
-COD is the default QA-safe payment method and does not require a third-party credential.
-
-## Demo-only variables
-
-The QA seed is protected by:
-
-```text
-FABINZI_DEMO_SEED_ENABLED=false
-```
-
-The command additionally reads:
-
+- `FABINZI_DEMO_SEED_ENABLED`
 - `DEMO_ADMIN_EMAIL`
 - `DEMO_ADMIN_PASSWORD`
+- `DEMO_ADMIN_TOTP_SECRET` — base32 secret used only by `provision_demo_admin_otp`.
 - `DEMO_DESIGNER_EMAIL`
 - `DEMO_DESIGNER_PASSWORD`
 - `DEMO_MANUFACTURER_EMAIL`
@@ -67,14 +61,14 @@ The command additionally reads:
 - `DEMO_CUSTOMER_EMAIL`
 - `DEMO_CUSTOMER_PASSWORD`
 
-Passwords have no source-controlled defaults. The command refuses to run when any required password value is empty.
+`FABINZI_DEMO_SEED_ENABLED` must remain false in production. The production `render.yaml` does not request demo passwords. QA/demo secrets belong only in a protected non-production environment.
 
-For a real production launch, keep the safety flag false and remove demo credentials from the runtime environment.
+## Local development
 
-## Reverse proxy / HTTPS
+`.env.example` contains safe names/placeholders. Copy it to `.env` locally and provide local values. `PRIVATE_MEDIA_STORAGE_MODE=local` is allowed only for development/test environments; the settings module rejects it for production-like environments.
 
-Production settings trust `X-Forwarded-Proto=https` from the hosting proxy and use secure session/CSRF cookies, HTTPS redirection, HSTS, same-origin referrer policy, frame denial, content-type nosniff, and cross-origin opener/resource policy protections.
+## Security-derived settings
 
-## `.env` handling
+When DEBUG is false the application enables secure session/CSRF cookies, HTTPS redirect by default, one-year HSTS, subdomain HSTS/preload, `DENY` framing, content-type nosniff, same-origin referrer policy and cross-origin opener policy. Custom middleware also applies restrictive permissions/resource headers and `X-Robots-Tag` to non-public surfaces.
 
-`.env.example` contains variable names and safe placeholders only. Copy it locally as `.env` and provide local values. `.env` itself must remain ignored by Git.
+The custom CSRF failure view is `apps.platform_ops.launch_views.csrf_failure`; it renders a branded recovery page without exposing the internal rejection reason.
