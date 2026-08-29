@@ -85,7 +85,7 @@ def complete_private_artwork(owner, org, *, title="Private Wave"):
 )
 def test_designer_onboarding_states_render_without_crossing_access(client, app_status, org_status, expected_heading, can_edit):
     user = User.objects.create_user(username=f"state-{app_status}-{org_status}", password="password123")
-    designer_org(user, f"State {app_status} {org_status}", status=org_status, app_status=app_status)
+    org = designer_org(user, f"State {app_status} {org_status}", status=org_status, app_status=app_status)
     client.force_login(user)
     response = client.get(reverse("designer"))
     assert response.status_code == 200
@@ -93,7 +93,12 @@ def test_designer_onboarding_states_render_without_crossing_access(client, app_s
     text = response.content.decode("utf-8")
     assert expected_heading in text
     if org_status == Organization.VerificationStatus.ACTIVE:
-        assert "Active work" in text
+        assert f"{org.display_name} workspace" in text
+        assert "Real design, Artwork, sourcing, Store, fulfillment and finance state" in text
+        assert "New Garment Design" in text
+        assert "Priority actions" in text
+        assert "Edit application" not in text
+        assert "Submit for review" not in text
     else:
         assert "Full Designer workspace access follows" in text
         assert ("Edit application" in text) is can_edit
