@@ -9,6 +9,7 @@ INDEXABLE_URL_NAMES = {
     "public-storefront",
     "public-store-product",
     "artwork",
+    "artwork-detail",
     "manufacturer-marketplace",
     "manufacturer-public-detail",
 }
@@ -24,8 +25,8 @@ PUBLIC_PAGE_SEO = {
         "ar": ("FABINZI | من فكرة الأزياء إلى منتج حقيقي", "تسوّق أزياء المصممين والتصميمات الجاهزة والتخصيص الاختياري بينما تربط FABINZI التصميم والتصنيع والشراء في رحلة واحدة."),
     },
     "artwork": {
-        "en": ("Approved artwork | FABINZI", "Explore artwork actually approved on FABINZI and connected to the platform's designer-led product ecosystem."),
-        "ar": ("الأعمال الفنية المعتمدة | FABINZI", "استكشف الأعمال الفنية المعتمدة فعليًا على FABINZI والمرتبطة بمنظومة المنتجات التي يقودها المصممون."),
+        "en": ("Artwork Marketplace | FABINZI", "Discover approved Designer Artwork that can be used on eligible FABINZI products."),
+        "ar": ("سوق الأعمال الفنية | FABINZI", "اكتشف أعمال المصممين الفنية المعتمدة التي يمكن استخدامها على منتجات FABINZI المؤهلة."),
     },
     "manufacturer-marketplace": {
         "en": ("Manufacturers | FABINZI", "Discover verified manufacturer businesses and their published production capabilities on FABINZI."),
