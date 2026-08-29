@@ -3,6 +3,7 @@ import logging
 from django.db import DatabaseError
 
 from .models import MaintenanceWindow, PlatformAnnouncement
+from .seo import seo_context
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,8 @@ def active_announcements(request):
             ),
         }
     except DatabaseError:
-        # Announcements and banners are optional presentation data. They must
-        # never turn otherwise healthy pages into a 500 response.
         logger.exception("Platform announcement lookup failed; rendering without operational banners")
         return {"platform_announcements": (), "maintenance_warning": None}
+
+
+__all__ = ["active_announcements", "seo_context"]
