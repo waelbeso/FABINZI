@@ -1,11 +1,8 @@
-import json
-from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from django.conf import settings
 from django.db import connection
 from django.db.models import Prefetch
-from django.http import FileResponse, HttpResponse, JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
 
@@ -13,6 +10,7 @@ from apps.artwork.models import Artwork, ArtworkAsset, ArtworkVersion
 from apps.manufacturer_marketplace.models import ManufacturerListing
 from apps.organizations.models import Organization
 from apps.storefront.models import StoreProduct, Storefront
+from .brand_assets import favicon_ico, icon_png, social_share_png
 from .seo import absolute_url, localized_public_url
 
 
@@ -155,14 +153,14 @@ def site_manifest(request):
     manifest = {
         "name": "FABINZI",
         "short_name": "FABINZI",
-        "description": "Designer fashion, distributed manufacturing and customer customization.",
+        "description": "Designer fashion, distributed manufacturing and optional customer customization.",
         "start_url": "/",
         "display": "standalone",
         "background_color": "#f7f7fb",
         "theme_color": "#6d4aff",
         "icons": [
-            {"src": "/static/brand/icon-192.png", "sizes": "192x192", "type": "image/png"},
-            {"src": "/static/brand/icon-512.png", "sizes": "512x512", "type": "image/png"},
+            {"src": reverse("site-icon-192"), "sizes": "192x192", "type": "image/png"},
+            {"src": reverse("site-icon-512"), "sizes": "512x512", "type": "image/png"},
         ],
     }
     response = JsonResponse(manifest, json_dumps_params={"ensure_ascii": False})
@@ -171,11 +169,43 @@ def site_manifest(request):
     return response
 
 
-def favicon(request):
-    path = Path(settings.BASE_DIR) / "static" / "brand" / "favicon.ico"
-    response = FileResponse(path.open("rb"), content_type="image/x-icon")
-    response["Cache-Control"] = "public, max-age=604800, immutable"
+def _brand_binary(payload, content_type, max_age=604800):
+    response = HttpResponse(payload, content_type=content_type)
+    response["Cache-Control"] = f"public, max-age={max_age}, immutable"
+    response["X-Content-Type-Options"] = "nosniff"
     return response
+
+
+def favicon(request):
+    return _brand_binary(favicon_ico(), "image/x-icon")
+
+
+def apple_touch_icon(request):
+    return _brand_binary(icon_png(180), "image/png")
+
+
+def site_icon_192(request):
+    return _brand_binary(icon_png(192), "image/png")
+
+
+def site_icon_512(request):
+    return _brand_binary(icon_png(512), "image/png")
+
+
+def social_share_image(request):
+    return _brand_binary(social_share_png(), "image/png", max_age=86400)
+
+
+def handler403(request, exception=None):
+    return render(request, "errors/403.html", status=403)
+
+
+def handler404(request, exception=None):
+    return render(request, "errors/404.html", status=404)
+
+
+def handler500(request):
+    return render(request, "errors/500.html", status=500)
 
 
 def healthz(request):
