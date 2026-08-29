@@ -1,3 +1,4 @@
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponseBadRequest
 from django.shortcuts import redirect, render
@@ -5,6 +6,7 @@ from django.utils.translation import activate
 
 from apps.artwork.models import Artwork
 from apps.checkout.models import Cart, CustomerPurchase
+from apps.notifications.models import Notification
 from apps.storefront.models import StoreProduct, Storefront, StudioProject
 from .models import User
 
@@ -37,6 +39,7 @@ def app_home(request):
         .order_by("-updated_at")[:4]
     )
     active_cart = Cart.objects.filter(customer=request.user, status=Cart.Status.ACTIVE).prefetch_related("items").first()
+    unread_notifications = Notification.objects.filter(recipient=request.user, is_read=False).count()
     return render(
         request,
         "accounts/app_home.html",
@@ -46,21 +49,28 @@ def app_home(request):
             "recent_purchases": purchases,
             "studio_projects": studio_projects,
             "active_cart": active_cart,
+            "unread_notifications": unread_notifications,
         },
     )
 
 
 @login_required
 def profile_preferences(request):
-    if request.method != "POST":
-        return redirect("app-home")
+    if request.method == "GET":
+        return render(request, "accounts/preferences.html")
+
     theme = request.POST.get("theme")
     language = request.POST.get("language")
     if theme not in User.Theme.values or language not in User.Language.values:
         return HttpResponseBadRequest("Invalid preference")
+
     request.user.theme_preference = theme
     request.user.language_preference = language
     request.user.save(update_fields=["theme_preference", "language_preference"])
     activate(language)
     request.session["django_language"] = language
-    return redirect("app-home")
+    messages.success(
+        request,
+        "تم حفظ تفضيلات الحساب." if language == "ar" else "Account preferences saved.",
+    )
+    return redirect("profile-preferences")
