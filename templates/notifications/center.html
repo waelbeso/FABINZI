@@ -1,1 +1,32 @@
-{% extends 'base.html' %}{% load i18n %}{% block title %}{% trans 'Notifications' %} · FABINZI{% endblock %}{% block content %}<section><h1>{% trans 'Notifications' %}</h1><p>{% trans 'In-app notifications are always available. Email and SMS are optional and only use integrations activated by FABINZI administration.' %}</p>{% for n in notifications %}<article class="card"><strong>{% if LANGUAGE_CODE == 'ar' %}{{ n.title_ar }}{% else %}{{ n.title_en }}{% endif %}</strong><p>{% if LANGUAGE_CODE == 'ar' %}{{ n.body_ar }}{% else %}{{ n.body_en }}{% endif %}</p>{% if n.destination %}<a href="{{ n.destination }}">{% trans 'Open' %}</a>{% endif %}</article>{% empty %}<p>{% trans 'No notifications yet.' %}</p>{% endfor %}</section>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}{% if request.LANGUAGE_CODE == 'ar' %}الإشعارات{% else %}Notifications{% endif %} | FABINZI{% endblock %}
+{% block content %}
+<section class="section--tight split">
+  <div>
+    <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}حسابي{% else %}MY ACCOUNT{% endif %}</div>
+    <h1 class="page-title">{% if request.LANGUAGE_CODE == 'ar' %}الإشعارات{% else %}Notifications{% endif %}</h1>
+    <p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}التحديثات داخل FABINZI متاحة دائمًا. البريد الإلكتروني والرسائل النصية اختيارية ولا تُستخدم إلا عندما تكون تكاملات المنصة مفعلة فعليًا.{% else %}In-app updates are always available. Email and SMS are optional and only deliver when the relevant FABINZI integrations are actually enabled.{% endif %}</p>
+  </div>
+  <aside class="card summary-list">
+    <div class="summary-row"><span>{% if request.LANGUAGE_CODE == 'ar' %}غير مقروء{% else %}Unread{% endif %}</span><strong>{{ unread_count }}</strong></div>
+    {% if unread_count %}<form method="post">{% csrf_token %}<input type="hidden" name="action" value="mark_all_read"><button class="button button--ghost button--sm" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}تعليم الكل كمقروء{% else %}Mark all as read{% endif %}</button></form>{% endif %}
+  </aside>
+</section>
+
+<div class="split section--tight">
+  <section aria-labelledby="notification-feed-title">
+    <div class="section-header"><div><div class="section-kicker">{% if request.LANGUAGE_CODE == 'ar' %}آخر التحديثات{% else %}LATEST UPDATES{% endif %}</div><h2 class="section-title" id="notification-feed-title">{% if request.LANGUAGE_CODE == 'ar' %}مركز الإشعارات{% else %}Notification feed{% endif %}</h2></div></div>
+    {% if notifications %}<div class="stack">{% for n in notifications %}<article class="card {% if not n.is_read %}notification--unread{% endif %}" {% if not n.is_read %}aria-label="{% if request.LANGUAGE_CODE == 'ar' %}إشعار غير مقروء{% else %}Unread notification{% endif %}"{% endif %}><div class="cluster"><span class="badge {% if not n.is_read %}badge--info{% endif %}">{% if not n.is_read %}{% if request.LANGUAGE_CODE == 'ar' %}جديد{% else %}New{% endif %}{% else %}{% if request.LANGUAGE_CODE == 'ar' %}مقروء{% else %}Read{% endif %}{% endif %}</span><time class="muted" datetime="{{ n.created_at|date:'c' }}">{{ n.created_at|date:'Y-m-d H:i' }}</time></div><h3>{% if request.LANGUAGE_CODE == 'ar' %}{{ n.title_ar }}{% else %}{{ n.title_en }}{% endif %}</h3>{% if n.body_ar or n.body_en %}<p class="muted">{% if request.LANGUAGE_CODE == 'ar' %}{{ n.body_ar }}{% else %}{{ n.body_en }}{% endif %}</p>{% endif %}{% if n.destination %}<a class="button button--ghost button--sm" href="{{ n.destination }}">{% if request.LANGUAGE_CODE == 'ar' %}فتح{% else %}Open{% endif %}</a>{% endif %}</article>{% endfor %}</div>{% else %}<div class="empty-state"><h3>{% if request.LANGUAGE_CODE == 'ar' %}لا توجد إشعارات بعد{% else %}No notifications yet{% endif %}</h3><p>{% if request.LANGUAGE_CODE == 'ar' %}ستظهر هنا تحديثات الحساب والطلبات عندما تُنشأ فعليًا.{% else %}Account and order updates will appear here when they are actually created.{% endif %}</p></div>{% endif %}
+  </section>
+
+  <aside class="surface stack" aria-labelledby="notification-preferences-title">
+    <div><div class="section-kicker">{% if request.LANGUAGE_CODE == 'ar' %}التفضيلات{% else %}PREFERENCES{% endif %}</div><h2 class="section-title" id="notification-preferences-title">{% if request.LANGUAGE_CODE == 'ar' %}قنوات الإشعار{% else %}Notification channels{% endif %}</h2><p class="muted">{% if request.LANGUAGE_CODE == 'ar' %}الإشعارات داخل الموقع لا يتم إيقافها. يمكنك فقط اختيار القنوات الخارجية الإضافية.{% else %}In-app notifications stay available. These settings only control optional external delivery channels.{% endif %}</p></div>
+    <form method="post" class="stack">{% csrf_token %}<input type="hidden" name="action" value="preferences">
+      <label class="card cluster" for="notification-email"><input id="notification-email" name="email_enabled" type="checkbox" {% if preference.email_enabled %}checked{% endif %}><span><strong>{% if request.LANGUAGE_CODE == 'ar' %}البريد الإلكتروني{% else %}Email{% endif %}</strong><small class="muted">{% if user.email %}{{ user.email }}{% else %}{% if request.LANGUAGE_CODE == 'ar' %}لا يوجد بريد محفوظ بالحساب{% else %}No email saved on this account{% endif %}{% endif %}</small></span></label>
+      <label class="card cluster" for="notification-sms"><input id="notification-sms" name="sms_enabled" type="checkbox" {% if preference.sms_enabled %}checked{% endif %}><span><strong>{% if request.LANGUAGE_CODE == 'ar' %}رسالة نصية SMS{% else %}SMS{% endif %}</strong><small class="muted">{% if request.LANGUAGE_CODE == 'ar' %}تتطلب رقمًا دوليًا صالحًا وتكامل SMS مفعّلًا{% else %}Requires a valid international number and an enabled SMS integration{% endif %}</small></span></label>
+      <div class="field"><label for="notification-phone">{% if request.LANGUAGE_CODE == 'ar' %}رقم الهاتف الدولي{% else %}International phone number{% endif %}</label><input class="input" id="notification-phone" name="phone_e164" type="tel" inputmode="tel" autocomplete="tel" value="{{ preference.phone_e164 }}" placeholder="+201000000000"><span class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}استخدم صيغة E.164 مع علامة + وكود الدولة.{% else %}Use E.164 format with + and country code.{% endif %}</span></div>
+      <button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}حفظ تفضيلات الإشعارات{% else %}Save notification preferences{% endif %}</button>
+    </form>
+  </aside>
+</div>
+{% endblock %}
