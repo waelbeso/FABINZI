@@ -88,9 +88,13 @@ def public_artwork_queryset():
         status=ArtworkVersion.Status.APPROVED,
     ).prefetch_related(Prefetch("assets", queryset=preview_assets, to_attr="public_previews")).order_by("-version_number")
     return (
-        Artwork.objects.filter(status=Artwork.Status.APPROVED)
+        Artwork.objects.filter(
+            status=Artwork.Status.APPROVED,
+            versions__status=ArtworkVersion.Status.APPROVED,
+        )
         .select_related("organization")
         .prefetch_related(Prefetch("versions", queryset=approved_versions, to_attr="public_versions"))
+        .distinct()
     )
 
 
