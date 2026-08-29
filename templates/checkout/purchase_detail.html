@@ -1,4 +1,4 @@
-{% extends 'base.html' %}
+{% extends 'base.html' %}{% load fabinzi_i18n %}
 {% block title %}{% if request.LANGUAGE_CODE == 'ar' %}تفاصيل الطلب{% else %}Order details{% endif %} | FABINZI{% endblock %}
 {% block content %}
 <nav class="breadcrumbs"><a href="{% url 'purchases' %}">{% if request.LANGUAGE_CODE == 'ar' %}طلباتي{% else %}My Orders{% endif %}</a><span>/</span><span>{{ purchase.number }}</span></nav>
@@ -6,10 +6,10 @@
   <div>
     <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}رقم الطلب{% else %}Order number{% endif %}</div>
     <h1 class="page-title purchase-number">{{ purchase.number }}</h1>
-    <div class="cluster"><span class="badge {% if purchase.status == 'confirmed' %}badge--success{% elif purchase.status == 'payment_failed' or purchase.status == 'cancelled' %}badge--danger{% else %}badge--info{% endif %}">{{ purchase.get_status_display }}</span><span class="badge">{{ purchase.fulfillment_status }}</span></div>
+    <div class="cluster"><span class="badge {% if purchase.status == 'confirmed' %}badge--success{% elif purchase.status == 'payment_failed' or purchase.status == 'cancelled' %}badge--danger{% else %}badge--info{% endif %}">{{ purchase.status|fab_label:request.LANGUAGE_CODE }}</span><span class="badge">{{ purchase.fulfillment_status|fab_label:request.LANGUAGE_CODE }}</span></div>
   </div>
   <div class="card summary-list">
-    <div class="summary-row"><span>{% if request.LANGUAGE_CODE == 'ar' %}الدفع{% else %}Payment{% endif %}</span><strong>{{ purchase.get_payment_method_display }}</strong></div>
+    <div class="summary-row"><span>{% if request.LANGUAGE_CODE == 'ar' %}الدفع{% else %}Payment{% endif %}</span><strong>{{ purchase.payment_method|fab_label:request.LANGUAGE_CODE }}</strong></div>
     <div class="summary-row"><span>{% if request.LANGUAGE_CODE == 'ar' %}الإجمالي الفرعي{% else %}Subtotal{% endif %}</span><strong>{{ purchase.subtotal }} {{ purchase.currency }}</strong></div>
     <div class="summary-row"><span>{% if request.LANGUAGE_CODE == 'ar' %}الشحن{% else %}Shipping{% endif %}</span><strong>{{ purchase.shipping_amount }} {{ purchase.currency }}</strong></div>
     <div class="summary-row summary-row--total"><span>{% if request.LANGUAGE_CODE == 'ar' %}الإجمالي{% else %}Total{% endif %}</span><strong>{{ purchase.total }} {{ purchase.currency }}</strong></div>
@@ -22,11 +22,11 @@
     {% for order in purchase.child_orders.all %}
     <article class="card purchase-item">
       <div>
-        <div class="cluster">{% if order.item.studio_project %}<span class="badge badge--info">{% if request.LANGUAGE_CODE == 'ar' %}مخصص{% else %}Customized{% endif %}</span>{% elif order.item.store_product.designed_product.placements.exists %}<span class="badge badge--success">{% if request.LANGUAGE_CODE == 'ar' %}تصميم جاهز{% else %}Ready designed{% endif %}</span>{% else %}<span class="badge">{% if request.LANGUAGE_CODE == 'ar' %}منتج عادي{% else %}Plain product{% endif %}</span>{% endif %}<span class="badge">{{ order.get_status_display }}</span></div>
+        <div class="cluster">{% if order.item.studio_project %}<span class="badge badge--info">{% if request.LANGUAGE_CODE == 'ar' %}مخصص{% else %}Customized{% endif %}</span>{% elif order.item.store_product.designed_product.placements.exists %}<span class="badge badge--success">{% if request.LANGUAGE_CODE == 'ar' %}تصميم جاهز{% else %}Ready designed{% endif %}</span>{% else %}<span class="badge">{% if request.LANGUAGE_CODE == 'ar' %}منتج عادي{% else %}Plain product{% endif %}</span>{% endif %}<span class="badge">{{ order.status|fab_label:request.LANGUAGE_CODE }}</span></div>
         <h3>{{ order.item.title }}</h3>
         <p class="muted">{{ order.item.size }}{% if order.item.color_name %} · {{ order.item.color_name }}{% endif %} · ×{{ order.item.quantity }}</p>
       </div>
-      <div><span class="muted">{% if request.LANGUAGE_CODE == 'ar' %}حالة التنفيذ{% else %}Fulfillment{% endif %}</span><strong>{% if order.fulfillment %}{{ order.fulfillment.get_status_display }}{% else %}{% if request.LANGUAGE_CODE == 'ar' %}قيد التجهيز{% else %}Processing{% endif %}{% endif %}</strong></div>
+      <div><span class="muted">{% if request.LANGUAGE_CODE == 'ar' %}حالة التنفيذ{% else %}Fulfillment{% endif %}</span><strong>{% if order.fulfillment %}{{ order.fulfillment.status|fab_label:request.LANGUAGE_CODE }}{% else %}{{ 'processing'|fab_label:request.LANGUAGE_CODE }}{% endif %}</strong></div>
       <strong class="price">{{ order.total }} {{ order.currency }}</strong>
     </article>
     {% endfor %}
