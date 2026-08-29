@@ -23,6 +23,7 @@ jobs:
     env:
       DJANGO_SECRET_KEY: ci-secret-not-production-but-long-enough-for-django-checks-123456
       DJANGO_DEBUG: "true"
+      ENVIRONMENT: test
       DATABASE_URL: postgresql://fabinzi:fabinzi@localhost:5432/fabinzi
       REDIS_URL: redis://localhost:6379/0
       FABINZI_PUBLIC_BASE_URL: http://localhost:8000
@@ -41,6 +42,8 @@ jobs:
       - name: Production settings check
         env:
           DJANGO_DEBUG: "false"
+          ENVIRONMENT: production
+          PRIVATE_MEDIA_STORAGE_MODE: s3
           INTEGRATION_ENCRYPTION_KEY: ci-arbitrary-secret-managed-by-render
           FABINZI_PUBLIC_BASE_URL: https://fabinzi.example
           DJANGO_ALLOWED_HOSTS: fabinzi.example
