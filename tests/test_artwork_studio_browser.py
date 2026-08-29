@@ -92,7 +92,7 @@ def _start_project_from_studio_entry(driver, data):
     wait = _wait(driver)
     wait.until(EC.presence_of_element_located((By.ID, "studio-variant")))
     Select(driver.find_element(By.ID, "studio-variant")).select_by_value(str(data["variant"].pk))
-    _click(driver, By.CSS_SELECTOR, 'form[aria-label="Start customization project"] button[type="submit"]')
+    _click(driver, By.CSS_SELECTOR, 'form:has(#studio-variant) button[type="submit"]')
     wait.until(EC.presence_of_element_located((By.ID, "studio-editor")))
     return StudioProject.objects.filter(product=data["product"]).latest("id")
 
@@ -251,13 +251,15 @@ def test_artwork_marketplace_and_visual_studio_desktop_journeys(client, live_ser
         before_invalid = dict(text_element.transform)
         x_input = driver.find_element(By.ID, "transform-x")
         x_input.clear(); x_input.send_keys("0.98"); x_input.send_keys(Keys.TAB)
-        wait.until(lambda d: d.find_element(By.ID, "studio-save-state").get_attribute("data-state") == "error")
+        wait.until(lambda d: d.find_element(By.ID, "studio-validation").get_attribute("data-correction-required") == "true")
+        assert driver.find_element(By.ID, "studio-save-state").get_attribute("data-state") == "error"
         text_element.refresh_from_db(); assert text_element.transform == before_invalid
         _shot(driver, "15-studio-invalid-desktop-en-light.png")
         x_input = driver.find_element(By.ID, "transform-x")
         x_input.clear(); x_input.send_keys("0.55"); x_input.send_keys(Keys.TAB)
         wait.until(lambda d: CustomizationElement.objects.get(pk=text_element.pk).transform["x"] == .55)
         wait.until(lambda d: d.find_element(By.ID, "studio-save-state").get_attribute("data-state") == "saved")
+        assert driver.find_element(By.ID, "studio-validation").get_attribute("data-correction-required") is None
         _ready_and_cart(driver)
         assert CartItem.objects.filter(cart__customer=customer, studio_project=invalid_project).exists()
     finally:
