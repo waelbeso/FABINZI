@@ -2,11 +2,53 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpResponseBadRequest
 from django.shortcuts import redirect, render
 from django.utils.translation import activate
+
+from apps.artwork.models import Artwork
+from apps.checkout.models import Cart, CustomerPurchase
+from apps.storefront.models import StoreProduct, Storefront, StudioProject
 from .models import User
+
 
 @login_required
 def app_home(request):
-    return render(request, "accounts/app_home.html")
+    products = (
+        StoreProduct.objects.filter(
+            status=StoreProduct.Status.PUBLISHED,
+            storefront__status=Storefront.Status.PUBLISHED,
+        )
+        .select_related("storefront", "designed_product")
+        .prefetch_related("images__media_asset", "variants", "designed_product__placements")
+        .order_by("-featured", "-published_at", "-updated_at")[:6]
+    )
+    artworks = (
+        Artwork.objects.filter(status=Artwork.Status.APPROVED)
+        .select_related("organization")
+        .order_by("-updated_at")[:4]
+    )
+    purchases = (
+        CustomerPurchase.objects.filter(customer=request.user)
+        .prefetch_related("child_orders__item__store_product")
+        .order_by("-created_at")[:4]
+    )
+    studio_projects = (
+        StudioProject.objects.filter(customer=request.user)
+        .exclude(status=StudioProject.Status.ARCHIVED)
+        .select_related("product", "product__storefront", "variant")
+        .order_by("-updated_at")[:4]
+    )
+    active_cart = Cart.objects.filter(customer=request.user, status=Cart.Status.ACTIVE).prefetch_related("items").first()
+    return render(
+        request,
+        "accounts/app_home.html",
+        {
+            "featured_products": products,
+            "featured_artworks": artworks,
+            "recent_purchases": purchases,
+            "studio_projects": studio_projects,
+            "active_cart": active_cart,
+        },
+    )
+
 
 @login_required
 def profile_preferences(request):
