@@ -1,12 +1,19 @@
-{% extends "base.html" %}{% load static i18n %}{% get_current_language as LANGUAGE_CODE %}
+{% extends "base.html" %}{% load static i18n two_factor_tags %}{% get_current_language as LANGUAGE_CODE %}
 {% block title %}{% if LANGUAGE_CODE == 'ar' %}تسجيل الدخول | FABINZI{% else %}Sign in | FABINZI{% endif %}{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'css/launch-gate.css' %}">{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/launch-gate.css' %}">{{ form.media }}{% endblock %}
 {% block content %}
 <section class="error-shell account-shell" aria-labelledby="signin-title">
   <div class="error-panel account-panel">
     <div class="trust-kicker">FABINZI</div>
     <h1 id="signin-title">{% if LANGUAGE_CODE == 'ar' %}تسجيل الدخول{% else %}Sign in{% endif %}</h1>
-    <p>{% if LANGUAGE_CODE == 'ar' %}استخدم بيانات حسابك الحالية. إذا كان حسابك يتطلب مصادقة إضافية فسيطلب منك FABINZI رمز التحقق في الخطوة التالية.{% else %}Use your existing account credentials. If your account requires an additional authentication factor, FABINZI will request it in the next step.{% endif %}</p>
+    {% if wizard.steps.current == 'auth' %}
+      <p>{% if LANGUAGE_CODE == 'ar' %}استخدم بيانات حسابك الحالية. إذا كان حسابك يتطلب مصادقة إضافية فسيطلب منك FABINZI رمز التحقق في الخطوة التالية.{% else %}Use your existing account credentials. If your account requires an additional authentication factor, FABINZI will request it in the next step.{% endif %}</p>
+    {% elif wizard.steps.current == 'token' %}
+      <p>{{ device|as_verbose_action }}</p>
+    {% elif wizard.steps.current == 'backup' %}
+      <p>{% if LANGUAGE_CODE == 'ar' %}أدخل أحد رموز الاسترداد الاحتياطية المحفوظة مسبقًا لهذا الحساب.{% else %}Enter one of the backup recovery tokens previously generated for this account.{% endif %}</p>
+    {% endif %}
+
     <form method="post" action="" novalidate>
       {% csrf_token %}
       {{ wizard.management_form }}
@@ -19,11 +26,33 @@
           {% for error in field.errors %}<div class="field-error" role="alert">{{ error }}</div>{% endfor %}
         </div>
       {% endfor %}
+
+      {% if other_devices %}
+        <div class="trust-note">
+          <strong>{% if LANGUAGE_CODE == 'ar' %}طريقة تحقق أخرى{% else %}Another verification method{% endif %}</strong>
+          <div class="error-actions">
+            {% for other in other_devices %}
+              <button name="challenge_device" value="{{ other.persistent_id }}" class="button button--ghost" type="submit">{{ other|as_action }}</button>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+
       <div class="error-actions">
         <button class="button" type="submit">{% if LANGUAGE_CODE == 'ar' %}متابعة{% else %}Continue{% endif %}</button>
         {% if wizard.steps.prev %}<button class="button button--ghost" type="submit" name="wizard_goto_step" value="{{ wizard.steps.prev }}" formnovalidate>{% if LANGUAGE_CODE == 'ar' %}رجوع{% else %}Back{% endif %}</button>{% endif %}
       </div>
     </form>
+
+    {% if backup_tokens %}
+      <form method="post" action="" class="trust-note">
+        {% csrf_token %}
+        {{ wizard.management_form }}
+        <p>{% if LANGUAGE_CODE == 'ar' %}إذا تعذر استخدام جهاز التحقق يمكنك استخدام رمز احتياطي صالح.{% else %}If your verification device is unavailable, you can use a valid backup token.{% endif %}</p>
+        <button name="wizard_goto_step" type="submit" value="backup" class="button button--ghost">{% if LANGUAGE_CODE == 'ar' %}استخدام رمز احتياطي{% else %}Use backup token{% endif %}</button>
+      </form>
+    {% endif %}
+
     <p class="trust-note">{% if LANGUAGE_CODE == 'ar' %}لا تطلب FABINZI كلمة المرور أو رمز المصادقة من خلال صفحة دعم عامة. لا تشارك أسرار المصادقة متعددة العوامل مع أي شخص.{% else %}FABINZI does not ask for your password or MFA secret through a public support page. Never share multi-factor authentication secrets with anyone.{% endif %}</p>
   </div>
 </section>
