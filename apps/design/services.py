@@ -4,7 +4,7 @@ from django.db.models import Max
 from django.utils import timezone
 
 from apps.audit.services import record_audit_event
-from apps.media.designer_services import require_private_designer_asset
+from apps.media.designer_services import claim_or_require_private_designer_asset
 from apps.notifications.models import Notification
 from apps.organizations.models import Membership, Organization
 from apps.organizations.services import require_org_access, user_has_org_access
@@ -114,7 +114,7 @@ def add_asset(*, version, actor, media_asset, kind, label="", request=None):
     require_draft(version, actor)
     organization = version.design.organization
     if media_asset.access == media_asset.Access.PRIVATE:
-        require_private_designer_asset(asset=media_asset, organization=organization, actor=actor)
+        claim_or_require_private_designer_asset(asset=media_asset, organization=organization, actor=actor, purpose=f"design_{kind}")
     elif kind != DesignAsset.Kind.PRODUCT_IMAGE:
         raise ValidationError("Technical design assets must remain private.")
     elif media_asset.uploaded_by_id and media_asset.uploaded_by_id != actor.pk and not actor.is_staff:
