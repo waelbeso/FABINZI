@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{% if request.LANGUAGE_CODE == 'ar' %}تفضيلات الحساب | FABINZI{% else %}Account Preferences | FABINZI{% endif %}{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="{% if request.LANGUAGE_CODE == 'ar' %}مسار الصفحة{% else %}Breadcrumb{% endif %}">
+  <a href="{% url 'app-home' %}">{% if request.LANGUAGE_CODE == 'ar' %}FABINZI الخاص بي{% else %}My FABINZI{% endif %}</a><span>/</span><span>{% if request.LANGUAGE_CODE == 'ar' %}التفضيلات{% else %}Preferences{% endif %}</span>
+</nav>
+<section class="account-settings-layout section--tight">
+  <div class="account-settings-intro">
+    <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}الحساب{% else %}ACCOUNT{% endif %}</div>
+    <h1 class="page-title">{% if request.LANGUAGE_CODE == 'ar' %}اللغة والمظهر{% else %}Language & appearance{% endif %}</h1>
+    <p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}اضبط لغة واجهة FABINZI والمظهر الذي تفضله. تبقى هذه الإعدادات منفصلة عن تجربة التسوق والطلبات.{% else %}Choose your FABINZI interface language and preferred appearance. These settings stay separate from shopping, Studio and order activity.{% endif %}</p>
+    <div class="account-settings-links">
+      <a href="{% url 'app-home' %}">{% if request.LANGUAGE_CODE == 'ar' %}العودة إلى FABINZI الخاص بي{% else %}Back to My FABINZI{% endif %}</a>
+      <a href="{% url 'notifications' %}">{% if request.LANGUAGE_CODE == 'ar' %}إعدادات الإشعارات{% else %}Notification settings{% endif %}</a>
+    </div>
+  </div>
+  <div class="panel account-settings-card">
+    <form action="{% url 'profile-preferences' %}" method="post" class="stack">{% csrf_token %}
+      <div class="field">
+        <label for="preference-language">{% if request.LANGUAGE_CODE == 'ar' %}اللغة{% else %}Language{% endif %}</label>
+        <select id="preference-language" name="language">
+          <option value="en" {% if user.language_preference == 'en' %}selected{% endif %}>English</option>
+          <option value="ar" {% if user.language_preference == 'ar' %}selected{% endif %}>العربية</option>
+        </select>
+        <p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}تتحول اتجاهات الصفحات تلقائيًا بين RTL وLTR وفق اللغة المختارة.{% else %}Page direction automatically switches between LTR and RTL with your language choice.{% endif %}</p>
+      </div>
+      <div class="field">
+        <label for="preference-theme">{% if request.LANGUAGE_CODE == 'ar' %}المظهر{% else %}Appearance{% endif %}</label>
+        <select id="preference-theme" name="theme">
+          <option value="system" {% if user.theme_preference == 'system' %}selected{% endif %}>{% if request.LANGUAGE_CODE == 'ar' %}حسب النظام{% else %}System{% endif %}</option>
+          <option value="light" {% if user.theme_preference == 'light' %}selected{% endif %}>{% if request.LANGUAGE_CODE == 'ar' %}فاتح{% else %}Light{% endif %}</option>
+          <option value="dark" {% if user.theme_preference == 'dark' %}selected{% endif %}>{% if request.LANGUAGE_CODE == 'ar' %}داكن{% else %}Dark{% endif %}</option>
+        </select>
+        <p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}يمكنك أيضًا تبديل المظهر مؤقتًا من زر المظهر في الترويسة.{% else %}You can also temporarily cycle appearance from the header control.{% endif %}</p>
+      </div>
+      <button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}حفظ التفضيلات{% else %}Save preferences{% endif %}</button>
+    </form>
+  </div>
+</section>
+{% endblock %}
