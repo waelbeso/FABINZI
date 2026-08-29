@@ -6,7 +6,7 @@ from django.utils import timezone
 from apps.audit.services import record_audit_event
 from apps.notifications.models import Notification
 from apps.storefront.models import ProductVariant, StoreProduct, StudioProject
-from apps.storefront.services import _validate_available_product, require_project_owner
+from apps.storefront.services import _validate_available_product, require_project_owner, validate_studio_project
 from .gateways import create_remote_payment, get_payment_config
 from .models import Cart, CartItem, CheckoutSession, CustomerOrder, CustomerPurchase, OrderItem, PaymentAttempt, PaymentWebhookEvent
 
@@ -22,14 +22,29 @@ def _shipping_snapshot(session):
 def _customization_snapshot(project):
     if not project or not hasattr(project, "customization") or not project.customization.enabled:
         return {}
-    return {"enabled": True, "studio_project_id": project.pk, "elements": [{"kind": e.kind, "zone_id": e.decoration_zone_id, "text": e.text, "media_asset_id": e.media_asset_id, "transform": e.transform, "style": e.style} for e in project.customization.elements.all()]}
+    elements = []
+    for element in project.customization.elements.select_related("decoration_zone", "media_asset", "artwork_version__artwork"):
+        elements.append({
+            "kind": element.kind,
+            "zone_id": element.decoration_zone_id,
+            "text": element.text,
+            "media_asset_id": element.media_asset_id,
+            "artwork_version_id": element.artwork_version_id,
+            "artwork_id": element.artwork_version.artwork_id if element.artwork_version_id else None,
+            "production_method": element.production_method,
+            "transform": element.transform,
+            "style": element.style,
+        })
+    return {"enabled": True, "studio_project_id": project.pk, "elements": elements}
 
 
 def _pricing(project):
+    if project.status != StudioProject.Status.READY:
+        raise ValidationError("Studio project must be Ready for checkout.")
     if not project.variant_id:
         raise ValidationError("A product variant is required for checkout.")
-    _validate_available_product(project.product, project.variant, project.quantity)
-    unit = _money(project.variant.price)
+    validation = validate_studio_project(project)
+    unit = _money(validation["unit_price"])
     subtotal = _money(unit * project.quantity)
     return unit, subtotal, Decimal("0.00"), Decimal("0.00"), subtotal
 
@@ -47,12 +62,15 @@ def _validate_cart_item(item):
         if project.customer_id != item.cart.customer_id:
             raise PermissionDenied("Studio project does not belong to this customer.")
         if project.status != StudioProject.Status.READY:
-            raise ValidationError("Studio project must be Ready before adding it to Cart.")
+            raise ValidationError("This customization needs attention in Studio before checkout.")
         if project.product_id != item.store_product_id or project.variant_id != item.variant_id:
             raise ValidationError("Studio project product and variant must match the Cart item.")
-        if hasattr(project, "customization") and project.customization.enabled:
-            for element in project.customization.elements.select_related("decoration_zone", "media_asset"):
-                element.full_clean()
+        if project.quantity != item.quantity:
+            raise ValidationError("Studio Cart quantity must match the saved customization project.")
+        try:
+            validate_studio_project(project)
+        except ValidationError as exc:
+            raise ValidationError(["This customization needs attention before checkout.", *exc.messages]) from exc
     elif item.studio_project_id:
         raise ValidationError("Only Studio cart items may reference a Studio project.")
 
@@ -144,6 +162,9 @@ def add_cart_item(*, customer, product, variant, quantity=1, kind=CartItem.Kind.
             raise ValidationError("Studio project must be Ready before adding it to Cart.")
         if studio_project.product_id != product.pk or studio_project.variant_id != variant.pk:
             raise ValidationError("Studio project product and variant must match the Cart item.")
+        if studio_project.quantity != quantity:
+            raise ValidationError("Studio Cart quantity must match the saved customization project.")
+        validate_studio_project(studio_project)
         existing = cart.items.filter(kind=kind, studio_project=studio_project).first()
     else:
         if studio_project is not None:
@@ -170,6 +191,8 @@ def update_cart_item(*, item, actor, quantity, request=None):
     quantity = int(quantity)
     if quantity < 1:
         raise ValidationError("Quantity must be at least 1.")
+    if item.kind == CartItem.Kind.STUDIO and item.studio_project_id and quantity != item.studio_project.quantity:
+        raise ValidationError("Change customized quantity in Studio so the saved project and Cart remain consistent.")
     item.quantity = quantity
     _validate_cart_item(item)
     item.full_clean()
@@ -193,6 +216,8 @@ def create_cart_checkout(*, cart, actor, request=None):
     require_cart_owner(actor, cart)
     if cart.status != Cart.Status.ACTIVE:
         raise ValidationError("Only an active Cart can be checked out.")
+    # Boundary 1: authoritative validation and repricing immediately before
+    # checkout is created or refreshed.
     lines, subtotal, shipping, discount, total, currency = _cart_pricing(cart)
     session, created = CheckoutSession.objects.get_or_create(cart=cart, defaults={"customer": cart.customer, "subtotal": subtotal, "shipping_amount": shipping, "discount_amount": discount, "total": total, "currency": currency})
     if session.status != CheckoutSession.Status.DRAFT:
@@ -326,6 +351,8 @@ def place_cart_purchase(*, session, actor, payment_method, request=None):
     cart = Cart.objects.select_for_update().get(pk=session.cart_id)
     if cart.status != Cart.Status.ACTIVE:
         raise ValidationError("Cart is no longer active.")
+    # Boundary 2: re-run all product/variant/Studio/source/method/transform
+    # validation and server pricing immediately before any purchase is created.
     lines, subtotal, shipping, discount, total, currency = _cart_pricing(cart)
     if payment_method not in CustomerPurchase.PaymentMethod.values:
         raise ValidationError("Unsupported payment method.")
