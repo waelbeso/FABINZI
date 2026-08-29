@@ -1,5 +1,5 @@
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import permissions, status
@@ -7,9 +7,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.media.models import MediaAsset
+from .designer_services import secure_add_or_update_member, secure_deactivate_member
 from .models import Membership, OnboardingApplication, Organization, VerificationDocument
 from .serializers import DesignerCreateSerializer, ManufacturerCreateSerializer, MemberMutationSerializer, OnboardingApplicationSerializer, VerificationDocumentCreateSerializer
-from .services import add_or_update_member, create_designer_onboarding, create_manufacturer_onboarding, deactivate_member, require_org_access, submit_application, update_onboarding
+from .services import create_designer_onboarding, create_manufacturer_onboarding, require_org_access, submit_application, update_onboarding
 
 
 def _application_for(user, kind):
@@ -84,10 +85,10 @@ class SubmitOnboardingAPIView(APIView):
         application = get_object_or_404(OnboardingApplication.objects.select_related("organization"), pk=pk)
         try:
             submit_application(application=application, actor=request.user, request=request)
-        except Exception as exc:
-            if exc.__class__.__name__ in {"PermissionDenied", "ValidationError"}:
-                return Response({"detail": str(exc)}, status=400 if exc.__class__.__name__ == "ValidationError" else 403)
-            raise
+        except PermissionDenied as exc:
+            return Response({"detail": str(exc)}, status=403)
+        except ValidationError as exc:
+            return Response({"detail": exc.messages}, status=400)
         return Response(OnboardingApplicationSerializer(application).data)
 
 
@@ -106,7 +107,9 @@ class OrganizationMembersAPIView(APIView):
         serializer.is_valid(raise_exception=True)
         user = get_object_or_404(get_user_model(), pk=serializer.validated_data["user_id"])
         try:
-            membership = add_or_update_member(organization=org, actor=request.user, user=user, role=serializer.validated_data["role"], request=request)
+            membership = secure_add_or_update_member(organization=org, actor=request.user, user=user, role=serializer.validated_data["role"], request=request)
+        except PermissionDenied as exc:
+            return Response({"detail": str(exc)}, status=403)
         except ValidationError as exc:
             return Response({"detail": exc.messages}, status=400)
         return Response({"id": membership.id, "user_id": membership.user_id, "role": membership.role, "is_active": membership.is_active}, status=201)
@@ -118,7 +121,9 @@ class OrganizationMemberDetailAPIView(APIView):
     def delete(self, request, organization_id, membership_id):
         membership = get_object_or_404(Membership.objects.select_related("organization"), pk=membership_id, organization_id=organization_id)
         try:
-            deactivate_member(membership=membership, actor=request.user, request=request)
+            secure_deactivate_member(membership=membership, actor=request.user, request=request)
+        except PermissionDenied as exc:
+            return Response({"detail": str(exc)}, status=403)
         except ValidationError as exc:
             return Response({"detail": exc.messages}, status=400)
         return Response(status=204)
