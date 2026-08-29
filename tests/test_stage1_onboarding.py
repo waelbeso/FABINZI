@@ -76,3 +76,41 @@ def test_portal_creates_designer_draft(client):
 def test_api_is_authenticated(client):
     response = client.get("/api/v1/onboarding/designer/")
     assert response.status_code in (401, 403)
+
+
+@pytest.mark.django_db
+def test_owner_can_add_team_member_and_last_owner_cannot_be_removed():
+    owner = User.objects.create_user(username="teamowner", password="StrongPass123!")
+    teammate = User.objects.create_user(username="teammate", password="StrongPass123!")
+    app = create_designer_onboarding(user=owner, organization_data={"display_name": "Team Studio", "email": "team@example.com"}, profile_data={"terms_accepted": True})
+    from apps.organizations.services import add_or_update_member, deactivate_member
+    member = add_or_update_member(organization=app.organization, actor=owner, user=teammate, role=Membership.Role.DESIGNER)
+    assert member.is_active
+    owner_membership = Membership.objects.get(organization=app.organization, user=owner)
+    with pytest.raises(ValidationError):
+        deactivate_member(membership=owner_membership, actor=owner)
+
+
+@pytest.mark.django_db
+def test_revision_required_application_can_be_edited():
+    owner = User.objects.create_user(username="editowner", password="StrongPass123!")
+    staff = User.objects.create_user(username="editstaff", password="StrongPass123!", is_staff=True)
+    app = create_designer_onboarding(user=owner, organization_data={"display_name": "Old Studio", "email": "old@example.com"}, profile_data={"terms_accepted": True})
+    submit_application(application=app, actor=owner)
+    review_application(application=app, reviewer=staff, decision=OnboardingApplication.Status.REVISION_REQUIRED, notes="Update legal name")
+    from apps.organizations.services import update_onboarding
+    update_onboarding(application=app, actor=owner, organization_data={"display_name": "New Studio"}, profile_data={})
+    app.organization.refresh_from_db()
+    assert app.organization.display_name == "New Studio"
+
+
+@pytest.mark.django_db
+def test_verification_document_must_be_private():
+    from apps.media.models import MediaAsset
+    from apps.organizations.models import VerificationDocument
+    owner = User.objects.create_user(username="docowner", password="StrongPass123!")
+    app = create_designer_onboarding(user=owner, organization_data={"display_name": "Doc Studio", "email": "doc@example.com"}, profile_data={"terms_accepted": True})
+    asset = MediaAsset.objects.create(provider=MediaAsset.Provider.LOCAL_DEV, provider_asset_id="public/test.pdf", original_filename="test.pdf", mime_type="application/pdf", size_bytes=100, access=MediaAsset.Access.PUBLIC, uploaded_by=owner)
+    doc = VerificationDocument(application=app, media_asset=asset, document_type=VerificationDocument.DocumentType.REGISTRATION)
+    with pytest.raises(ValidationError):
+        doc.full_clean()

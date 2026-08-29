@@ -109,3 +109,47 @@ def review_application(*, application, reviewer, decision, notes="", request=Non
         Notification.objects.create(recipient=membership.user, type="business_onboarding_review", title_en=title_en, title_ar=title_ar, body_en=notes, body_ar=notes, destination="/designer/" if application.organization.kind == Organization.Kind.DESIGNER else "/manufacturer/")
     record_audit_event(actor=reviewer, action=f"onboarding.{decision}", instance=application, metadata={"organization_id": application.organization_id, "notes_present": bool(notes)}, request=request)
     return application
+
+
+@transaction.atomic
+def update_onboarding(*, application, actor, organization_data, profile_data, request=None):
+    require_org_access(actor, application.organization, roles=[Membership.Role.OWNER, Membership.Role.MANAGER])
+    if application.status not in {OnboardingApplication.Status.DRAFT, OnboardingApplication.Status.REVISION_REQUIRED}:
+        raise ValidationError("Only draft or revision-required applications can be edited.")
+    org = application.organization
+    for field, value in organization_data.items():
+        setattr(org, field, value)
+    org.full_clean(exclude=["created_by"])
+    org.save()
+    profile = org.designer_profile if org.kind == Organization.Kind.DESIGNER else org.manufacturer_profile
+    for field, value in profile_data.items():
+        setattr(profile, field, value)
+    profile.full_clean()
+    profile.save()
+    record_audit_event(actor=actor, action="onboarding.updated", instance=application, metadata={"organization_id": org.pk}, request=request)
+    return application
+
+
+@transaction.atomic
+def add_or_update_member(*, organization, actor, user, role, request=None):
+    require_org_access(actor, organization, roles=[Membership.Role.OWNER, Membership.Role.MANAGER])
+    membership, _ = Membership.objects.get_or_create(organization=organization, user=user, defaults={"role": role, "is_active": True})
+    membership.role = role
+    membership.is_active = True
+    membership.full_clean()
+    membership.save()
+    record_audit_event(actor=actor, action="business.member.upserted", instance=membership, metadata={"organization_id": organization.pk, "user_id": user.pk, "role": role}, request=request)
+    return membership
+
+
+@transaction.atomic
+def deactivate_member(*, membership, actor, request=None):
+    require_org_access(actor, membership.organization, roles=[Membership.Role.OWNER, Membership.Role.MANAGER])
+    if membership.role == Membership.Role.OWNER:
+        owner_count = Membership.objects.filter(organization=membership.organization, role=Membership.Role.OWNER, is_active=True).count()
+        if owner_count <= 1:
+            raise ValidationError("The last active owner cannot be removed.")
+    membership.is_active = False
+    membership.save(update_fields=["is_active"])
+    record_audit_event(actor=actor, action="business.member.deactivated", instance=membership, metadata={"organization_id": membership.organization_id, "user_id": membership.user_id}, request=request)
+    return membership

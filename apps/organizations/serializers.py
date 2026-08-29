@@ -62,3 +62,14 @@ class ManufacturerCreateSerializer(serializers.Serializer):
         if not value:
             raise serializers.ValidationError("Terms must be accepted.")
         return value
+
+
+class MemberMutationSerializer(serializers.Serializer):
+    user_id = serializers.IntegerField(min_value=1)
+    role = serializers.ChoiceField(choices=Membership.Role.choices)
+
+
+class VerificationDocumentCreateSerializer(serializers.Serializer):
+    media_asset_id = serializers.IntegerField(min_value=1)
+    document_type = serializers.ChoiceField(choices=["registration", "tax", "identity", "certification", "other"])
+    description = serializers.CharField(required=False, allow_blank=True, max_length=255)

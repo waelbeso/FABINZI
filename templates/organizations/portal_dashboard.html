@@ -8,10 +8,9 @@
   <p>Verification status: <strong>{{ application.organization.get_verification_status_display }}</strong></p>
   {% if application.review_notes %}<div class="card"><h2>FABINZI review notes</h2><p>{{ application.review_notes }}</p></div>{% endif %}
   {% if application.status == "draft" or application.status == "revision_required" %}
-  <form method="post" action="{% url 'submit-onboarding' application.pk %}">
-    {% csrf_token %}
-    <button class="button" type="submit">Submit for review</button>
-  </form>
+    <p><a class="button secondary" href="{% url 'edit-onboarding' application.pk %}">Edit onboarding</a></p>
+    <form method="post" action="{% url 'submit-onboarding' application.pk %}">{% csrf_token %}<button class="button" type="submit">Submit for review</button></form>
   {% endif %}
+  <div class="card"><h2>Team</h2><p>Tenant roles and member management are available through the FABINZI API and Control Center. Owners and Managers may manage members.</p></div>
 </section>
 {% endblock %}
