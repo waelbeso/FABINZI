@@ -5,6 +5,8 @@ from django.utils import timezone
 
 from apps.audit.services import record_audit_event
 from apps.design.models import GarmentDesignVersion
+from apps.media.designer_services import require_private_designer_asset
+from apps.media.models import MediaAsset
 from apps.notifications.models import Notification
 from apps.organizations.models import Membership, Organization
 from apps.organizations.services import require_org_access, user_has_org_access
@@ -31,6 +33,113 @@ def require_artwork_access(user, artwork, *, edit=False):
     return require_org_access(user, artwork.organization, roles=ARTWORK_EDIT_ROLES if edit else None)
 
 
+def _public_preview_rows(artwork):
+    return ArtworkAsset.objects.filter(
+        version__artwork=artwork,
+        kind=ArtworkAsset.Kind.PREVIEW,
+        media_asset__metadata__artwork_public_derivative=True,
+    ).select_related("media_asset", "version")
+
+
+def _set_public_derivative_state(media, *, enabled, version=None):
+    metadata = dict(media.metadata or {})
+    if enabled:
+        media.access = MediaAsset.Access.PUBLIC
+        metadata["artwork_public_derivative"] = True
+        metadata["artwork_version_id"] = version.pk if version else metadata.get("artwork_version_id")
+        metadata["public_url"] = f"/artwork/media/{media.pk}/"
+        metadata.pop("artwork_public_revoked", None)
+    else:
+        media.access = MediaAsset.Access.PRIVATE
+        metadata.pop("public_url", None)
+        metadata["artwork_public_revoked"] = True
+    media.metadata = metadata
+    media.save(update_fields=["access", "metadata"])
+    return media
+
+
+def revoke_public_preview_derivatives(*, artwork, actor=None, reason="state_change", request=None):
+    for row in _public_preview_rows(artwork):
+        if row.media_asset.access != MediaAsset.Access.PRIVATE or (row.media_asset.metadata or {}).get("public_url"):
+            _set_public_derivative_state(row.media_asset, enabled=False)
+            record_audit_event(
+                actor=actor,
+                action="artwork.preview.revoked",
+                instance=row.version,
+                metadata={"artwork_id": artwork.pk, "media_asset_id": row.media_asset_id, "reason": reason},
+                request=request,
+            )
+
+
+def ensure_public_preview_for_version(*, version, actor=None, request=None):
+    if version.status != ArtworkVersion.Status.APPROVED or version.artwork.status != Artwork.Status.APPROVED:
+        raise ValidationError("Only an approved Artwork Version can publish a public preview.")
+
+    # Backward-compatible public previews remain valid. New Designer Portal workflow
+    # previews stay private and receive a separate public derivative row on approval.
+    existing_public = version.assets.filter(
+        kind=ArtworkAsset.Kind.PREVIEW,
+        media_asset__access=MediaAsset.Access.PUBLIC,
+        media_asset__mime_type__startswith="image/",
+    ).select_related("media_asset").order_by("id").first()
+    if existing_public and not (existing_public.media_asset.metadata or {}).get("artwork_public_revoked"):
+        return existing_public
+
+    source_row = version.assets.filter(
+        kind=ArtworkAsset.Kind.PREVIEW,
+        media_asset__access=MediaAsset.Access.PRIVATE,
+        media_asset__mime_type__startswith="image/",
+        media_asset__metadata__designer_private_upload=True,
+        media_asset__metadata__organization_id=version.artwork.organization_id,
+    ).select_related("media_asset").order_by("id").first()
+    if not source_row:
+        raise ValidationError("Approved Artwork requires a valid private Designer preview before it can be published.")
+
+    source = source_row.media_asset
+    derivative_row = version.assets.filter(
+        kind=ArtworkAsset.Kind.PREVIEW,
+        media_asset__metadata__artwork_public_derivative=True,
+        media_asset__metadata__source_media_asset_id=source.pk,
+    ).select_related("media_asset").order_by("id").first()
+    if derivative_row:
+        _set_public_derivative_state(derivative_row.media_asset, enabled=True, version=version)
+        return derivative_row
+
+    derivative = MediaAsset.objects.create(
+        provider=source.provider,
+        provider_asset_id=source.provider_asset_id,
+        original_filename=source.original_filename,
+        mime_type=source.mime_type,
+        size_bytes=source.size_bytes,
+        checksum_sha256=source.checksum_sha256,
+        access=MediaAsset.Access.PUBLIC,
+        metadata={
+            "artwork_public_derivative": True,
+            "source_media_asset_id": source.pk,
+            "organization_id": version.artwork.organization_id,
+            "artwork_version_id": version.pk,
+            "width": (source.metadata or {}).get("width"),
+            "height": (source.metadata or {}).get("height"),
+        },
+        uploaded_by=source.uploaded_by,
+    )
+    _set_public_derivative_state(derivative, enabled=True, version=version)
+    derivative_row = ArtworkAsset.objects.create(
+        version=version,
+        kind=ArtworkAsset.Kind.PREVIEW,
+        media_asset=derivative,
+        label="Approved public preview",
+    )
+    record_audit_event(
+        actor=actor,
+        action="artwork.preview.published",
+        instance=version,
+        metadata={"artwork_id": version.artwork_id, "source_media_asset_id": source.pk, "public_media_asset_id": derivative.pk},
+        request=request,
+    )
+    return derivative_row
+
+
 @transaction.atomic
 def create_artwork(*, organization, actor, title, description="", tags=None, request=None):
     require_active_designer_org(organization)
@@ -48,6 +157,7 @@ def create_artwork_revision(*, artwork, actor, request=None):
     latest = artwork.versions.order_by("-version_number").first()
     if latest and latest.status not in {ArtworkVersion.Status.REVISION_REQUIRED, ArtworkVersion.Status.APPROVED, ArtworkVersion.Status.REJECTED}:
         raise ValidationError("A new artwork revision can only follow a reviewed version.")
+    revoke_public_preview_derivatives(artwork=artwork, actor=actor, reason="new_revision", request=request)
     number = (artwork.versions.aggregate(m=Max("version_number"))["m"] or 0) + 1
     version = ArtworkVersion.objects.create(artwork=artwork, version_number=number, created_by=actor, color_profile=latest.color_profile if latest else "", production_notes=latest.production_notes if latest else "", metadata=latest.metadata if latest else {})
     artwork.status = Artwork.Status.DRAFT; artwork.save(update_fields=["status", "updated_at"])
@@ -64,7 +174,12 @@ def require_artwork_draft(version, actor):
 @transaction.atomic
 def add_artwork_asset(*, version, actor, media_asset, kind, label="", request=None):
     require_artwork_draft(version, actor)
-    if media_asset.uploaded_by_id and media_asset.uploaded_by_id != actor.pk and not actor.is_staff:
+    organization = version.artwork.organization
+    if kind in {ArtworkAsset.Kind.SOURCE, ArtworkAsset.Kind.RIGHTS_EVIDENCE}:
+        require_private_designer_asset(asset=media_asset, organization=organization, actor=actor)
+    elif kind == ArtworkAsset.Kind.PREVIEW and media_asset.access == MediaAsset.Access.PRIVATE:
+        require_private_designer_asset(asset=media_asset, organization=organization, actor=actor)
+    elif media_asset.uploaded_by_id and media_asset.uploaded_by_id != actor.pk and not actor.is_staff:
         raise PermissionDenied("This media asset is not owned by the current user.")
     asset = ArtworkAsset(version=version, kind=kind, media_asset=media_asset, label=label)
     asset.full_clean(); asset.save()
@@ -120,6 +235,10 @@ def review_artwork_version(*, version, reviewer, decision, notes="", request=Non
     version.save(update_fields=["status", "reviewed_at", "reviewed_by", "review_notes"])
     status_map = {ArtworkReview.Decision.APPROVED: Artwork.Status.APPROVED, ArtworkReview.Decision.REVISION_REQUIRED: Artwork.Status.REVISION_REQUIRED, ArtworkReview.Decision.REJECTED: Artwork.Status.REJECTED}
     version.artwork.status = status_map[decision]; version.artwork.save(update_fields=["status", "updated_at"])
+    if decision == ArtworkReview.Decision.APPROVED:
+        ensure_public_preview_for_version(version=version, actor=reviewer, request=request)
+    else:
+        revoke_public_preview_derivatives(artwork=version.artwork, actor=reviewer, reason=decision, request=request)
     title_en = {"approved":"Artwork approved","revision_required":"Artwork needs revision","rejected":"Artwork rejected"}[decision]
     title_ar = {"approved":"تم اعتماد العمل الفني","revision_required":"العمل الفني يحتاج إلى تعديلات","rejected":"تم رفض العمل الفني"}[decision]
     for membership in version.artwork.organization.memberships.filter(is_active=True).select_related("user"):
@@ -177,7 +296,14 @@ def create_ip_case(*, actor=None, artwork=None, designed_product=None, reporter_
 
 @transaction.atomic
 def add_ip_case_evidence(*, case, actor, media_asset, description="", request=None):
-    if media_asset.uploaded_by_id and actor and media_asset.uploaded_by_id != actor.pk and not actor.is_staff:
+    if media_asset.access != MediaAsset.Access.PRIVATE:
+        raise ValidationError("IP case evidence must remain private.")
+    if (media_asset.metadata or {}).get("studio_private_upload"):
+        raise ValidationError("Customer Studio uploads cannot be attached as Designer IP evidence.")
+    target_org = case.artwork.organization if case.artwork_id else case.designed_product.organization
+    if (media_asset.metadata or {}).get("designer_private_upload"):
+        require_private_designer_asset(asset=media_asset, organization=target_org, actor=actor)
+    elif media_asset.uploaded_by_id and actor and media_asset.uploaded_by_id != actor.pk and not actor.is_staff:
         raise PermissionDenied("This media asset is not owned by the current user.")
     evidence = IPCaseEvidence(case=case, media_asset=media_asset, description=description, submitted_by=actor)
     evidence.full_clean(); evidence.save()
@@ -199,12 +325,15 @@ def moderate_ip_case(*, case, reviewer, status, resolution=IPCase.Resolution.NON
     if resolution == IPCase.Resolution.TAKEDOWN:
         if target_artwork:
             target_artwork.status = Artwork.Status.SUSPENDED; target_artwork.save(update_fields=["status", "updated_at"])
+            revoke_public_preview_derivatives(artwork=target_artwork, actor=reviewer, reason="ip_takedown", request=request)
             DesignedProduct.objects.filter(artwork_version__artwork=target_artwork, status=DesignedProduct.Status.PUBLISHED).update(status=DesignedProduct.Status.SUSPENDED)
         if case.designed_product_id:
             case.designed_product.status = DesignedProduct.Status.SUSPENDED; case.designed_product.save(update_fields=["status", "updated_at"])
     elif resolution == IPCase.Resolution.RESTORED:
         if target_artwork and target_artwork.versions.filter(status=ArtworkVersion.Status.APPROVED).exists():
             target_artwork.status = Artwork.Status.APPROVED; target_artwork.save(update_fields=["status", "updated_at"])
+            approved_version = target_artwork.versions.filter(status=ArtworkVersion.Status.APPROVED).order_by("-version_number").first()
+            ensure_public_preview_for_version(version=approved_version, actor=reviewer, request=request)
         if case.designed_product_id and case.designed_product.garment_version.status == GarmentDesignVersion.Status.APPROVED and case.designed_product.artwork_version.status == ArtworkVersion.Status.APPROVED:
             case.designed_product.status = DesignedProduct.Status.PUBLISHED; case.designed_product.save(update_fields=["status", "updated_at"])
     record_audit_event(actor=reviewer, action="ip_case.moderated", instance=case, metadata={"status": status, "resolution": resolution}, request=request)
