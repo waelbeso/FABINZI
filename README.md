@@ -1,9 +1,9 @@
 # FABINZI
 
-FABINZI is a greenfield fashion platform connecting Designers, Manufacturers and Customers through controlled design, sourcing, storefront, customization, checkout, manufacturing and fulfillment workflows.
+FABINZI is a greenfield fashion platform connecting Designers, Manufacturers and Customers through controlled design, sourcing, storefront, customization, checkout, manufacturing, fulfillment and finance workflows.
 
 ## Current implementation
-Stages 0–7 are implemented and CI-gated:
+Stages 0–8 are implemented and CI-gated:
 - Stage 0 — Engineering Foundation
 - Stage 1 — Business Identity & Onboarding
 - Stage 2 — Garment Design
@@ -12,8 +12,9 @@ Stages 0–7 are implemented and CI-gated:
 - Stage 5 — Store & Studio
 - Stage 6 — Checkout & Payments
 - Stage 7 — Manufacturing & Fulfillment
+- Stage 8 — Finance
 
-Stage 7 adds automatic operations initialization for confirmed orders, Manufacturer assignment from accepted sourcing selections, production milestones, QC, packing, shipment tracking and delivery events. Finance remains Stage 8.
+Stage 8 adds delivery-triggered financial recognition, platform commission policy, immutable organization/platform ledgers, available/pending/reserved balances, verified payout profiles, settlement requests and controlled external-settlement recording.
 
 ## Stack
 Python / Django / Django REST Framework / PostgreSQL / Celery / Redis.
@@ -31,8 +32,11 @@ python manage.py runserver
 - `/store/` public Store marketplace
 - `/studio/` customer Studio
 - `/orders/` customer orders
+- `/finance/` organization finance dashboard
 - `/designer/fulfillment/` Designer fulfillment operations
+- `/designer/finance/` Designer finance
 - `/manufacturer/production/` Manufacturer production operations
+- `/manufacturer/finance/` Manufacturer finance
 - `/artwork/` Artwork marketplace
 - `/manufacturers/` Manufacturer marketplace
 - `/designer/` Designer portal
@@ -41,5 +45,7 @@ python manage.py runserver
 
 ## Integrations
 COD is the default practical payment method. Paymob and Stripe remain disabled until explicitly configured and successfully tested in `/Maneg/`. Mailgun, Twilio, Amazon S3, Cloudflare Images and Sentry are also optional and disabled until configured, except the original seeded COD configuration.
+
+Finance payout profiles intentionally store only masked/non-sensitive destination hints. Stage 8 records externally completed settlements but does not store banking credentials or execute bank transfers.
 
 No production secrets belong in source control.
