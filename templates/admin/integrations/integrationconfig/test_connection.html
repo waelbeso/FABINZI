@@ -1,0 +1,1 @@
+{% extends "admin/base_site.html" %}{% block content %}<div id="content-main"><h1>Test {{ object }}</h1><p>This health check will not intentionally create a financial charge or customer communication. Secret values will not be displayed.</p><form method="post">{% csrf_token %}<input type="submit" class="default" value="Run Test Connection"></form></div>{% endblock %}

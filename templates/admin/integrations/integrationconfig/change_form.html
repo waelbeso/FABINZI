@@ -1,0 +1,1 @@
+{% extends "admin/change_form.html" %}{% block object-tools-items %}{{ block.super }}{% if original %}<li><a class="historylink" href="{% url 'fabinzi_admin:integrations_integrationconfig_test' original.pk %}">Test Connection</a></li>{% endif %}{% endblock %}
