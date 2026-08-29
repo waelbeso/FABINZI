@@ -3,27 +3,24 @@ from decimal import Decimal
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db.models.deletion import ProtectedError
 from django.utils import timezone
 
 from apps.artwork.designer_services import add_validated_product_placement, normalize_designed_product_transform
-from apps.artwork.models import Artwork, ArtworkPlacement, ArtworkVersion, DesignedProduct, IPCase
+from apps.artwork.models import Artwork, ArtworkVersion
 from apps.artwork.services import create_designed_product, publish_designed_product
-from apps.audit.models import AuditEvent
 from apps.checkout.models import CheckoutSession, CustomerOrder, OrderItem
 from apps.design.designer_services import delete_decoration_zone, delete_size_row, save_decoration_zone, save_size_row, update_version_definition
 from apps.design.models import DecorationZone, GarmentDesign, GarmentDesignVersion, SizeChartRow, TechnicalReview
 from apps.design.services import create_design, create_revision, review_version
-from apps.finance.models import FinanceAccount, FinancePolicy, LedgerEntry, OrderFinance, PayoutProfile
+from apps.finance.models import FinancePolicy, LedgerEntry, PayoutProfile
 from apps.finance.services import account_balance, organization_account, request_settlement
-from apps.manufacturer_marketplace.models import ManufacturerListing, ManufacturerQuote, RFQ
 from apps.manufacturer_marketplace.services import add_capability, create_rfq, get_or_create_listing, open_rfq, publish_listing, select_quote, submit_quote
+from apps.media.models import MediaAsset
 from apps.operations.models import FulfillmentRecord
 from apps.organizations.models import DesignerProfile, Membership, OnboardingApplication, Organization
 from apps.storefront.designer_services import hide_store_product, update_store_product, update_variant
-from apps.storefront.models import ProductVariant, StoreProduct, StoreProductImage, Storefront
+from apps.storefront.models import StoreProduct, StoreProductImage
 from apps.storefront.services import add_variant, create_store_product, create_storefront, publish_store_product, publish_storefront
-from apps.media.models import MediaAsset
 
 User = get_user_model()
 
@@ -168,7 +165,7 @@ def test_designed_product_publish_requires_placement():
 
 
 def manufacturer_org(user, name):
-    org = Organization.objects.create(kind=Organization.Kind.MANUFACTURER, display_name=name, email=f"{name.lower()}@example.test", verification_status=Organization.VerificationStatus.ACTIVE, created_by=user)
+    org = Organization.objects.create(kind=Organization.Kind.MANUFACTURER, display_name=name, email=f"{name.lower().replace(' ', '-')}@example.test", verification_status=Organization.VerificationStatus.ACTIVE, created_by=user)
     Membership.objects.create(organization=org, user=user, role=Membership.Role.OWNER)
     listing = get_or_create_listing(organization=org, actor=user)
     listing.headline_en = f"{name} manufacturing"; listing.save()
@@ -197,7 +194,9 @@ def test_rfq_real_quote_comparison_and_selection_integrity(client):
     response = client.get(f"/designer/rfqs/{rfq.pk}/?org={org.pk}")
     text = response.content.decode("utf-8")
     assert "120" in text and "125" in text
-    assert "rating" not in text.lower() and "ranking" not in text.lower()
+    assert "Real submitted quote data with no fabricated Manufacturer ranking or score." in text
+    assert 'aria-label="rating"' not in text.lower()
+    assert "score:" not in text.lower()
 
 
 @pytest.mark.django_db
@@ -289,12 +288,12 @@ def test_fulfillment_is_tenant_scoped_and_minimizes_customer_pii(client):
     customer, order, fulfillment = fulfillment_fixture(owner, org)
     client.force_login(owner)
     body = client.get(f"/designer/fulfillment/?org={org.pk}").content.decode("utf-8")
-    assert order.number in body and fulfillment.tracking_number in body
+    assert str(order.number) in body and fulfillment.tracking_number in body
     assert customer.email not in body and "PRIVATE CUSTOMER ADDRESS" not in body
     assert "Start production" not in body and "Record QC" not in body
     client.force_login(other)
     body = client.get(f"/designer/fulfillment/?org={other_org.pk}").content.decode("utf-8")
-    assert order.number not in body
+    assert str(order.number) not in body
 
 
 @pytest.mark.django_db
