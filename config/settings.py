@@ -33,12 +33,12 @@ INSTALLED_APPS = [
     "apps.accounts","apps.audit","apps.integrations","apps.media","apps.notifications","apps.platform_ops","apps.organizations","apps.design","apps.artwork","apps.manufacturer_marketplace","apps.storefront","apps.checkout","apps.operations","apps.finance",
 ]
 MIDDLEWARE = [
-    "django.middleware.security.SecurityMiddleware","whitenoise.middleware.WhiteNoiseMiddleware","django.contrib.sessions.middleware.SessionMiddleware","django.middleware.locale.LocaleMiddleware","django.middleware.common.CommonMiddleware","django.middleware.csrf.CsrfViewMiddleware","django.contrib.auth.middleware.AuthenticationMiddleware","django_otp.middleware.OTPMiddleware","django.contrib.messages.middleware.MessageMiddleware","django.middleware.clickjacking.XFrameOptionsMiddleware","apps.platform_ops.middleware.SecurityHeadersMiddleware","apps.platform_ops.middleware.MaintenanceModeMiddleware",
+    "django.middleware.security.SecurityMiddleware","whitenoise.middleware.WhiteNoiseMiddleware","django.contrib.sessions.middleware.SessionMiddleware","django.middleware.locale.LocaleMiddleware","apps.platform_ops.middleware.PublicLocaleMiddleware","django.middleware.common.CommonMiddleware","django.middleware.csrf.CsrfViewMiddleware","django.contrib.auth.middleware.AuthenticationMiddleware","django_otp.middleware.OTPMiddleware","django.contrib.messages.middleware.MessageMiddleware","django.middleware.clickjacking.XFrameOptionsMiddleware","apps.platform_ops.middleware.SecurityHeadersMiddleware","apps.platform_ops.middleware.MaintenanceModeMiddleware",
 ]
 ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
-TEMPLATES = [{"BACKEND":"django.template.backends.django.DjangoTemplates","DIRS":[BASE_DIR/"templates"],"APP_DIRS":True,"OPTIONS":{"context_processors":["django.template.context_processors.request","django.contrib.auth.context_processors.auth","django.contrib.messages.context_processors.messages","apps.platform_ops.context_processors.active_announcements"]}}]
+TEMPLATES = [{"BACKEND":"django.template.backends.django.DjangoTemplates","DIRS":[BASE_DIR/"templates"],"APP_DIRS":True,"OPTIONS":{"context_processors":["django.template.context_processors.request","django.contrib.auth.context_processors.auth","django.contrib.messages.context_processors.messages","apps.platform_ops.context_processors.active_announcements","apps.platform_ops.context_processors.seo_context"]}}]
 
 DATABASES = {"default": env.db("DATABASE_URL", default="postgresql://fabinzi:fabinzi@localhost:5432/fabinzi")}
 AUTH_USER_MODEL = "accounts.User"
@@ -119,3 +119,4 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
 CSRF_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_SAMESITE = "Lax"
+FORMS_URLFIELD_ASSUME_HTTPS = True
