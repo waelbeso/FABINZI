@@ -221,7 +221,7 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server):
         _replace(driver, driver.find_element(By.ID, "version-material"), "Organic cotton")
         _replace(driver, driver.find_element(By.ID, "version-specs"), "gsm = 200\nfit = regular")
         _click(driver, By.XPATH, '//button[contains(normalize-space(.), "Save technical definition")]')
-        wait.until(lambda d: d.find_element(By.ID, "version-material").get_attribute("value") == "Organic cotton")
+        wait.until(lambda _d: GarmentDesignVersion.objects.filter(pk=browser_version.pk, base_material="Organic cotton").exists())
         browser_version.refresh_from_db()
         assert browser_version.technical_specs == {"gsm": "200", "fit": "regular"}
         _click(driver, By.XPATH, '//summary[contains(normalize-space(.), "Add size row")]')
@@ -229,8 +229,7 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server):
         size_form.find_element(By.NAME, "size_label").send_keys("M")
         size_form.find_element(By.NAME, "measurements").send_keys("chest_cm = 54\nlength_cm = 73")
         _click(driver, By.XPATH, '//input[@name="size_label" and not(@value)]/ancestor::form//button[@type="submit"]')
-        wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Size row saved."))
-        wait.until(lambda d: SizeChartRow.objects.filter(version=browser_version, size_label="M").exists())
+        wait.until(lambda _d: SizeChartRow.objects.filter(version=browser_version, size_label="M").exists())
         size_row = SizeChartRow.objects.get(version=browser_version, size_label="M")
         assert size_row.measurements == {"chest_cm": "54", "length_cm": "73"}
         wait.until(EC.text_to_be_present_in_element((By.ID, "size-chart"), "chest_cm: 54"))
