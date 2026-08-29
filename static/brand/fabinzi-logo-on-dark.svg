@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg"
-     viewBox="0 0 3150 1000"
-     width="3150" height="1000"
+     viewBox="0 0 3260 1000"
+     width="3260" height="1000"
      role="img" aria-label="FABINZI">
   <defs>
     <linearGradient id="g" x1="125" y1="94" x2="875" y2="906" gradientUnits="userSpaceOnUse">
@@ -8,7 +8,7 @@
       <stop offset="1" stop-color="#5A36E6"/>
     </linearGradient>
   </defs>
-  <!-- Approved FABINZI mark; only the wordmark contrast is adapted for dark surfaces. -->
+  <!-- Approved FABINZI mark; only wordmark contrast adapts for dark surfaces. -->
   <g transform="scale(15.625)">
     <rect x="3" y="3" width="58" height="58" rx="16" fill="#111827"/>
     <path d="M18 16h29v9H29v8h15v9H29v14H18V16Z" fill="url(#g)"/>
