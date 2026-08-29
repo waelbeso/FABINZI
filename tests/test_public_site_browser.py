@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import time
@@ -86,9 +87,26 @@ def _login(driver, live_server, client, user):
     driver.add_cookie({"name": settings.SESSION_COOKIE_NAME, "value": cookie, "path": "/"})
 
 
-def _shot(driver, name):
+def _full_page_shot(driver, name):
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-    assert driver.save_screenshot(str(ARTIFACT_DIR / name))
+    metrics = driver.execute_cdp_cmd("Page.getLayoutMetrics", {})
+    size = metrics.get("cssContentSize") or metrics.get("contentSize")
+    result = driver.execute_cdp_cmd(
+        "Page.captureScreenshot",
+        {
+            "format": "png",
+            "captureBeyondViewport": True,
+            "fromSurface": True,
+            "clip": {
+                "x": 0,
+                "y": 0,
+                "width": size["width"],
+                "height": size["height"],
+                "scale": 1,
+            },
+        },
+    )
+    (ARTIFACT_DIR / name).write_bytes(base64.b64decode(result["data"]))
 
 
 def _assert_dom_accessibility_baseline(driver):
@@ -136,7 +154,7 @@ def test_public_and_customer_site_real_chrome_acceptance(client, live_server):
         assert vitals["cls"] < 0.10
         assert vitals["lcp"] == 0 or vitals["lcp"] < 4000
         assert nav["ttfb"] < 1500
-        _shot(driver, "08-home-desktop-light.png")
+        _full_page_shot(driver, "08-home-desktop-light.png")
         ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
         with urlopen(live_server.url + "/share/fabinzi-1200x630.png", timeout=10) as response:
             (ARTIFACT_DIR / "13-social-share-1200x630.png").write_bytes(response.read())
@@ -150,7 +168,7 @@ def test_public_and_customer_site_real_chrome_acceptance(client, live_server):
         assert "Save preferences" not in driver.page_source
         _assert_dom_accessibility_baseline(driver)
         assert driver.execute_script("return document.documentElement.scrollWidth <= window.innerWidth + 1")
-        _shot(driver, "09-customer-home-desktop-light.png")
+        _full_page_shot(driver, "09-customer-home-desktop-light.png")
 
         driver.get(live_server.url + "/app/settings/preferences/")
         wait.until(EC.presence_of_element_located((By.ID, "preference-language")))
@@ -177,7 +195,7 @@ def test_public_and_customer_site_real_chrome_acceptance(client, live_server):
         _assert_dom_accessibility_baseline(mobile)
         assert mobile.execute_script("return getComputedStyle(document.querySelector('.brand-logo--dark')).display !== 'none'")
         assert mobile.execute_script("return document.documentElement.scrollWidth <= window.innerWidth + 1")
-        _shot(mobile, "10-customer-home-mobile-rtl-dark.png")
+        _full_page_shot(mobile, "10-customer-home-mobile-rtl-dark.png")
 
         mobile.get(live_server.url + "/?lang=ar")
         WebDriverWait(mobile, 10).until(EC.presence_of_element_located((By.ID, "home-hero-title")))
@@ -186,7 +204,7 @@ def test_public_and_customer_site_real_chrome_acceptance(client, live_server):
         assert manufacturer.organization.display_name in mobile.page_source
         _assert_dom_accessibility_baseline(mobile)
         assert mobile.execute_script("return document.documentElement.scrollWidth <= window.innerWidth + 1")
-        _shot(mobile, "11-home-mobile-rtl-dark.png")
+        _full_page_shot(mobile, "11-home-mobile-rtl-dark.png")
     finally:
         mobile.quit()
 
@@ -199,6 +217,6 @@ def test_public_and_customer_site_real_chrome_acceptance(client, live_server):
         assert manufacturer.organization.display_name in tablet.page_source
         _assert_dom_accessibility_baseline(tablet)
         assert tablet.execute_script("return document.documentElement.scrollWidth <= window.innerWidth + 1")
-        _shot(tablet, "12-home-tablet-light.png")
+        _full_page_shot(tablet, "12-home-tablet-light.png")
     finally:
         tablet.quit()
