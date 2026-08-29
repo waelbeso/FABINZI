@@ -416,8 +416,12 @@ def test_maneg_control_center_real_chrome_a_to_l(client, live_server):
 
         # K. Audit history from the visible operations above.
         driver.get(f"{live_server.url}/Maneg/audit/?lang=en")
-        wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "control_center.user.suspended"))
-        wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "integration.connection.tested"))
+        wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "User suspended"))
+        wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Integration connection tested"))
+        audit_text = driver.find_element(By.TAG_NAME, "body").text
+        assert "control_center.user.suspended" not in audit_text
+        assert "integration.connection.tested" not in audit_text
+        assert "platform_ops.MaintenanceWindow" not in audit_text
         assert _no_page_overflow(driver)
         _shot(driver, EXPECTED_SCREENSHOTS[13])
 
