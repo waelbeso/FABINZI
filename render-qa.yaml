@@ -20,7 +20,7 @@ envVarGroups:
       - key: FABINZI_PUBLIC_BASE_URL
         value: https://fabinzi-qa-web.onrender.com
       - key: FABINZI_DEMO_SEED_ENABLED
-        value: "false"
+        value: "true"
       - key: DEFAULT_LANGUAGE
         value: en
       - key: TIME_ZONE
@@ -65,6 +65,8 @@ services:
       - key: DEMO_ADMIN_EMAIL
         sync: false
       - key: DEMO_ADMIN_PASSWORD
+        sync: false
+      - key: DEMO_ADMIN_TOTP_SECRET
         sync: false
       - key: DEMO_DESIGNER_EMAIL
         sync: false
