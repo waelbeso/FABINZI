@@ -18,6 +18,21 @@ DEFAULT_DESCRIPTIONS = {
     "ar": "اكتشف أزياء المصممين والمنتجات ذات التصميمات الجاهزة والتخصيص الاختياري على FABINZI، حيث يبدع المصمم وينتج المصنع ويشتري العميل.",
 }
 
+PUBLIC_PAGE_SEO = {
+    "home": {
+        "en": ("FABINZI | From fashion idea to real product", "Shop original designer fashion, ready-designed products and optional customization while FABINZI connects design, manufacturing and customer commerce."),
+        "ar": ("FABINZI | من فكرة الأزياء إلى منتج حقيقي", "تسوّق أزياء المصممين والتصميمات الجاهزة والتخصيص الاختياري بينما تربط FABINZI التصميم والتصنيع والشراء في رحلة واحدة."),
+    },
+    "artwork": {
+        "en": ("Approved artwork | FABINZI", "Explore artwork actually approved on FABINZI and connected to the platform's designer-led product ecosystem."),
+        "ar": ("الأعمال الفنية المعتمدة | FABINZI", "استكشف الأعمال الفنية المعتمدة فعليًا على FABINZI والمرتبطة بمنظومة المنتجات التي يقودها المصممون."),
+    },
+    "manufacturer-marketplace": {
+        "en": ("Manufacturers | FABINZI", "Discover verified manufacturer businesses and their published production capabilities on FABINZI."),
+        "ar": ("المصنّعون | FABINZI", "استكشف جهات التصنيع الموثقة وقدرات الإنتاج المنشورة فعليًا على FABINZI."),
+    },
+}
+
 
 def absolute_url(path="/"):
     if path.startswith("http://") or path.startswith("https://"):
@@ -61,6 +76,8 @@ def seo_context(request):
     if language not in {"en", "ar"}:
         language = "en"
     path = request.path or "/"
+    match = getattr(request, "resolver_match", None)
+    url_name = match.url_name if match else None
     indexable = request_is_indexable(request)
     has_filter_query = any(key != "lang" for key in request.GET.keys())
 
@@ -101,6 +118,10 @@ def seo_context(request):
             "query-input": "required name=search_term_string",
         },
     }
+    default_page_seo = None
+    if url_name in PUBLIC_PAGE_SEO:
+        title, description = PUBLIC_PAGE_SEO[url_name][language]
+        default_page_seo = page_seo(title=title, description=description)
     return {
         "seo_default_description": DEFAULT_DESCRIPTIONS[language],
         "seo_robots": robots,
@@ -110,4 +131,5 @@ def seo_context(request):
         "seo_public_base_url": settings.FABINZI_PUBLIC_BASE_URL,
         "seo_base_json_ld": safe_json_ld([organization_schema, website_schema]),
         "seo_is_indexable": indexable,
+        "page_seo": default_page_seo,
     }
