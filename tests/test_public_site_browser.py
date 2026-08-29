@@ -66,6 +66,40 @@ def _shot(driver, name):
     assert driver.save_screenshot(str(ARTIFACT_DIR / name))
 
 
+def _assert_dom_accessibility_baseline(driver):
+    audit = driver.execute_script("""
+      const duplicateIds=[...document.querySelectorAll('[id]')]
+        .map(el=>el.id).filter((id,i,a)=>id && a.indexOf(id)!==i);
+      const unlabeledControls=[...document.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]),select,textarea')]
+        .filter(el=>!(el.labels&&el.labels.length)&&!el.getAttribute('aria-label')&&!el.getAttribute('aria-labelledby'))
+        .map(el=>el.id||el.name||el.outerHTML.slice(0,80));
+      const unnamedInteractive=[...document.querySelectorAll('a[href],button,summary')]
+        .filter(el=>{
+          const text=(el.textContent||'').trim();
+          const aria=(el.getAttribute('aria-label')||'').trim();
+          const labelled=(el.getAttribute('aria-labelledby')||'').trim();
+          const imgAlt=[...el.querySelectorAll('img')].some(img=>(img.alt||'').trim());
+          return !text&&!aria&&!labelled&&!imgAlt;
+        }).map(el=>el.outerHTML.slice(0,120));
+      return {
+        duplicateIds:[...new Set(duplicateIds)],
+        unlabeledControls,
+        unnamedInteractive,
+        main:document.querySelectorAll('main').length,
+        h1:document.querySelectorAll('h1').length,
+        missingAlt:document.querySelectorAll('img:not([alt])').length,
+        skipLink:!!document.querySelector('.skip-link[href="#main-content"]')
+      };
+    """)
+    assert audit["duplicateIds"] == []
+    assert audit["unlabeledControls"] == []
+    assert audit["unnamedInteractive"] == []
+    assert audit["main"] == 1
+    assert audit["h1"] == 1
+    assert audit["missingAlt"] == 0
+    assert audit["skipLink"] is True
+
+
 @pytest.mark.django_db(transaction=True)
 def test_public_and_customer_site_real_chrome_acceptance(client, live_server):
     if os.getenv("CI") != "true":
@@ -81,9 +115,7 @@ def test_public_and_customer_site_real_chrome_acceptance(client, live_server):
         time.sleep(0.5)
         assert "The idea starts with a designer" in driver.page_source
         assert product.title_en in driver.page_source
-        assert driver.execute_script("return document.querySelectorAll('main').length") == 1
-        assert driver.execute_script("return document.querySelectorAll('h1').length") == 1
-        assert driver.execute_script("return document.querySelectorAll('img:not([alt])').length") == 0
+        _assert_dom_accessibility_baseline(driver)
         assert driver.execute_script("return document.documentElement.scrollWidth <= window.innerWidth + 1")
         assert driver.execute_script("return performance.getEntriesByType('resource').filter(e=>!e.name.startsWith(location.origin)).length") == 0
         nav = driver.execute_script("const n=performance.getEntriesByType('navigation')[0];return {ttfb:n?Math.max(0,n.responseStart-n.requestStart):0,dom:n?n.domContentLoadedEventEnd:0};")
@@ -98,7 +130,7 @@ def test_public_and_customer_site_real_chrome_acceptance(client, live_server):
         wait.until(EC.presence_of_element_located((By.CLASS_NAME, "customer-welcome")))
         assert "Live products to explore" in driver.page_source
         assert product.title_en in driver.page_source
-        assert driver.execute_script("return document.querySelectorAll('h1').length") == 1
+        _assert_dom_accessibility_baseline(driver)
         assert driver.execute_script("return document.documentElement.scrollWidth <= window.innerWidth + 1")
         _shot(driver, "09-customer-home-desktop-light.png")
 
@@ -119,6 +151,7 @@ def test_public_and_customer_site_real_chrome_acceptance(client, live_server):
         assert html.get_attribute("dir") == "rtl"
         assert html.get_attribute("data-theme") == "dark"
         assert "منتجات منشورة الآن" in mobile.page_source
+        _assert_dom_accessibility_baseline(mobile)
         assert mobile.execute_script("return getComputedStyle(document.querySelector('.brand-logo--dark')).display !== 'none'")
         assert mobile.execute_script("return document.documentElement.scrollWidth <= window.innerWidth + 1")
         _shot(mobile, "10-customer-home-mobile-rtl-dark.png")
@@ -126,7 +159,19 @@ def test_public_and_customer_site_real_chrome_acceptance(client, live_server):
         mobile.get(live_server.url + "/?lang=ar")
         WebDriverWait(mobile, 10).until(EC.presence_of_element_located((By.ID, "home-hero-title")))
         assert "الفكرة تبدأ عند المصمم" in mobile.page_source
+        _assert_dom_accessibility_baseline(mobile)
         assert mobile.execute_script("return document.documentElement.scrollWidth <= window.innerWidth + 1")
         _shot(mobile, "11-home-mobile-rtl-dark.png")
     finally:
         mobile.quit()
+
+    tablet = _chrome(width=820, height=1180, language="en-US,en")
+    try:
+        tablet.get(live_server.url + "/?lang=en")
+        WebDriverWait(tablet, 10).until(EC.presence_of_element_located((By.ID, "home-hero-title")))
+        assert tablet.execute_script("return getComputedStyle(document.querySelector('.mobile-menu')).display !== 'none'")
+        _assert_dom_accessibility_baseline(tablet)
+        assert tablet.execute_script("return document.documentElement.scrollWidth <= window.innerWidth + 1")
+        _shot(tablet, "12-home-tablet-light.png")
+    finally:
+        tablet.quit()
