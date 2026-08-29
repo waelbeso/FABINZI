@@ -159,12 +159,16 @@ class CustomizationElement(models.Model):
     class Kind(models.TextChoices):
         TEXT = "text", "Text"
         IMAGE = "image", "Customer image"
+        ARTWORK = "artwork", "Marketplace artwork"
 
     customization = models.ForeignKey(CustomerCustomization, on_delete=models.CASCADE, related_name="elements")
     decoration_zone = models.ForeignKey("design.DecorationZone", on_delete=models.PROTECT, related_name="customer_customization_elements")
     kind = models.CharField(max_length=16, choices=Kind.choices)
     text = models.CharField(max_length=240, blank=True)
     media_asset = models.ForeignKey("media.MediaAsset", null=True, blank=True, on_delete=models.PROTECT, related_name="customization_elements")
+    artwork_version = models.ForeignKey("artwork.ArtworkVersion", null=True, blank=True, on_delete=models.PROTECT, related_name="customer_customization_elements")
+    production_method = models.CharField(max_length=20, choices=[("print", "Print"), ("embroidery", "Embroidery")], blank=True)
+    rights_confirmed = models.BooleanField(default=False)
     transform = models.JSONField(default=dict)
     style = models.JSONField(default=dict, blank=True)
     sort_order = models.PositiveIntegerField(default=0)
@@ -176,10 +180,34 @@ class CustomizationElement(models.Model):
         project = self.customization.project if self.customization_id else None
         if project and self.decoration_zone_id and self.decoration_zone.version_id != project.product.designed_product.garment_version_id:
             raise ValidationError({"decoration_zone": "Customization zone must belong to the product Garment Design Version."})
-        if self.kind == self.Kind.TEXT and not self.text.strip():
-            raise ValidationError({"text": "Text customization requires text."})
-        if self.kind == self.Kind.IMAGE:
+        if self.production_method:
+            if self.production_method not in {"print", "embroidery"}:
+                raise ValidationError({"production_method": "Unsupported production method."})
+            if self.decoration_zone_id and self.decoration_zone.method != "both" and self.production_method != self.decoration_zone.method:
+                raise ValidationError({"production_method": "Production method is not supported by this decoration zone."})
+
+        if self.kind == self.Kind.TEXT:
+            if not self.text.strip():
+                raise ValidationError({"text": "Text customization requires text."})
+            if self.media_asset_id or self.artwork_version_id:
+                raise ValidationError("Text customization cannot reference image or Artwork media.")
+        elif self.kind == self.Kind.IMAGE:
             if not self.media_asset_id or not self.media_asset.mime_type.startswith("image/"):
                 raise ValidationError({"media_asset": "Image customization requires image media."})
-            if project and self.media_asset.uploaded_by_id not in {None, project.customer_id}:
+            if self.media_asset.access != self.media_asset.Access.PRIVATE:
+                raise ValidationError({"media_asset": "Customer customization images must remain private."})
+            if project and self.media_asset.uploaded_by_id != project.customer_id:
                 raise ValidationError({"media_asset": "Customer image must be owned by the Studio customer."})
+            if not self.rights_confirmed:
+                raise ValidationError({"rights_confirmed": "Confirm that you have the right to use this content."})
+            if self.artwork_version_id:
+                raise ValidationError({"artwork_version": "Customer image customization cannot reference Marketplace Artwork."})
+        elif self.kind == self.Kind.ARTWORK:
+            if not self.artwork_version_id:
+                raise ValidationError({"artwork_version": "Marketplace Artwork is required."})
+            if self.artwork_version.status != self.artwork_version.Status.APPROVED or self.artwork_version.artwork.status != self.artwork_version.artwork.Status.APPROVED:
+                raise ValidationError({"artwork_version": "Marketplace Artwork is not currently approved for use."})
+            if self.media_asset_id:
+                raise ValidationError({"media_asset": "Marketplace Artwork uses its approved source, not a customer media upload."})
+        else:
+            raise ValidationError({"kind": "Unsupported customization element type."})
