@@ -59,3 +59,11 @@ jobs:
           path: artifacts/browser-qa
           if-no-files-found: ignore
           retention-days: 14
+      - name: Upload Designer Portal browser QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: designer-portal-browser-qa
+          path: artifacts/designer-browser-qa
+          if-no-files-found: ignore
+          retention-days: 14
