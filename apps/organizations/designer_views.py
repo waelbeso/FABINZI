@@ -709,7 +709,7 @@ def _eligible_public_images(organization):
         Q(design_assets__version__design__organization=organization)
         | Q(artwork_assets__version__artwork__organization=organization)
         | Q(storefront_logos__organization=organization)
-    ).distinct().order_by("-created_at")[:100]
+    ).distinct().order_by("-created_at")
 
 
 @login_required
@@ -737,7 +737,7 @@ def designer_store_product(request, pk):
         except (ValidationError, PermissionDenied) as exc:
             messages.error(request, _error_text(exc))
         return _redirect_with_org("designer-store-product", organization, pk=product.pk)
-    context.update({"product": product, "fulfillment_modes": StoreProduct.FulfillmentMode.choices, "public_images": _eligible_public_images(organization)})
+    context.update({"product": product, "fulfillment_modes": StoreProduct.FulfillmentMode.choices, "public_images": _eligible_public_images(organization)[:100]})
     return render(request, "designer/store_product.html", context)
 
 
