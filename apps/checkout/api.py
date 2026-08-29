@@ -5,6 +5,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from apps.integrations.models import IntegrationConfig
+from apps.platform_ops.public_urls import absolute_public_url
 from apps.storefront.models import StudioProject
 from .gateways import get_payment_config, parse_webhook, verify_paymob_signature, verify_stripe_signature
 from .models import CheckoutSession, CustomerOrder, PaymentAttempt
@@ -33,7 +34,9 @@ class PlaceOrderAPIView(APIView):
     def post(self,request,checkout_id):
         try:
             order,attempt=place_order(session=get_object_or_404(CheckoutSession,pk=checkout_id),actor=request.user,payment_method=request.data.get("payment_method","cod"),request=request)
-            if attempt.provider != "cod" and request.data.get("initiate",True): initiate_online_payment(attempt=attempt,return_url=request.data.get("return_url",""))
+            if attempt.provider != "cod" and request.data.get("initiate",True):
+                return_url=request.data.get("return_url") or absolute_public_url(f"/orders/{order.pk}/")
+                initiate_online_payment(attempt=attempt,return_url=return_url)
             return Response({"order":_order_data(order),"payment":{"id":attempt.pk,"status":attempt.status,"provider":attempt.provider,"redirect_url":attempt.redirect_url,"client_secret":attempt.provider_payload.get("client_secret","")}},status=201)
         except (ValidationError,PermissionDenied) as exc: return _err(exc)
 class OrderListAPIView(APIView):
