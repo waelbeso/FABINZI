@@ -78,6 +78,17 @@ jobs:
           set -o pipefail
           dart format --output=none --set-exit-if-changed lib test tool/verify_customer_contract.dart 2>&1 | tee build-evidence/format.log
           printf 'PASS\n' > build-evidence/format-result.txt
+      - name: Upload exact formatted workspace on format failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: flutter-customer-formatted-source
+          path: |
+            mobile/customer_app/lib
+            mobile/customer_app/test
+            mobile/customer_app/tool
+          if-no-files-found: error
+          retention-days: 7
       - name: Static analysis
         working-directory: mobile/customer_app
         shell: bash
