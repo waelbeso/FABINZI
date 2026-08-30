@@ -1,1 +1,1 @@
-Temporary pre-candidate trigger for the registered Continuation #2 proof workflow; remove before candidate designation.
+Temporary pre-candidate trigger confirming the validated Flutter workflow registration; remove before candidate designation.
