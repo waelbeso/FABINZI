@@ -23,7 +23,7 @@ jobs:
         shell: bash
         run: |
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
-          test "$(git rev-parse feature/web-productization)" = "101b62220222f6372b11dfd5c76bd71aee1ab420" || true
+          test "$(git rev-parse origin/feature/web-productization)" = "101b62220222f6372b11dfd5c76bd71aee1ab420"
           test -f mobile/customer_app/tool/prepare_checkpoint_fix.py
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
@@ -36,11 +36,12 @@ jobs:
           set -euo pipefail
           python mobile/customer_app/tool/prepare_checkpoint_fix.py
           cd mobile/customer_app
+          flutter pub get
           dart --version
           dart format lib test tool/verify_customer_contract.dart
-          flutter pub get
           test -s pubspec.lock
           cd ../..
+          git checkout HEAD -- mobile/customer_app/analysis_options.yaml
           git diff --check
           git diff --exit-code 101b62220222f6372b11dfd5c76bd71aee1ab420...HEAD -- \
             docs/api/fabinzi-customer-api-v1.openapi.json \
@@ -50,13 +51,14 @@ jobs:
             docs/API_V1_CUSTOMER_REPRODUCIBILITY.md \
             contracts/customer-api-v1-manifest.json \
             contracts/customer-api-v1-fixtures.json
-      - name: Commit prepared Flutter tree only to working branch
+      - name: Commit prepared mobile tree only to working branch
         shell: bash
         run: |
           set -euo pipefail
+          git checkout HEAD -- .github/workflows/flutter-customer.yml
           git config user.name "FABINZI CI"
           git config user.email "actions@users.noreply.github.com"
-          git add .github/workflows/flutter-customer.yml mobile/customer_app
+          git add mobile/customer_app
           git status --short
           test -n "$(git status --porcelain)"
           git commit -m "fix(mobile): complete Flutter verification hardening"
