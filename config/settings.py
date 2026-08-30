@@ -1,3 +1,4 @@
+from datetime import timedelta
 from pathlib import Path
 import environ
 from django.core.exceptions import ImproperlyConfigured
@@ -42,7 +43,7 @@ DEMO_CUSTOMER_PASSWORD = env("DEMO_CUSTOMER_PASSWORD", default="")
 
 INSTALLED_APPS = [
     "django.contrib.admin","django.contrib.auth","django.contrib.contenttypes","django.contrib.sessions","django.contrib.messages","django.contrib.staticfiles","django.contrib.sites",
-    "rest_framework","django_otp","django_otp.plugins.otp_totp","django_otp.plugins.otp_static","two_factor",
+    "rest_framework","rest_framework_simplejwt.token_blacklist","django_otp","django_otp.plugins.otp_totp","django_otp.plugins.otp_static","two_factor",
     "apps.accounts","apps.audit","apps.integrations","apps.media","apps.notifications","apps.platform_ops","apps.organizations","apps.design","apps.artwork","apps.manufacturer_marketplace","apps.storefront","apps.checkout","apps.operations","apps.finance",
 ]
 MIDDLEWARE = [
@@ -89,8 +90,28 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES":["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_VERSIONING_CLASS":"rest_framework.versioning.NamespaceVersioning",
     "DEFAULT_THROTTLE_CLASSES":["rest_framework.throttling.AnonRateThrottle","rest_framework.throttling.UserRateThrottle"],
-    "DEFAULT_THROTTLE_RATES":{"anon":env("API_ANON_RATE",default="120/hour"),"user":env("API_USER_RATE",default="1200/hour")},
+    "DEFAULT_THROTTLE_RATES":{
+        "anon":env("API_ANON_RATE",default="120/hour"),
+        "user":env("API_USER_RATE",default="1200/hour"),
+        "customer_login":env("API_CUSTOMER_LOGIN_RATE",default="10/minute"),
+        "customer_refresh":env("API_CUSTOMER_REFRESH_RATE",default="30/minute"),
+        "customer_upload":env("API_CUSTOMER_UPLOAD_RATE",default="30/hour"),
+        "customer_place":env("API_CUSTOMER_PLACE_RATE",default="20/hour"),
+    },
 }
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+    "UPDATE_LAST_LOGIN": False,
+    "ALGORITHM": "HS256",
+    "SIGNING_KEY": SECRET_KEY,
+    "AUTH_HEADER_TYPES": ("Bearer",),
+    "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
+}
+
 CACHES = {"default":{"BACKEND":"django.core.cache.backends.locmem.LocMemCache","LOCATION":"fabinzi-runtime-throttles"}}
 
 REDIS_URL = env("REDIS_URL", default="redis://localhost:6379/0")
