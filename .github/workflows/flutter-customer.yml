@@ -54,8 +54,8 @@ jobs:
         shell: bash
         run: |
           flutter create --empty --no-pub --platforms=android,ios --org com.fabinzi --project-name fabinzi_customer_app .
-          git checkout HEAD -- pubspec.yaml analysis_options.yaml
-          git diff --exit-code HEAD -- pubspec.yaml analysis_options.yaml
+          git checkout HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
+          git diff --exit-code HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
       - name: Verify committed locked dependencies
         working-directory: mobile/customer_app
         shell: bash
@@ -167,8 +167,8 @@ jobs:
         shell: bash
         run: |
           flutter create --empty --no-pub --platforms=android,ios --org com.fabinzi --project-name fabinzi_customer_app .
-          git checkout HEAD -- pubspec.yaml analysis_options.yaml
-          git diff --exit-code HEAD -- pubspec.yaml analysis_options.yaml
+          git checkout HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
+          git diff --exit-code HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
           flutter pub get --enforce-lockfile
       - name: iOS debug build without code signing
         working-directory: mobile/customer_app
