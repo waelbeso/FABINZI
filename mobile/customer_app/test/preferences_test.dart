@@ -12,16 +12,31 @@ void main() {
     expect(a, replay);
     expect(a, isNot(otherProvider));
     expect(a.length, greaterThanOrEqualTo(8));
+
+    await store.clear(42);
+    final afterConfirmedCompletion = await store.keyFor(42, 'cod');
+    expect(afterConfirmedCompletion, isNot(a));
   });
 
-  test('locale and theme preferences never contain authentication credentials', () async {
-    SharedPreferences.setMockInitialValues({});
-    final preferences = AppPreferences();
-    await preferences.writeLocale('ar');
-    await preferences.writeTheme('dark');
-    final raw = await SharedPreferences.getInstance();
-    expect(raw.getString('fabinzi.locale'), 'ar');
-    expect(raw.getString('fabinzi.theme'), 'dark');
-    expect(raw.getKeys().where((key) => key.contains('token') || key.contains('access') || key.contains('refresh')), isEmpty);
-  });
+  test(
+    'locale and theme preferences never contain authentication credentials',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final preferences = AppPreferences();
+      await preferences.writeLocale('ar');
+      await preferences.writeTheme('dark');
+      final raw = await SharedPreferences.getInstance();
+      expect(raw.getString('fabinzi.locale'), 'ar');
+      expect(raw.getString('fabinzi.theme'), 'dark');
+      expect(
+        raw.getKeys().where(
+          (key) =>
+              key.contains('token') ||
+              key.contains('access') ||
+              key.contains('refresh'),
+        ),
+        isEmpty,
+      );
+    },
+  );
 }

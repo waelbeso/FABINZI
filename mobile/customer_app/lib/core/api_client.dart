@@ -13,7 +13,8 @@ class NetworkProblem implements Exception {
   final String kind;
   final String message;
   @override
-  String toString() => 'NetworkProblem($kind${message.isEmpty ? '' : ': $message'})';
+  String toString() =>
+      'NetworkProblem($kind${message.isEmpty ? '' : ': $message'})';
 }
 
 class CustomerApiClient {
@@ -23,11 +24,11 @@ class CustomerApiClient {
     http.Client? httpClient,
     String Function()? language,
     Duration timeout = const Duration(seconds: 20),
-  })  : _config = config,
-        _tokens = tokens,
-        _http = httpClient ?? http.Client(),
-        _language = language ?? (() => 'en'),
-        _timeout = timeout;
+  }) : _config = config,
+       _tokens = tokens,
+       _http = httpClient ?? http.Client(),
+       _language = language ?? (() => 'en'),
+       _timeout = timeout;
 
   final AppConfig _config;
   final TokenStore _tokens;
@@ -40,16 +41,21 @@ class CustomerApiClient {
       BootstrapConfig.fromJson(await _json('GET', 'bootstrap/', auth: false));
 
   Future<UserProfile> login(String username, String password) async {
-    final payload = asMap(await _json(
-      'POST',
-      'auth/login/',
-      auth: false,
-      body: {'username': username, 'password': password},
-    ));
+    final payload = asMap(
+      await _json(
+        'POST',
+        'auth/login/',
+        auth: false,
+        body: {'username': username, 'password': password},
+      ),
+    );
     final access = asString(payload['access']);
     final refresh = asString(payload['refresh']);
     if (access.isEmpty || refresh.isEmpty) {
-      throw const NetworkProblem('invalid_response', 'Login did not return both JWT credentials.');
+      throw const NetworkProblem(
+        'invalid_response',
+        'Login did not return both JWT credentials.',
+      );
     }
     await _tokens.write(SessionTokens(access: access, refresh: refresh));
     return me();
@@ -62,7 +68,8 @@ class CustomerApiClient {
       await me();
       return true;
     } on ApiProblem catch (problem) {
-      if (problem.isAuthenticationFailure || problem.code == 'invalid_refresh_token') {
+      if (problem.isAuthenticationFailure ||
+          problem.code == 'invalid_refresh_token') {
         await _tokens.clear();
         return false;
       }
@@ -78,13 +85,23 @@ class CustomerApiClient {
     }
     try {
       try {
-        await _json('POST', 'auth/logout/', body: {'refresh': refresh}, retryAuth: false);
+        await _json(
+          'POST',
+          'auth/logout/',
+          body: {'refresh': refresh},
+          retryAuth: false,
+        );
       } on ApiProblem catch (problem) {
         if (!problem.isAuthenticationFailure) rethrow;
         await _refreshTokens();
         refresh = await _tokens.readRefresh();
         if (refresh != null && refresh!.isNotEmpty) {
-          await _json('POST', 'auth/logout/', body: {'refresh': refresh}, retryAuth: false);
+          await _json(
+            'POST',
+            'auth/logout/',
+            body: {'refresh': refresh},
+            retryAuth: false,
+          );
         }
       }
     } finally {
@@ -92,7 +109,8 @@ class CustomerApiClient {
     }
   }
 
-  Future<UserProfile> me() async => UserProfile.fromJson(await _json('GET', 'me/'));
+  Future<UserProfile> me() async =>
+      UserProfile.fromJson(await _json('GET', 'me/'));
 
   Future<UserProfile> updateMe({String? language, String? theme}) async {
     final body = <String, Object?>{};
@@ -101,36 +119,71 @@ class CustomerApiClient {
     return UserProfile.fromJson(await _json('PATCH', 'me/', body: body));
   }
 
-  Future<Paged<Storefront>> stores({String query = '', int page = 1}) async => Paged<Storefront>.fromJson(
-        await _json('GET', 'stores/', auth: false, query: {'q': query, 'page': '$page'}),
+  Future<Paged<Storefront>> stores({String query = '', int page = 1}) async =>
+      Paged<Storefront>.fromJson(
+        await _json(
+          'GET',
+          'stores/',
+          auth: false,
+          query: {'q': query, 'page': '$page'},
+        ),
         Storefront.fromJson,
       );
 
-  Future<Storefront> store(String slug) async =>
-      Storefront.fromJson(await _json('GET', 'stores/${Uri.encodeComponent(slug)}/', auth: false));
+  Future<Storefront> store(String slug) async => Storefront.fromJson(
+    await _json('GET', 'stores/${Uri.encodeComponent(slug)}/', auth: false),
+  );
 
-  Future<Paged<Product>> products({String query = '', String store = '', bool? customizable, int page = 1}) async => Paged<Product>.fromJson(
-        await _json('GET', 'products/', auth: false, query: {
-          'q': query,
-          'store': store,
-          'customizable': customizable == null ? null : '$customizable',
-          'page': '$page',
-        }),
-        Product.fromJson,
-      );
+  Future<Paged<Product>> products({
+    String query = '',
+    String store = '',
+    bool? customizable,
+    int page = 1,
+  }) async => Paged<Product>.fromJson(
+    await _json(
+      'GET',
+      'products/',
+      auth: false,
+      query: {
+        'q': query,
+        'store': store,
+        'customizable': customizable == null ? null : '$customizable',
+        'page': '$page',
+      },
+    ),
+    Product.fromJson,
+  );
 
-  Future<Product> product(String storeSlug, String productSlug) async => Product.fromJson(
-        await _json('GET', 'stores/${Uri.encodeComponent(storeSlug)}/products/${Uri.encodeComponent(productSlug)}/', auth: false),
-      );
+  Future<Product> product(
+    String storeSlug,
+    String productSlug,
+  ) async => Product.fromJson(
+    await _json(
+      'GET',
+      'stores/${Uri.encodeComponent(storeSlug)}/products/${Uri.encodeComponent(productSlug)}/',
+      auth: false,
+    ),
+  );
 
-  Future<Paged<Artwork>> artworks({String query = '', String method = '', int page = 1}) async => Paged<Artwork>.fromJson(
-        await _json('GET', 'artworks/', auth: false, query: {'q': query, 'method': method, 'page': '$page'}),
-        Artwork.fromJson,
-      );
+  Future<Paged<Artwork>> artworks({
+    String query = '',
+    String method = '',
+    int page = 1,
+  }) async => Paged<Artwork>.fromJson(
+    await _json(
+      'GET',
+      'artworks/',
+      auth: false,
+      query: {'q': query, 'method': method, 'page': '$page'},
+    ),
+    Artwork.fromJson,
+  );
 
-  Future<Artwork> artwork(int id) async => Artwork.fromJson(await _json('GET', 'artworks/$id/', auth: false));
+  Future<Artwork> artwork(int id) async =>
+      Artwork.fromJson(await _json('GET', 'artworks/$id/', auth: false));
 
-  Future<Paged<StudioProject>> studioProjects({int page = 1}) async => Paged<StudioProject>.fromJson(
+  Future<Paged<StudioProject>> studioProjects({int page = 1}) async =>
+      Paged<StudioProject>.fromJson(
         await _json('GET', 'studio-projects/', query: {'page': '$page'}),
         StudioProject.fromJson,
       );
@@ -141,25 +194,40 @@ class CustomerApiClient {
     String? variantSku,
     int quantity = 1,
     String customerNotes = '',
-  }) async => StudioProject.fromJson(await _json('POST', 'studio-projects/', body: {
+  }) async => StudioProject.fromJson(
+    await _json(
+      'POST',
+      'studio-projects/',
+      body: {
         'store_slug': storeSlug,
         'product_slug': productSlug,
         if (variantSku != null) 'variant_sku': variantSku,
         'quantity': quantity,
         'customer_notes': customerNotes,
-      }));
+      },
+    ),
+  );
 
-  Future<StudioProject> studioProject(int id) async => StudioProject.fromJson(await _json('GET', 'studio-projects/$id/'));
+  Future<StudioProject> studioProject(int id) async =>
+      StudioProject.fromJson(await _json('GET', 'studio-projects/$id/'));
 
-  Future<StudioProject> updateStudio(int id, {String? variantSku, int? quantity, String? customerNotes}) async {
+  Future<StudioProject> updateStudio(
+    int id, {
+    String? variantSku,
+    int? quantity,
+    String? customerNotes,
+  }) async {
     final body = <String, Object?>{};
     if (variantSku != null) body['variant_sku'] = variantSku;
     if (quantity != null) body['quantity'] = quantity;
     if (customerNotes != null) body['customer_notes'] = customerNotes;
-    return StudioProject.fromJson(await _json('PATCH', 'studio-projects/$id/', body: body));
+    return StudioProject.fromJson(
+      await _json('PATCH', 'studio-projects/$id/', body: body),
+    );
   }
 
-  Future<void> enableCustomization(int id) async => _json('POST', 'studio-projects/$id/customization/');
+  Future<void> enableCustomization(int id) async =>
+      _json('POST', 'studio-projects/$id/customization/');
 
   Future<StudioElement> addStudioElement(
     int projectId, {
@@ -170,10 +238,19 @@ class CustomerApiClient {
     int? artworkVersionId,
     required String productionMethod,
     required bool rightsConfirmed,
-    StudioTransform transform = const StudioTransform(x: .5, y: .5, scale: .35, rotation: 0),
+    StudioTransform transform = const StudioTransform(
+      x: .5,
+      y: .5,
+      scale: .35,
+      rotation: 0,
+    ),
     JsonMap style = const {},
     int sortOrder = 0,
-  }) async => StudioElement.fromJson(await _json('POST', 'studio-projects/$projectId/elements/', body: {
+  }) async => StudioElement.fromJson(
+    await _json(
+      'POST',
+      'studio-projects/$projectId/elements/',
+      body: {
         'decoration_zone': zone,
         'kind': kind,
         'text': text,
@@ -184,21 +261,37 @@ class CustomerApiClient {
         'transform': transform.toJson(),
         'style': style,
         'sort_order': sortOrder,
-      }));
+      },
+    ),
+  );
 
-  Future<StudioElement> updateStudioElement(int projectId, int elementId, {StudioTransform? transform, String? productionMethod, String? text}) async {
+  Future<StudioElement> updateStudioElement(
+    int projectId,
+    int elementId, {
+    StudioTransform? transform,
+    String? productionMethod,
+    String? text,
+  }) async {
     final body = <String, Object?>{};
     if (transform != null) body['transform'] = transform.toJson();
     if (productionMethod != null) body['production_method'] = productionMethod;
     if (text != null) body['text'] = text;
-    return StudioElement.fromJson(await _json('PATCH', 'studio-projects/$projectId/elements/$elementId/', body: body));
+    return StudioElement.fromJson(
+      await _json(
+        'PATCH',
+        'studio-projects/$projectId/elements/$elementId/',
+        body: body,
+      ),
+    );
   }
 
   Future<void> deleteStudioElement(int projectId, int elementId) async =>
       _json('DELETE', 'studio-projects/$projectId/elements/$elementId/');
 
   Future<StudioValidation> validateStudio(int id) async =>
-      StudioValidation.fromJson(await _json('GET', 'studio-projects/$id/validation/'));
+      StudioValidation.fromJson(
+        await _json('GET', 'studio-projects/$id/validation/'),
+      );
 
   Future<StudioProject> markStudioReady(int id) async =>
       StudioProject.fromJson(await _json('POST', 'studio-projects/$id/ready/'));
@@ -206,21 +299,36 @@ class CustomerApiClient {
   Future<Checkout> studioCheckout(int id) async =>
       Checkout.fromJson(await _json('POST', 'studio-projects/$id/checkout/'));
 
-  Future<UploadAsset> uploadStudioImage(int projectId, Uint8List bytes, String filename) async {
+  Future<UploadAsset> uploadStudioImage(
+    int projectId,
+    Uint8List bytes,
+    String filename,
+  ) async {
     if (bytes.length > 10485760) {
-      throw ApiProblem(statusCode: 413, code: 'upload_error', message: 'The image exceeds the 10 MiB Customer Studio limit.');
+      throw ApiProblem(
+        statusCode: 413,
+        code: 'upload_error',
+        message: 'The image exceeds the 10 MiB Customer Studio limit.',
+      );
     }
     Future<UploadAsset> send(bool retryAuth) async {
       final access = await _tokens.readAccess();
-      final request = http.MultipartRequest('POST', _config.customerUri('studio-projects/$projectId/uploads/'));
+      final request = http.MultipartRequest(
+        'POST',
+        _config.customerUri('studio-projects/$projectId/uploads/'),
+      );
       request.headers['Accept-Language'] = _language() == 'ar' ? 'ar' : 'en';
-      if (access != null && access.isNotEmpty) request.headers['Authorization'] = 'Bearer $access';
-      request.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+      if (access != null && access.isNotEmpty)
+        request.headers['Authorization'] = 'Bearer $access';
+      request.files.add(
+        http.MultipartFile.fromBytes('file', bytes, filename: filename),
+      );
       try {
         final streamed = await _http.send(request).timeout(_timeout);
         final response = await http.Response.fromStream(streamed);
         final payload = _decode(response.bodyBytes);
-        if (response.statusCode >= 200 && response.statusCode < 300) return UploadAsset.fromJson(payload);
+        if (response.statusCode >= 200 && response.statusCode < 300)
+          return UploadAsset.fromJson(payload);
         final problem = ApiProblem.fromPayload(response.statusCode, payload);
         if (retryAuth && problem.isAuthenticationFailure) {
           await _refreshTokens();
@@ -233,27 +341,41 @@ class CustomerApiClient {
         throw NetworkProblem('connection', error.message);
       }
     }
+
     return send(true);
   }
 
   Future<Uint8List> protectedMedia(String accessUrl) async {
     Future<Uint8List> send(bool retryAuth) async {
       final access = await _tokens.readAccess();
-      final request = http.Request('GET', _config.resolveApplicationUrl(accessUrl))..followRedirects = false;
+      final request = http.Request(
+        'GET',
+        _config.resolveApplicationUrl(accessUrl),
+      )..followRedirects = false;
       request.headers['Accept-Language'] = _language() == 'ar' ? 'ar' : 'en';
-      if (access != null && access.isNotEmpty) request.headers['Authorization'] = 'Bearer $access';
+      if (access != null && access.isNotEmpty)
+        request.headers['Authorization'] = 'Bearer $access';
       try {
         final streamed = await _http.send(request).timeout(_timeout);
         final response = await http.Response.fromStream(streamed);
         if (response.statusCode >= 300 && response.statusCode < 400) {
           final location = response.headers['location'];
-          if (location == null || location.isEmpty) throw const NetworkProblem('invalid_response', 'Private media redirect omitted Location.');
+          if (location == null || location.isEmpty)
+            throw const NetworkProblem(
+              'invalid_response',
+              'Private media redirect omitted Location.',
+            );
           final signed = await _http.get(Uri.parse(location)).timeout(_timeout);
-          if (signed.statusCode >= 200 && signed.statusCode < 300) return signed.bodyBytes;
+          if (signed.statusCode >= 200 && signed.statusCode < 300)
+            return signed.bodyBytes;
           throw const NetworkProblem('media_unavailable');
         }
-        if (response.statusCode >= 200 && response.statusCode < 300) return response.bodyBytes;
-        final problem = ApiProblem.fromPayload(response.statusCode, _decode(response.bodyBytes));
+        if (response.statusCode >= 200 && response.statusCode < 300)
+          return response.bodyBytes;
+        final problem = ApiProblem.fromPayload(
+          response.statusCode,
+          _decode(response.bodyBytes),
+        );
         if (retryAuth && problem.isAuthenticationFailure) {
           await _refreshTokens();
           return send(false);
@@ -265,66 +387,106 @@ class CustomerApiClient {
         throw NetworkProblem('connection', error.message);
       }
     }
+
     return send(true);
   }
 
   Future<Cart> cart() async => Cart.fromJson(await _json('GET', 'cart/'));
 
-  Future<Cart> addCartItem({required String kind, String? storeSlug, String? productSlug, String? variantSku, int? studioProjectId, int quantity = 1}) async => Cart.fromJson(await _json('POST', 'cart/items/', body: {
+  Future<Cart> addCartItem({
+    required String kind,
+    String? storeSlug,
+    String? productSlug,
+    String? variantSku,
+    int? studioProjectId,
+    int quantity = 1,
+  }) async => Cart.fromJson(
+    await _json(
+      'POST',
+      'cart/items/',
+      body: {
         'kind': kind,
         if (storeSlug != null) 'store_slug': storeSlug,
         if (productSlug != null) 'product_slug': productSlug,
         if (variantSku != null) 'variant_sku': variantSku,
         if (studioProjectId != null) 'studio_project_id': studioProjectId,
         'quantity': quantity,
-      }));
+      },
+    ),
+  );
 
-  Future<Cart> updateCartItem(int id, int quantity) async =>
-      Cart.fromJson(await _json('PATCH', 'cart/items/$id/', body: {'quantity': quantity}));
+  Future<Cart> updateCartItem(int id, int quantity) async => Cart.fromJson(
+    await _json('PATCH', 'cart/items/$id/', body: {'quantity': quantity}),
+  );
 
-  Future<void> removeCartItem(int id) async => _json('DELETE', 'cart/items/$id/');
+  Future<void> removeCartItem(int id) async =>
+      _json('DELETE', 'cart/items/$id/');
 
-  Future<Checkout> cartCheckout() async => Checkout.fromJson(await _json('POST', 'cart/checkout/'));
-  Future<Checkout> checkout(int id) async => Checkout.fromJson(await _json('GET', 'checkouts/$id/'));
+  Future<Checkout> cartCheckout() async =>
+      Checkout.fromJson(await _json('POST', 'cart/checkout/'));
+  Future<Checkout> checkout(int id) async =>
+      Checkout.fromJson(await _json('GET', 'checkouts/$id/'));
   Future<Checkout> updateCheckout(int id, ShippingDetails shipping) async =>
-      Checkout.fromJson(await _json('PATCH', 'checkouts/$id/', body: shipping.toPatchJson()));
+      Checkout.fromJson(
+        await _json('PATCH', 'checkouts/$id/', body: shipping.toPatchJson()),
+      );
 
   Future<List<PaymentOption>> paymentOptions() async {
     final payload = asMap(await _json('GET', 'payment-options/'));
     return asList(payload['results']).map(PaymentOption.fromJson).toList();
   }
 
-  Future<PlacementResult> placeCheckout(int id, String provider, String idempotencyKey) async => PlacementResult.fromJson(
-        await _json('POST', 'checkouts/$id/place/', body: {'payment_method': provider}, headers: {'Idempotency-Key': idempotencyKey}),
-      );
+  Future<PlacementResult> placeCheckout(
+    int id,
+    String provider,
+    String idempotencyKey,
+  ) async => PlacementResult.fromJson(
+    await _json(
+      'POST',
+      'checkouts/$id/place/',
+      body: {'payment_method': provider},
+      headers: {'Idempotency-Key': idempotencyKey},
+    ),
+  );
 
-  Future<Paged<Purchase>> purchases({int page = 1}) async => Paged<Purchase>.fromJson(
+  Future<Paged<Purchase>> purchases({int page = 1}) async =>
+      Paged<Purchase>.fromJson(
         await _json('GET', 'purchases/', query: {'page': '$page'}),
         Purchase.fromJson,
       );
 
   Future<Purchase> purchase(String reference) async => Purchase.fromJson(
-        await _json('GET', 'purchases/${Uri.encodeComponent(reference)}/'),
-      );
+    await _json('GET', 'purchases/${Uri.encodeComponent(reference)}/'),
+  );
 
-  Future<Paged<NotificationItem>> notifications({int page = 1}) async => Paged<NotificationItem>.fromJson(
+  Future<Paged<NotificationItem>> notifications({int page = 1}) async =>
+      Paged<NotificationItem>.fromJson(
         await _json('GET', 'notifications/', query: {'page': '$page'}),
         NotificationItem.fromJson,
       );
 
   Future<NotificationItem> markNotificationRead(int id) async =>
       NotificationItem.fromJson(await _json('POST', 'notifications/$id/read/'));
-  Future<int> markAllNotificationsRead() async => asInt(asMap(await _json('POST', 'notifications/read-all/'))['updated']);
+  Future<int> markAllNotificationsRead() async =>
+      asInt(asMap(await _json('POST', 'notifications/read-all/'))['updated']);
 
   Future<NotificationPreferences> notificationPreferences() async =>
-      NotificationPreferences.fromJson(await _json('GET', 'notifications/preferences/'));
+      NotificationPreferences.fromJson(
+        await _json('GET', 'notifications/preferences/'),
+      );
 
-  Future<NotificationPreferences> updateNotificationPreferences({bool? emailEnabled, bool? smsEnabled, String? phoneE164}) async {
+  Future<NotificationPreferences> updateNotificationPreferences({
+    bool? emailEnabled,
+    bool? smsEnabled,
+    String? phoneE164,
+  }) async {
     final body = <String, Object?>{};
     if (emailEnabled != null) body['email_enabled'] = emailEnabled;
     if (smsEnabled != null) body['sms_enabled'] = smsEnabled;
     if (phoneE164 != null) body['phone_e164'] = phoneE164;
-    return NotificationPreferences.fromJson(await _json('PATCH', 'notifications/preferences/', body: body));
+    return NotificationPreferences.fromJson(
+      await _json('PATCH', 'notifications/preferences/', body: body),
+    );
   }
 
   Future<Object?> _json(
@@ -342,18 +504,26 @@ class CustomerApiClient {
         'Accept': 'application/json',
         'Accept-Language': _language() == 'ar' ? 'ar' : 'en',
         if (body != null) 'Content-Type': 'application/json',
-        if (access != null && access.isNotEmpty) 'Authorization': 'Bearer $access',
+        if (access != null && access.isNotEmpty)
+          'Authorization': 'Bearer $access',
         ...headers,
       };
       try {
-        final request = http.Request(method, _config.customerUri(path, query))..headers.addAll(allHeaders);
+        final request = http.Request(method, _config.customerUri(path, query))
+          ..headers.addAll(allHeaders);
         if (body != null) request.body = jsonEncode(body);
         final streamed = await _http.send(request).timeout(_timeout);
         final response = await http.Response.fromStream(streamed);
-        final payload = response.bodyBytes.isEmpty ? null : _decode(response.bodyBytes);
-        if (response.statusCode >= 200 && response.statusCode < 300) return payload;
+        final payload = response.bodyBytes.isEmpty
+            ? null
+            : _decode(response.bodyBytes);
+        if (response.statusCode >= 200 && response.statusCode < 300)
+          return payload;
         final problem = ApiProblem.fromPayload(response.statusCode, payload);
-        if (auth && canRefresh && retryAuth && problem.isAuthenticationFailure) {
+        if (auth &&
+            canRefresh &&
+            retryAuth &&
+            problem.isAuthenticationFailure) {
           await _refreshTokens();
           return send(false);
         }
@@ -364,6 +534,7 @@ class CustomerApiClient {
         throw NetworkProblem('connection', error.message);
       }
     }
+
     return send(true);
   }
 
@@ -372,7 +543,10 @@ class CustomerApiClient {
     try {
       return jsonDecode(utf8.decode(bytes));
     } on FormatException {
-      throw const NetworkProblem('invalid_response', 'Server response was not valid JSON.');
+      throw const NetworkProblem(
+        'invalid_response',
+        'Server response was not valid JSON.',
+      );
     }
   }
 
@@ -391,18 +565,30 @@ class CustomerApiClient {
     final refresh = await _tokens.readRefresh();
     if (refresh == null || refresh.isEmpty) {
       await _tokens.clear();
-      throw ApiProblem(statusCode: 401, code: 'invalid_refresh_token', message: 'No refresh credential is available.');
+      throw ApiProblem(
+        statusCode: 401,
+        code: 'invalid_refresh_token',
+        message: 'No refresh credential is available.',
+      );
     }
     try {
       final request = http.Request('POST', _config.customerUri('auth/refresh/'))
-        ..headers.addAll({'Accept': 'application/json', 'Accept-Language': _language() == 'ar' ? 'ar' : 'en', 'Content-Type': 'application/json'})
+        ..headers.addAll({
+          'Accept': 'application/json',
+          'Accept-Language': _language() == 'ar' ? 'ar' : 'en',
+          'Content-Type': 'application/json',
+        })
         ..body = jsonEncode({'refresh': refresh});
       final streamed = await _http.send(request).timeout(_timeout);
       final response = await http.Response.fromStream(streamed);
-      final payload = response.bodyBytes.isEmpty ? null : _decode(response.bodyBytes);
+      final payload = response.bodyBytes.isEmpty
+          ? null
+          : _decode(response.bodyBytes);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         final problem = ApiProblem.fromPayload(response.statusCode, payload);
-        if (problem.code == 'invalid_refresh_token' || problem.isAuthenticationFailure) await _tokens.clear();
+        if (problem.code == 'invalid_refresh_token' ||
+            problem.isAuthenticationFailure)
+          await _tokens.clear();
         throw problem;
       }
       final json = asMap(payload);
@@ -410,7 +596,10 @@ class CustomerApiClient {
       final rotated = asString(json['refresh']);
       if (access.isEmpty || rotated.isEmpty) {
         await _tokens.clear();
-        throw const NetworkProblem('invalid_response', 'Rotating refresh response did not return new credentials.');
+        throw const NetworkProblem(
+          'invalid_response',
+          'Rotating refresh response did not return new credentials.',
+        );
       }
       final tokens = SessionTokens(access: access, refresh: rotated);
       await _tokens.write(tokens);

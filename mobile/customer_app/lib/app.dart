@@ -40,23 +40,23 @@ class _FabinziCustomerAppState extends State<FabinziCustomerApp> {
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-        animation: controller,
-        builder: (context, _) => MaterialApp(
-          debugShowCheckedModeBanner: false,
-          title: 'FABINZI',
-          locale: controller.locale,
-          supportedLocales: L10n.supportedLocales,
-          localizationsDelegates: const [
-            GlobalMaterialLocalizations.delegate,
-            GlobalWidgetsLocalizations.delegate,
-            GlobalCupertinoLocalizations.delegate,
-          ],
-          theme: FabinziTheme.light(),
-          darkTheme: FabinziTheme.dark(),
-          themeMode: controller.themeMode,
-          home: _AppGateway(controller: controller),
-        ),
-      );
+    animation: controller,
+    builder: (context, _) => MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'FABINZI',
+      locale: controller.locale,
+      supportedLocales: L10n.supportedLocales,
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      theme: FabinziTheme.light(),
+      darkTheme: FabinziTheme.dark(),
+      themeMode: controller.themeMode,
+      home: _AppGateway(controller: controller),
+    ),
+  );
 }
 
 class _AppGateway extends StatelessWidget {
@@ -65,13 +65,17 @@ class _AppGateway extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (controller.initializing || (!controller.initialized && controller.initializationError == null)) {
+    if (controller.initializing ||
+        (!controller.initialized && controller.initializationError == null)) {
       return const Scaffold(body: BusyView());
     }
     if (!controller.initialized && controller.initializationError != null) {
       return Scaffold(
         appBar: AppBar(title: const FabinziWordmark()),
-        body: FailureView(error: controller.initializationError!, onRetry: controller.retryInitialize),
+        body: FailureView(
+          error: controller.initializationError!,
+          onRetry: controller.retryInitialize,
+        ),
       );
     }
     return CustomerShell(controller: controller);
@@ -91,20 +95,28 @@ class _CustomerShellState extends State<CustomerShell> {
 
   Future<bool> ensureSignIn() async {
     if (widget.controller.isAuthenticated) return true;
-    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => LoginScreen(controller: widget.controller)));
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => LoginScreen(controller: widget.controller),
+      ),
+    );
     return widget.controller.isAuthenticated;
   }
 
   void openProtected(Widget Function() builder) async {
     if (await ensureSignIn() && mounted) {
-      await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => builder()));
+      await Navigator.of(context)
+          .push(MaterialPageRoute<void>(builder: (_) => builder()));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final tabs = <Widget>[
-      DiscoverScreen(controller: widget.controller, requestSignIn: ensureSignIn),
+      DiscoverScreen(
+        controller: widget.controller,
+        requestSignIn: ensureSignIn,
+      ),
       ArtworkScreen(controller: widget.controller),
       widget.controller.isAuthenticated
           ? StudioProjectsScreen(controller: widget.controller)
@@ -120,12 +132,15 @@ class _CustomerShellState extends State<CustomerShell> {
         actions: [
           IconButton(
             tooltip: L10n.t(context, 'notifications'),
-            onPressed: () => openProtected(() => NotificationsScreen(controller: widget.controller)),
+            onPressed: () => openProtected(
+              () => NotificationsScreen(controller: widget.controller),
+            ),
             icon: const Icon(Icons.notifications_none_rounded),
           ),
           IconButton(
             tooltip: L10n.t(context, 'cart'),
-            onPressed: () => openProtected(() => CartScreen(controller: widget.controller)),
+            onPressed: () =>
+                openProtected(() => CartScreen(controller: widget.controller)),
             icon: const Icon(Icons.shopping_bag_outlined),
           ),
           const SizedBox(width: 4),
@@ -136,11 +151,31 @@ class _CustomerShellState extends State<CustomerShell> {
         selectedIndex: index,
         onDestinationSelected: (value) => setState(() => index = value),
         destinations: [
-          NavigationDestination(icon: const Icon(Icons.explore_outlined), selectedIcon: const Icon(Icons.explore), label: L10n.t(context, 'discover')),
-          NavigationDestination(icon: const Icon(Icons.palette_outlined), selectedIcon: const Icon(Icons.palette), label: L10n.t(context, 'artwork')),
-          NavigationDestination(icon: const Icon(Icons.auto_fix_high_outlined), selectedIcon: const Icon(Icons.auto_fix_high), label: L10n.t(context, 'studio')),
-          NavigationDestination(icon: const Icon(Icons.receipt_long_outlined), selectedIcon: const Icon(Icons.receipt_long), label: L10n.t(context, 'purchases')),
-          NavigationDestination(icon: const Icon(Icons.person_outline), selectedIcon: const Icon(Icons.person), label: L10n.t(context, 'account')),
+          NavigationDestination(
+            icon: const Icon(Icons.explore_outlined),
+            selectedIcon: const Icon(Icons.explore),
+            label: L10n.t(context, 'discover'),
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.palette_outlined),
+            selectedIcon: const Icon(Icons.palette),
+            label: L10n.t(context, 'artwork'),
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.auto_fix_high_outlined),
+            selectedIcon: const Icon(Icons.auto_fix_high),
+            label: L10n.t(context, 'studio'),
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.receipt_long_outlined),
+            selectedIcon: const Icon(Icons.receipt_long),
+            label: L10n.t(context, 'purchases'),
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.person_outline),
+            selectedIcon: const Icon(Icons.person),
+            label: L10n.t(context, 'account'),
+          ),
         ],
       ),
     );

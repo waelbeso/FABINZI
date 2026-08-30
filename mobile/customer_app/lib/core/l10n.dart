@@ -63,10 +63,13 @@ class L10n {
       'zone': 'Decoration zone',
       'text': 'Text',
       'selectArtwork': 'Select artwork',
-      'rightsConfirm': 'I confirm that I have the right to use this uploaded image.',
-      'readyForCart': 'This saved Studio project is Ready and can enter Cart or Checkout.',
+      'rightsConfirm':
+          'I confirm that I have the right to use this uploaded image.',
+      'readyForCart':
+          'This saved Studio project is Ready and can enter Cart or Checkout.',
       'noProjects': 'No Studio projects yet',
-      'studioHint': 'Start from a customizable product to create a saved Studio project.',
+      'studioHint':
+          'Start from a customizable product to create a saved Studio project.',
       'studioQuantityHint': 'Change customized quantity in Studio so the saved project and Cart remain consistent.',
       'subtotal': 'Subtotal',
       'shipping': 'Shipping',
@@ -90,7 +93,8 @@ class L10n {
       'placeOrder': 'Place purchase',
       'placingOrder': 'Placing purchase…',
       'paymentPending': 'Payment confirmation is server-authoritative. Refresh the purchase after completing any provider step.',
-      'paymentOptionsUnavailable': 'No payment option is currently available from the server.',
+      'paymentOptionsUnavailable':
+          'No payment option is currently available from the server.',
       'paymentContinuationUnavailable': 'This payment needs client continuation that is not configured on this build. The purchase remains server-authoritative; no success has been assumed.',
       'purchase': 'Purchase',
       'items': 'Items',
@@ -120,7 +124,8 @@ class L10n {
       'accountCapabilities': 'Account capabilities',
       'unsupportedAccountActions': 'Password reset, account activation, self-signup and social login are not available in this version.',
       'guest': 'Guest',
-      'browseAsGuest': 'You can browse products and approved artwork without signing in.',
+      'browseAsGuest':
+          'You can browse products and approved artwork without signing in.',
       'fileTooLarge': 'The image exceeds the 10 MiB limit.',
       'unsupportedImage': 'Choose a PNG, JPEG or WebP image.',
       'uploading': 'Uploading…',
@@ -196,7 +201,8 @@ class L10n {
       'text': 'النص',
       'selectArtwork': 'اختر عملاً فنياً',
       'rightsConfirm': 'أؤكد أن لدي الحق في استخدام هذه الصورة المرفوعة.',
-      'readyForCart': 'مشروع الاستوديو المحفوظ جاهز ويمكن نقله إلى السلة أو إتمام الشراء.',
+      'readyForCart':
+          'مشروع الاستوديو المحفوظ جاهز ويمكن نقله إلى السلة أو إتمام الشراء.',
       'noProjects': 'لا توجد مشروعات استوديو بعد',
       'studioHint': 'ابدأ من منتج قابل للتخصيص لإنشاء مشروع استوديو محفوظ.',
       'studioQuantityHint': 'غيّر كمية المنتج المخصص من الاستوديو حتى يظل المشروع المحفوظ والسلة متطابقين.',
@@ -252,13 +258,15 @@ class L10n {
       'accountCapabilities': 'إمكانات الحساب',
       'unsupportedAccountActions': 'استعادة كلمة المرور وتفعيل الحساب وإنشاء حساب جديد وتسجيل الدخول الاجتماعي غير متاحة في هذا الإصدار.',
       'guest': 'زائر',
-      'browseAsGuest': 'يمكنك تصفح المنتجات والأعمال الفنية المعتمدة بدون تسجيل الدخول.',
+      'browseAsGuest':
+          'يمكنك تصفح المنتجات والأعمال الفنية المعتمدة بدون تسجيل الدخول.',
       'fileTooLarge': 'حجم الصورة يتجاوز 10 MiB.',
       'unsupportedImage': 'اختر صورة PNG أو JPEG أو WebP.',
       'uploading': 'جارٍ الرفع…',
       'validationPassed': 'تم اجتياز تحقق الاستوديو.',
       'validationFailed': 'الاستوديو يحتاج إلى مراجعة.',
-      'conflictRefresh': 'الخادم يبلّغ عن تعارض في الحالة. حدّث البيانات قبل المحاولة.',
+      'conflictRefresh':
+          'الخادم يبلّغ عن تعارض في الحالة. حدّث البيانات قبل المحاولة.',
       'rateLimited': 'طلبات كثيرة. حاول لاحقاً.',
       'serviceUnavailable': 'الخدمة غير متاحة مؤقتاً.',
       'refresh': 'تحديث',
@@ -273,7 +281,9 @@ class L10n {
   };
 
   static String t(BuildContext context, String key) {
-    final code = Localizations.localeOf(context).languageCode == 'ar' ? 'ar' : 'en';
+    final code = Localizations.localeOf(context).languageCode == 'ar'
+        ? 'ar'
+        : 'en';
     return _strings[code]?[key] ?? _strings['en']?[key] ?? key;
   }
 
