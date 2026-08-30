@@ -1,1 +1,1 @@
-Temporary pre-candidate trigger confirming the validated Flutter workflow registration; remove before candidate designation.
+Temporary pre-candidate trigger executing analyzer/test/Android and unsigned-iPhoneOS proof; remove before candidate designation.
