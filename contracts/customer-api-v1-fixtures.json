@@ -1,0 +1,293 @@
+{
+  "metadata": {
+    "contract": "FABINZI Customer API v1",
+    "backend_baseline": "FABINZI WEB v1.0",
+    "app_version": "1.0.0",
+    "synthetic_only": true,
+    "note": "All values are deterministic examples. They are not credentials, real Customer data, provider secrets, or storage identifiers."
+  },
+  "auth": {
+    "login_request": {
+      "username": "customer.example",
+      "password": "<PASSWORD-NOT-A-REAL-SECRET>"
+    },
+    "login_response": {
+      "token_type": "Bearer",
+      "access": "<ACCESS-JWT-PLACEHOLDER>",
+      "refresh": "<REFRESH-JWT-PLACEHOLDER>",
+      "access_expires_in": 900,
+      "refresh_expires_in": 2592000
+    }
+  },
+  "me": {
+    "id": 1001,
+    "username": "customer.example",
+    "display_name": "Example Customer",
+    "first_name": "Example",
+    "last_name": "Customer",
+    "email": "customer@example.test",
+    "language": "en",
+    "theme": "system",
+    "account_state": "active"
+  },
+  "pagination": {
+    "count": 25,
+    "next": "https://api.example.test/api/v1/customer/products/?page=2",
+    "previous": null,
+    "results": []
+  },
+  "product": {
+    "store": {"slug": "example-store", "name": "Example Store"},
+    "slug": "example-shirt",
+    "title": "Example Shirt",
+    "description": "Synthetic product fixture.",
+    "kind": "ready_designed",
+    "customization_enabled": true,
+    "featured": false,
+    "fulfillment_mode": "made_to_order",
+    "lead_time_days": 7,
+    "base_price": {"amount": "500.00", "currency": "EGP"},
+    "variants": [
+      {
+        "sku": "EXAMPLE-M-BLACK",
+        "size": "M",
+        "color_name": "Black",
+        "color_hex": "#000000",
+        "price": {"amount": "525.00", "currency": "EGP"},
+        "available": true
+      }
+    ],
+    "images": [
+      {
+        "url": "https://cdn.example.test/products/example-shirt.png",
+        "width": 800,
+        "height": 800,
+        "alt": "Example Shirt"
+      }
+    ],
+    "published_at": "2026-08-30T00:00:00Z",
+    "decoration_zones": [
+      {
+        "name": "Front",
+        "method": "both",
+        "placement": {"x": 0.2, "y": 0.2, "width": 0.6, "height": 0.6},
+        "max_width_mm": "240.00",
+        "max_height_mm": "300.00"
+      }
+    ]
+  },
+  "artwork": {
+    "id": 2001,
+    "title": "Example Artwork",
+    "description": "Synthetic approved public artwork fixture.",
+    "tags": ["print", "example"],
+    "creator": {"name": "Example Designer"},
+    "approved_version_id": 2101,
+    "preview": {
+      "url": "https://cdn.example.test/artwork/example.png",
+      "width": 600,
+      "height": 600
+    },
+    "production_methods": ["print"],
+    "suitability": "",
+    "product_types": [],
+    "updated_at": "2026-08-30T00:00:00Z"
+  },
+  "studio": {
+    "id": 3001,
+    "status": "draft",
+    "product": {
+      "store_slug": "example-store",
+      "product_slug": "example-shirt",
+      "title": "Example Shirt",
+      "customization_enabled": true
+    },
+    "variant": {
+      "sku": "EXAMPLE-M-BLACK",
+      "size": "M",
+      "color_name": "Black",
+      "color_hex": "#000000",
+      "price": {"amount": "525.00", "currency": "EGP"},
+      "available": true
+    },
+    "quantity": 1,
+    "customer_notes": "Synthetic Studio fixture.",
+    "unit_price": {"amount": "525.00", "currency": "EGP"},
+    "decoration_zones": [],
+    "elements": [
+      {
+        "id": 3101,
+        "kind": "text",
+        "decoration_zone": {
+          "name": "Front",
+          "method": "both",
+          "placement": {"x": 0.2, "y": 0.2, "width": 0.6, "height": 0.6},
+          "max_width_mm": "240.00",
+          "max_height_mm": "300.00"
+        },
+        "text": "FABINZI",
+        "media_asset_id": null,
+        "artwork_version_id": null,
+        "production_method": "print",
+        "transform": {"x": 0.5, "y": 0.5, "scale": 0.3, "rotation": 0.0},
+        "style": {},
+        "source_url": null
+      }
+    ],
+    "created_at": "2026-08-30T00:00:00Z",
+    "updated_at": "2026-08-30T00:01:00Z",
+    "ready_at": null
+  },
+  "private_upload": {
+    "id": 4001,
+    "mime_type": "image/png",
+    "size_bytes": 123456,
+    "width": 1200,
+    "height": 1200,
+    "access_url": "/api/v1/customer/media/4001/"
+  },
+  "cart": {
+    "id": 5001,
+    "status": "active",
+    "items": [
+      {
+        "id": 5101,
+        "kind": "plain",
+        "product": {
+          "store_slug": "example-store",
+          "product_slug": "example-shirt",
+          "title": "Example Shirt"
+        },
+        "variant": {
+          "sku": "EXAMPLE-M-BLACK",
+          "size": "M",
+          "color_name": "Black",
+          "color_hex": "#000000",
+          "price": {"amount": "525.00", "currency": "EGP"},
+          "available": true
+        },
+        "studio_project_id": null,
+        "quantity": 2,
+        "unit_price": {"amount": "525.00", "currency": "EGP"},
+        "line_total": {"amount": "1050.00", "currency": "EGP"}
+      }
+    ],
+    "item_count": 1,
+    "subtotal": {"amount": "1050.00", "currency": "EGP"},
+    "shipping_amount": {"amount": "0.00", "currency": "EGP"},
+    "discount_amount": {"amount": "0.00", "currency": "EGP"},
+    "total": {"amount": "1050.00", "currency": "EGP"}
+  },
+  "checkout": {
+    "id": 6001,
+    "status": "draft",
+    "source": "cart",
+    "subtotal": {"amount": "1050.00", "currency": "EGP"},
+    "shipping_amount": {"amount": "0.00", "currency": "EGP"},
+    "discount_amount": {"amount": "0.00", "currency": "EGP"},
+    "total": {"amount": "1050.00", "currency": "EGP"},
+    "shipping": {
+      "name": "Example Customer",
+      "phone": "+201000000000",
+      "email": "customer@example.test",
+      "address1": "1 Example Street",
+      "address2": "",
+      "city": "Cairo",
+      "region": "Cairo",
+      "country": "EG",
+      "postal_code": "00000"
+    },
+    "created_at": "2026-08-30T00:02:00Z",
+    "updated_at": "2026-08-30T00:03:00Z",
+    "placed_at": null
+  },
+  "purchase": {
+    "reference": "11111111-1111-4111-8111-111111111111",
+    "status": "confirmed",
+    "status_label": "Confirmed",
+    "fulfillment_status": "processing",
+    "fulfillment_status_label": "Processing",
+    "payment": {"method": "cod", "status": "succeeded"},
+    "subtotal": {"amount": "1050.00", "currency": "EGP"},
+    "shipping_amount": {"amount": "0.00", "currency": "EGP"},
+    "discount_amount": {"amount": "0.00", "currency": "EGP"},
+    "total": {"amount": "1050.00", "currency": "EGP"},
+    "item_count": 1,
+    "created_at": "2026-08-30T00:04:00Z",
+    "confirmed_at": "2026-08-30T00:04:01Z",
+    "shipping": {"city": "Cairo", "country": "EG"},
+    "items": [
+      {
+        "reference": "22222222-2222-4222-8222-222222222222",
+        "title": "Example Shirt",
+        "sku": "EXAMPLE-M-BLACK",
+        "size": "M",
+        "color_name": "Black",
+        "quantity": 2,
+        "unit_price": {"amount": "525.00", "currency": "EGP"},
+        "line_total": {"amount": "1050.00", "currency": "EGP"},
+        "status": "confirmed",
+        "status_label": "Confirmed",
+        "customized": false,
+        "studio_project_id": null,
+        "fulfillment": {
+          "status": "processing",
+          "label": "Processing",
+          "carrier": null,
+          "tracking_number": null,
+          "tracking_url": null,
+          "packed_at": null,
+          "shipped_at": null,
+          "delivered_at": null
+        }
+      }
+    ]
+  },
+  "notification": {
+    "id": 7001,
+    "type": "order_status",
+    "title": "Purchase update",
+    "body": "Your purchase has an update.",
+    "is_read": false,
+    "created_at": "2026-08-30T00:05:00Z",
+    "read_at": null,
+    "target": {
+      "resource": "purchase",
+      "reference": "11111111-1111-4111-8111-111111111111"
+    }
+  },
+  "errors": {
+    "not_found": {
+      "error": {
+        "code": "not_found",
+        "message": "The requested resource was not found.",
+        "fields": {},
+        "request_id": "fixture-request-id-not-found"
+      }
+    },
+    "validation_error": {
+      "error": {
+        "code": "validation_error",
+        "message": "The request contains invalid data.",
+        "fields": {"quantity": ["Quantity must be at least 1."]},
+        "request_id": "fixture-request-id-validation"
+      }
+    },
+    "rate_limited": {
+      "error": {
+        "code": "rate_limited",
+        "message": "Too many requests. Try again later.",
+        "fields": {},
+        "request_id": "fixture-request-id-throttle"
+      }
+    },
+    "upload_too_large": {
+      "error": {
+        "code": "upload_error",
+        "message": "The upload could not be accepted.",
+        "fields": {"file": ["The image exceeds the 10 MB Customer Studio limit."]},
+        "request_id": "fixture-request-id-upload"
+      }
+    }
+  }
+}
