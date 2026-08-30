@@ -1,0 +1,129 @@
+{
+  "schema": 1,
+  "contract": "FABINZI Customer API v1",
+  "api_version": "v1",
+  "base_path": "/api/v1/customer/",
+  "backend": {
+    "release": "FABINZI WEB v1.0",
+    "app_version": "1.0.0",
+    "entry_integration_sha": "461c9079b5e53e51e5af4f6d564b891fe7e20b47",
+    "predecessor_rc_sha": "ce856773a58b47826b23d60f011255beda78db13",
+    "predecessor_ci": 353,
+    "predecessor_run_id": 33290231430
+  },
+  "auth": {
+    "scheme": "Bearer JWT",
+    "access_seconds": 900,
+    "refresh_seconds": 2592000,
+    "rotate_refresh": true,
+    "blacklist_after_rotation": true,
+    "multiple_devices_independent": true,
+    "browser_session_auth_preserved": true,
+    "browser_csrf_preserved": true
+  },
+  "account_capabilities": {
+    "signup": false,
+    "password_reset": false,
+    "email_verification": false,
+    "account_activation": false,
+    "social_login": false
+  },
+  "pagination": {
+    "strategy": "page_number",
+    "default_page_size": 20,
+    "max_page_size": 50,
+    "shape": ["count", "next", "previous", "results"]
+  },
+  "money": {
+    "amount_type": "decimal-string-2dp",
+    "currency_type": "ISO-like-uppercase-3-letter-code",
+    "server_authoritative": true
+  },
+  "uploads": {
+    "request_content_type": "multipart/form-data",
+    "field": "file",
+    "mime_types": ["image/jpeg", "image/png", "image/webp"],
+    "max_bytes": 10485760,
+    "oversize_status": 413,
+    "wrong_media_status": 415,
+    "private_by_default": true,
+    "s3_signed_get_seconds": 300
+  },
+  "idempotency": {
+    "required_operation": "POST /api/v1/customer/checkouts/{checkout_id}/place/",
+    "header": "Idempotency-Key",
+    "min_length": 8,
+    "max_length": 80,
+    "pattern": "^[A-Za-z0-9._:-]{8,80}$",
+    "same_key_same_provider": "replay-same-purchase",
+    "same_key_different_provider": "409-conflict",
+    "different_key_after_placed": "409-conflict"
+  },
+  "operation_count": 41,
+  "operations": [
+    {"method":"GET","path":"/api/v1/customer/bootstrap/","auth":"public"},
+    {"method":"POST","path":"/api/v1/customer/auth/login/","auth":"public"},
+    {"method":"POST","path":"/api/v1/customer/auth/refresh/","auth":"public"},
+    {"method":"POST","path":"/api/v1/customer/auth/logout/","auth":"jwt"},
+    {"method":"GET","path":"/api/v1/customer/me/","auth":"jwt"},
+    {"method":"PATCH","path":"/api/v1/customer/me/","auth":"jwt"},
+    {"method":"GET","path":"/api/v1/customer/stores/","auth":"public"},
+    {"method":"GET","path":"/api/v1/customer/stores/{store_slug}/","auth":"public"},
+    {"method":"GET","path":"/api/v1/customer/products/","auth":"public"},
+    {"method":"GET","path":"/api/v1/customer/stores/{store_slug}/products/{product_slug}/","auth":"public"},
+    {"method":"GET","path":"/api/v1/customer/artworks/","auth":"public"},
+    {"method":"GET","path":"/api/v1/customer/artworks/{artwork_id}/","auth":"public"},
+    {"method":"GET","path":"/api/v1/customer/studio-projects/","auth":"jwt"},
+    {"method":"POST","path":"/api/v1/customer/studio-projects/","auth":"jwt"},
+    {"method":"GET","path":"/api/v1/customer/studio-projects/{project_id}/","auth":"jwt"},
+    {"method":"PATCH","path":"/api/v1/customer/studio-projects/{project_id}/","auth":"jwt"},
+    {"method":"POST","path":"/api/v1/customer/studio-projects/{project_id}/customization/","auth":"jwt"},
+    {"method":"POST","path":"/api/v1/customer/studio-projects/{project_id}/uploads/","auth":"jwt"},
+    {"method":"POST","path":"/api/v1/customer/studio-projects/{project_id}/elements/","auth":"jwt"},
+    {"method":"PATCH","path":"/api/v1/customer/studio-projects/{project_id}/elements/{element_id}/","auth":"jwt"},
+    {"method":"DELETE","path":"/api/v1/customer/studio-projects/{project_id}/elements/{element_id}/","auth":"jwt"},
+    {"method":"GET","path":"/api/v1/customer/studio-projects/{project_id}/validation/","auth":"jwt"},
+    {"method":"POST","path":"/api/v1/customer/studio-projects/{project_id}/ready/","auth":"jwt"},
+    {"method":"POST","path":"/api/v1/customer/studio-projects/{project_id}/checkout/","auth":"jwt"},
+    {"method":"GET","path":"/api/v1/customer/media/{asset_id}/","auth":"jwt"},
+    {"method":"GET","path":"/api/v1/customer/cart/","auth":"jwt"},
+    {"method":"POST","path":"/api/v1/customer/cart/items/","auth":"jwt"},
+    {"method":"PATCH","path":"/api/v1/customer/cart/items/{item_id}/","auth":"jwt"},
+    {"method":"DELETE","path":"/api/v1/customer/cart/items/{item_id}/","auth":"jwt"},
+    {"method":"POST","path":"/api/v1/customer/cart/checkout/","auth":"jwt"},
+    {"method":"GET","path":"/api/v1/customer/checkouts/{checkout_id}/","auth":"jwt"},
+    {"method":"PATCH","path":"/api/v1/customer/checkouts/{checkout_id}/","auth":"jwt"},
+    {"method":"POST","path":"/api/v1/customer/checkouts/{checkout_id}/place/","auth":"jwt"},
+    {"method":"GET","path":"/api/v1/customer/payment-options/","auth":"jwt"},
+    {"method":"GET","path":"/api/v1/customer/purchases/","auth":"jwt"},
+    {"method":"GET","path":"/api/v1/customer/purchases/{purchase_reference}/","auth":"jwt"},
+    {"method":"GET","path":"/api/v1/customer/notifications/","auth":"jwt"},
+    {"method":"GET","path":"/api/v1/customer/notifications/preferences/","auth":"jwt"},
+    {"method":"PATCH","path":"/api/v1/customer/notifications/preferences/","auth":"jwt"},
+    {"method":"POST","path":"/api/v1/customer/notifications/read-all/","auth":"jwt"},
+    {"method":"POST","path":"/api/v1/customer/notifications/{notification_id}/read/","auth":"jwt"}
+  ],
+  "excluded_families": [
+    "Designer workspace and sourcing APIs",
+    "Manufacturer workspace/production APIs",
+    "finance/payout/settlement APIs",
+    "platform operations/internal APIs",
+    "payment webhook server-to-server endpoints",
+    "/Maneg/ and admin internals",
+    "legacy public Manufacturer discovery"
+  ],
+  "contract_files": [
+    "docs/api/fabinzi-customer-api-v1.openapi.json",
+    "docs/API_V1_CUSTOMER_CONTRACT.md",
+    "docs/FLUTTER_API_HANDOFF.md",
+    "docs/CUSTOMER_API_V1_ENDPOINT_INVENTORY.md",
+    "docs/API_V1_CUSTOMER_REPRODUCIBILITY.md",
+    "contracts/customer-api-v1-manifest.json",
+    "contracts/customer-api-v1-fixtures.json"
+  ],
+  "deferred_live_e2e": {
+    "document": "docs/DEFERRED_LIVE_E2E.md",
+    "status": "UNRESOLVED",
+    "planned_return": "after Flutter"
+  }
+}
