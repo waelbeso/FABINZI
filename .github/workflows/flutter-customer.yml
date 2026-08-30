@@ -13,7 +13,8 @@ concurrency:
 
 env:
   FLUTTER_VERSION: "3.47.0"
-  FLUTTER_INTEGRATION_BASE_SHA: 101b62220222f6372b11dfd5c76bd71aee1ab420
+  CUSTOMER_API_FREEZE_SHA: 101b62220222f6372b11dfd5c76bd71aee1ab420
+  ACCEPTED_FLUTTER_SHA: bbe1d36eeb149dd876e685da91823ae09f74fbc4
 
 jobs:
   quality-android:
@@ -31,7 +32,7 @@ jobs:
           expected="${{ github.event.pull_request.head.sha || github.sha }}"
           actual="$(git rev-parse HEAD)"
           test "$actual" = "$expected"
-          test "$(git rev-parse origin/feature/web-productization)" = "$FLUTTER_INTEGRATION_BASE_SHA"
+          git merge-base --is-ancestor "$ACCEPTED_FLUTTER_SHA" HEAD
           echo "FABINZI_SOURCE_SHA=$actual" >> "$GITHUB_ENV"
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
@@ -75,7 +76,7 @@ jobs:
       - name: Verify frozen Customer API has no drift
         shell: bash
         run: |
-          git diff --exit-code "$FLUTTER_INTEGRATION_BASE_SHA"...HEAD -- \
+          git diff --exit-code "$CUSTOMER_API_FREEZE_SHA"...HEAD -- \
             docs/api/fabinzi-customer-api-v1.openapi.json \
             docs/API_V1_CUSTOMER_CONTRACT.md \
             docs/FLUTTER_API_HANDOFF.md \
@@ -143,7 +144,7 @@ jobs:
           sha256sum "$apk" > build-evidence/android-build-sha256.txt
       - name: Changed-file inventory
         shell: bash
-        run: git diff --name-status "$FLUTTER_INTEGRATION_BASE_SHA"...HEAD > mobile/customer_app/build-evidence/changed-files.txt
+        run: git diff --name-status "$CUSTOMER_API_FREEZE_SHA"...HEAD > mobile/customer_app/build-evidence/changed-files.txt
       - name: Upload Flutter quality evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -168,7 +169,7 @@ jobs:
           expected="${{ github.event.pull_request.head.sha || github.sha }}"
           actual="$(git rev-parse HEAD)"
           test "$actual" = "$expected"
-          test "$(git rev-parse origin/feature/web-productization)" = "$FLUTTER_INTEGRATION_BASE_SHA"
+          git merge-base --is-ancestor "$ACCEPTED_FLUTTER_SHA" HEAD
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           flutter-version: "3.47.0"
@@ -264,7 +265,8 @@ jobs:
           out=artifacts/flutter-customer-app-checkpoint
           mkdir -p "$out"
           printf '%s\n' "$(git rev-parse HEAD)" > "$out/source-sha.txt"
-          printf '%s\n' "$FLUTTER_INTEGRATION_BASE_SHA" > "$out/integration-baseline-sha.txt"
+          printf '%s\n' "$CUSTOMER_API_FREEZE_SHA" > "$out/customer-api-freeze-sha.txt"
+          printf '%s\n' "$ACCEPTED_FLUTTER_SHA" > "$out/accepted-flutter-sha.txt"
           cmp mobile/customer_app/pubspec.lock evidence/quality/pubspec.lock
           cp evidence/quality/flutter-version.json "$out/"
           cp evidence/quality/dart-version.txt "$out/"
@@ -288,11 +290,13 @@ jobs:
           cp evidence/ios/runner-architecture.txt "$out/"
           cp evidence/ios/codesign-check.txt "$out/"
           cp mobile/customer_app/KNOWN_LIMITATIONS.md "$out/"
-          git diff --name-status "$FLUTTER_INTEGRATION_BASE_SHA"...HEAD > "$out/changed-files.txt"
+          git diff --name-status "$CUSTOMER_API_FREEZE_SHA"...HEAD > "$out/changed-files.txt"
           sha256sum \
             docs/api/fabinzi-customer-api-v1.openapi.json \
             docs/API_V1_CUSTOMER_CONTRACT.md \
             docs/FLUTTER_API_HANDOFF.md \
+            docs/CUSTOMER_API_V1_ENDPOINT_INVENTORY.md \
+            docs/API_V1_CUSTOMER_REPRODUCIBILITY.md \
             contracts/customer-api-v1-manifest.json \
             contracts/customer-api-v1-fixtures.json \
             > "$out/frozen-contract-sha256.txt"
@@ -303,9 +307,10 @@ jobs:
           out = Path('artifacts/flutter-customer-app-checkpoint')
           flutter = json.loads((out / 'flutter-version.json').read_text())
           payload = {
-              'checkpoint': 'FABINZI — Flutter Customer App Productization',
+              'checkpoint': 'FABINZI — Flutter Customer App verification',
               'source_sha': subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(),
-              'integration_baseline_sha': '101b62220222f6372b11dfd5c76bd71aee1ab420',
+              'customer_api_freeze_sha': '101b62220222f6372b11dfd5c76bd71aee1ab420',
+              'accepted_flutter_sha': 'bbe1d36eeb149dd876e685da91823ae09f74fbc4',
               'flutter_version': flutter['frameworkVersion'],
               'dart_version': flutter['dartSdkVersion'],
               'flutter_framework_revision': flutter.get('frameworkRevision'),
