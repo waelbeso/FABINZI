@@ -114,6 +114,77 @@ jobs:
           find static -type f -print0 | sort -z | xargs -0 sha256sum > artifacts/web-v1-release/static-source-sha256.txt
           find staticfiles -type f | wc -l > artifacts/web-v1-release/collected-static-file-count.txt
           sha256sum requirements.txt constraints-release.txt release-manifest.json > artifacts/web-v1-release/release-input-sha256.txt
+      - name: Capture Customer API v1 contract evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          out=artifacts/customer-api-v1-contract
+          mkdir -p "$out/docs/api" "$out/contracts"
+          cp docs/api/fabinzi-customer-api-v1.openapi.json "$out/docs/api/"
+          cp docs/API_V1_CUSTOMER_CONTRACT.md docs/FLUTTER_API_HANDOFF.md docs/CUSTOMER_API_V1_ENDPOINT_INVENTORY.md docs/API_V1_CUSTOMER_REPRODUCIBILITY.md "$out/docs/"
+          cp contracts/customer-api-v1-manifest.json contracts/customer-api-v1-fixtures.json "$out/contracts/"
+          cp requirements.txt constraints-release.txt .python-version "$out/"
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import platform
+          from pathlib import Path
+          from config.release import APP_VERSION, RELEASE_PYTHON_VERSION
+
+          root = Path('.')
+          out = root / 'artifacts/customer-api-v1-contract'
+          manifest = json.loads((root / 'contracts/customer-api-v1-manifest.json').read_text())
+          openapi = json.loads((root / 'docs/api/fabinzi-customer-api-v1.openapi.json').read_text())
+          operation_count = sum(
+              1
+              for item in openapi['paths'].values()
+              for method in ('get', 'post', 'patch', 'delete')
+              if method in item
+          )
+          payload = {
+              'contract': manifest['contract'],
+              'api_version': manifest['api_version'],
+              'backend_release': manifest['backend']['release'],
+              'backend_app_version': APP_VERSION,
+              'source_sha': os.environ['FABINZI_SOURCE_SHA'],
+              'python_expected': RELEASE_PYTHON_VERSION,
+              'python_runtime': platform.python_version(),
+              'operation_count': operation_count,
+              'access_token_seconds': manifest['auth']['access_seconds'],
+              'refresh_token_seconds': manifest['auth']['refresh_seconds'],
+              'refresh_rotation': manifest['auth']['rotate_refresh'],
+              'refresh_blacklist_after_rotation': manifest['auth']['blacklist_after_rotation'],
+              'pagination_default': manifest['pagination']['default_page_size'],
+              'pagination_max': manifest['pagination']['max_page_size'],
+              'upload_max_bytes': manifest['uploads']['max_bytes'],
+              'deferred_live_e2e': manifest['deferred_live_e2e']['status'],
+          }
+          if payload['python_runtime'] != RELEASE_PYTHON_VERSION:
+              raise SystemExit(f"Python runtime mismatch: {payload['python_runtime']}")
+          if operation_count != manifest['operation_count']:
+              raise SystemExit(f"Contract operation mismatch: OpenAPI={operation_count}, manifest={manifest['operation_count']}")
+          (out / 'contract-evidence.json').write_text(json.dumps(payload, indent=2, sort_keys=True) + '\n')
+          PY
+          python -m pip freeze --all | sort > "$out/dependency-freeze.txt"
+          python -m pip check > "$out/pip-check.txt"
+          python manage.py showmigrations --plan > "$out/migration-plan.txt"
+          pytest --collect-only -q tests/test_customer_api_v1_*.py > "$out/customer-test-inventory.txt"
+          printf '%s\n' \
+            'Complete repository pytest executed before this artifact step.' \
+            'Customer focused families: auth, contract, Commerce/payment/idempotency, upload, security, OpenAPI/drift.' \
+            'The GitHub Actions run conclusion is authoritative for pass/fail counts.' \
+            > "$out/contract-test-summary.txt"
+          sha256sum \
+            docs/api/fabinzi-customer-api-v1.openapi.json \
+            docs/API_V1_CUSTOMER_CONTRACT.md \
+            docs/FLUTTER_API_HANDOFF.md \
+            docs/CUSTOMER_API_V1_ENDPOINT_INVENTORY.md \
+            docs/API_V1_CUSTOMER_REPRODUCIBILITY.md \
+            contracts/customer-api-v1-manifest.json \
+            contracts/customer-api-v1-fixtures.json \
+            requirements.txt constraints-release.txt .python-version \
+            > "$out/contract-source-sha256.txt"
       - name: Upload Web Productization browser QA evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -160,5 +231,13 @@ jobs:
         with:
           name: web-v1-release-contract
           path: artifacts/web-v1-release
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload Customer API v1 contract evidence
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: customer-api-v1-contract
+          path: artifacts/customer-api-v1-contract
           if-no-files-found: error
           retention-days: 30
