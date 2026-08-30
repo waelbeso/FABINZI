@@ -2,6 +2,20 @@
 
 Checkpoint: **repository-side production readiness**. This document does not replace the deferred live register and does not assert a production deployment.
 
+## Final acceptance record
+
+**FABINZI — Production Launch Gate: FINAL PASS / FORMALLY ACCEPTED / CLOSED.**
+
+- Accepted source SHA: `b05b2b0f3bed174aaf867bff9d10ef0b7cb3fbaa`.
+- Final CI: #342 / Run `33281214335`.
+- Result: 241 passed / 0 failed / 1 existing Django deprecation warning.
+- `makemigrations --check --dry-run`, migration reconciliation, fresh migrate, Django check, `collectstatic` and production `check --deploy` all passed.
+- Production Launch Gate artifact: `9723100271`.
+- Artifact digest: `sha256:87c3ba0244639d086a4d729f55828ff31d3550c35d34072338b0847e0c33ee42`.
+- Required launch screenshot inventory: 12/12 present and manually reviewed PASS.
+- PR #8 was integrated only into `feature/web-productization` through GitHub-generated merge commit `802dc0f091287f778d4e623caa375a32c67f97dc`.
+- The external Global Live E2E register remained unresolved and was not converted to PASS.
+
 ## Locked integration base
 
 - PR #7 was integrated only into `feature/web-productization`.
