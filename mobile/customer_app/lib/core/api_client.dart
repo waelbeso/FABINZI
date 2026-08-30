@@ -554,15 +554,16 @@ class CustomerApiClient {
     }
   }
 
-  Future<SessionTokens> _refreshTokens() {
+  Future<SessionTokens> _refreshTokens() async {
     final active = _refreshing;
     if (active != null) return active;
     final next = _performRefresh();
     _refreshing = next;
-    next.whenComplete(() {
+    try {
+      return await next;
+    } finally {
       if (identical(_refreshing, next)) _refreshing = null;
-    });
-    return next;
+    }
   }
 
   Future<SessionTokens> _performRefresh() async {
