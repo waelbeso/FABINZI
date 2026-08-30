@@ -201,16 +201,25 @@ def test_notification_feed_is_paginated_localized_and_uses_parent_purchase_deep_
     session = fill_shipping(create_cart_checkout(cart=get_active_cart(customer), actor=customer), customer)
     purchase, _attempt = place_cart_purchase(session=session, actor=customer, payment_method="cod")
     Notification.objects.filter(recipient=customer).delete()
-    for index in range(25):
+    for index in range(24):
         Notification.objects.create(
             recipient=customer,
-            type="order_status" if index == 0 else "general",
+            type="general",
             title_en=f"Notice {index}",
             title_ar=f"تنبيه {index}",
             body_en=f"Body {index}",
             body_ar=f"نص {index}",
-            destination=f"/purchases/{purchase.pk}/" if index == 0 else "",
+            destination="",
         )
+    Notification.objects.create(
+        recipient=customer,
+        type="order_status",
+        title_en="Purchase update",
+        title_ar="تحديث الطلب",
+        body_en="Your purchase has an update.",
+        body_ar="يوجد تحديث على طلبك.",
+        destination=f"/purchases/{purchase.pk}/",
+    )
     client = _auth(customer)
     response = client.get(reverse("v1:customer:notifications"), HTTP_ACCEPT_LANGUAGE="ar")
     assert response.status_code == 200
@@ -218,7 +227,7 @@ def test_notification_feed_is_paginated_localized_and_uses_parent_purchase_deep_
     assert len(response.data["results"]) == 20
     assert response.data["next"] is not None
     targeted = next(row for row in response.data["results"] if row["type"] == "order_status")
-    assert targeted["title"].startswith("تنبيه")
+    assert targeted["title"] == "تحديث الطلب"
     assert targeted["target"] == {"resource": "purchase", "reference": str(purchase.number)}
     assert "destination" not in targeted
 
