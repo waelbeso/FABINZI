@@ -33,9 +33,9 @@ from .customer import (
     CustomerStudioProjectDetailAPIView,
     CustomerStudioProjectsAPIView,
     CustomerStudioReadyAPIView,
-    CustomerStudioUploadAPIView,
     CustomerStudioValidationAPIView,
 )
+from .customer_upload import FrozenCustomerStudioUploadAPIView
 
 app_name = "customer"
 
@@ -54,7 +54,7 @@ urlpatterns = [
     path("studio-projects/", CustomerStudioProjectsAPIView.as_view(), name="studio-projects"),
     path("studio-projects/<int:project_id>/", CustomerStudioProjectDetailAPIView.as_view(), name="studio-project-detail"),
     path("studio-projects/<int:project_id>/customization/", CustomerStudioCustomizationAPIView.as_view(), name="studio-customization"),
-    path("studio-projects/<int:project_id>/uploads/", CustomerStudioUploadAPIView.as_view(), name="studio-upload"),
+    path("studio-projects/<int:project_id>/uploads/", FrozenCustomerStudioUploadAPIView.as_view(), name="studio-upload"),
     path("studio-projects/<int:project_id>/elements/", CustomerStudioElementAPIView.as_view(), name="studio-element"),
     path("studio-projects/<int:project_id>/elements/<int:element_id>/", CustomerStudioElementDetailAPIView.as_view(), name="studio-element-detail"),
     path("studio-projects/<int:project_id>/validation/", CustomerStudioValidationAPIView.as_view(), name="studio-validation"),
