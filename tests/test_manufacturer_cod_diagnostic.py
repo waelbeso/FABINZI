@@ -1,14 +1,14 @@
 import pytest
 from django.urls import reverse
 
-from tests.test_manufacturer_portal_acceptance import assigned_job, manufacturer
 from apps.organizations.models import Membership
+from tests.test_manufacturer_portal_acceptance import assigned_job, manufacturer
 
 
 @pytest.mark.django_db
 def test_diagnostic_manufacturer_cod_render_contexts(client):
-    operator, org, _, _ = manufacturer("cod-diagnostic", role=Membership.Role.OPERATOR)
-    data = assigned_job(org, prefix="cod-diagnostic")
+    operator, org, _, _ = manufacturer("job-operator", role=Membership.Role.OPERATOR)
+    data = assigned_job(org, prefix="assigned")
     client.force_login(operator)
 
     response = client.get(reverse("manufacturer-production-detail", args=[data["job"].id]))
