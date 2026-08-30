@@ -3,6 +3,7 @@ import re
 from importlib import metadata
 from pathlib import Path
 
+import pytest
 from django.conf import settings
 from django.urls import reverse
 from packaging.utils import canonicalize_name
@@ -136,6 +137,7 @@ def test_route_and_capability_inventories_preserve_architecture_locks():
     assert "one parent `customerpurchase`" in capability_text.lower()
 
 
+@pytest.mark.django_db
 def test_health_exposes_only_safe_release_traceability(client, monkeypatch):
     monkeypatch.setenv("RENDER_GIT_BRANCH", "work/web-v1-release-preparation")
     monkeypatch.setenv("RENDER_GIT_COMMIT", "b" * 40)
