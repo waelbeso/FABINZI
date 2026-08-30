@@ -1,24 +1,15 @@
 name: Flutter Customer Analyzer Cleanup
 
-on:
-  pull_request:
+on: [pull_request]
 
 permissions:
   contents: write
 
-concurrency:
-  group: flutter-customer-analyzer-cleanup-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   cleanup:
-    if: >-
-      github.event.pull_request.number == 11 &&
-      github.event.pull_request.head.ref == 'work/flutter-customer-app' &&
-      github.event.pull_request.base.ref == 'feature/web-productization'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
@@ -26,200 +17,33 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "${{ github.event.pull_request.number }}" = "11"
+          test "${{ github.event.pull_request.head.ref }}" = "work/flutter-customer-app"
+          test "${{ github.event.pull_request.base.ref }}" = "feature/web-productization"
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
           test "$(git rev-parse origin/feature/web-productization)" = "101b62220222f6372b11dfd5c76bd71aee1ab420"
           test "$(git rev-parse origin/main)" = "91f358c08d89557893e983f1c0d247fd1b42b15f"
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
         with:
           flutter-version: "3.47.0"
           channel: stable
           cache: true
-      - name: Restore locked dependencies and analysis policy
-        working-directory: mobile/customer_app
+      - name: Apply analyzer corrections
         shell: bash
         run: |
           set -euo pipefail
+          cd mobile/customer_app
           flutter pub get --enforce-lockfile
           git checkout HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
-          git diff --exit-code HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
-      - name: Apply supported analyzer corrections
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-
-          cart_path = Path('mobile/customer_app/lib/features/cart/cart_screen.dart')
-          cart = cart_path.read_text()
-          stripe_replacements = {
-              "import 'package:flutter_stripe/flutter_stripe.dart';": "import 'package:flutter_stripe/flutter_stripe.dart' as stripe;",
-              'Stripe.instance': 'stripe.Stripe.instance',
-              'SetupPaymentSheetParameters(': 'stripe.SetupPaymentSheetParameters(',
-              'on StripeException catch': 'on stripe.StripeException catch',
-              'FailureCode.Canceled': 'stripe.FailureCode.Canceled',
-          }
-          for old, new in stripe_replacements.items():
-              if old not in cart:
-                  raise SystemExit(f'Expected Stripe token not found: {old}')
-              cart = cart.replace(old, new)
-
-          old_payment = """          else
-            ...options.map(
-              (option) => RadioListTile<String>(
-                value: option.provider,
-                groupValue: provider,
-                onChanged: placing
-                    ? null
-                    : (value) => setState(() => provider = value),
-                title: Text(option.label),
-              ),
-            ),
-"""
-          new_payment = """          else
-            RadioGroup<String>(
-              groupValue: provider,
-              onChanged: (value) {
-                if (!placing && value != null) {
-                  setState(() => provider = value);
-                }
-              },
-              child: Column(
-                children: [
-                  for (final option in options)
-                    RadioListTile<String>(
-                      value: option.provider,
-                      enabled: !placing,
-                      title: Text(option.label),
-                    ),
-                ],
-              ),
-            ),
-"""
-          if old_payment not in cart:
-              raise SystemExit('Expected checkout payment radio block not found')
-          cart = cart.replace(old_payment, new_payment)
-          cart_path.write_text(cart)
-
-          account_path = Path('mobile/customer_app/lib/features/account/account_screen.dart')
-          account = account_path.read_text()
-          old_language = """      RadioListTile<String>(
-        value: 'en',
-        groupValue: controller.locale.languageCode,
-        onChanged: (value) {
-          if (value != null) controller.setLocale(value);
-        },
-        title: Text(L10n.t(context, 'english')),
-      ),
-      RadioListTile<String>(
-        value: 'ar',
-        groupValue: controller.locale.languageCode,
-        onChanged: (value) {
-          if (value != null) controller.setLocale(value);
-        },
-        title: Text(L10n.t(context, 'arabic')),
-      ),
-"""
-          new_language = """      RadioGroup<String>(
-        groupValue: controller.locale.languageCode,
-        onChanged: (value) {
-          if (value != null) {
-            controller.setLocale(value);
-          }
-        },
-        child: Column(
-          children: [
-            RadioListTile<String>(
-              value: 'en',
-              title: Text(L10n.t(context, 'english')),
-            ),
-            RadioListTile<String>(
-              value: 'ar',
-              title: Text(L10n.t(context, 'arabic')),
-            ),
-          ],
-        ),
-      ),
-"""
-          if old_language not in account:
-              raise SystemExit('Expected language radio block not found')
-          account = account.replace(old_language, new_language)
-
-          old_theme = """      RadioListTile<ThemeMode>(
-        value: ThemeMode.system,
-        groupValue: controller.themeMode,
-        onChanged: (value) {
-          if (value != null) controller.setThemeMode(value);
-        },
-        title: Text(L10n.t(context, 'system')),
-      ),
-      RadioListTile<ThemeMode>(
-        value: ThemeMode.light,
-        groupValue: controller.themeMode,
-        onChanged: (value) {
-          if (value != null) controller.setThemeMode(value);
-        },
-        title: Text(L10n.t(context, 'light')),
-      ),
-      RadioListTile<ThemeMode>(
-        value: ThemeMode.dark,
-        groupValue: controller.themeMode,
-        onChanged: (value) {
-          if (value != null) controller.setThemeMode(value);
-        },
-        title: Text(L10n.t(context, 'dark')),
-      ),
-"""
-          new_theme = """      RadioGroup<ThemeMode>(
-        groupValue: controller.themeMode,
-        onChanged: (value) {
-          if (value != null) {
-            controller.setThemeMode(value);
-          }
-        },
-        child: Column(
-          children: [
-            RadioListTile<ThemeMode>(
-              value: ThemeMode.system,
-              title: Text(L10n.t(context, 'system')),
-            ),
-            RadioListTile<ThemeMode>(
-              value: ThemeMode.light,
-              title: Text(L10n.t(context, 'light')),
-            ),
-            RadioListTile<ThemeMode>(
-              value: ThemeMode.dark,
-              title: Text(L10n.t(context, 'dark')),
-            ),
-          ],
-        ),
-      ),
-"""
-          if old_theme not in account:
-              raise SystemExit('Expected theme radio block not found')
-          account = account.replace(old_theme, new_theme)
-          account_path.write_text(account)
-
-          api_path = Path('mobile/customer_app/lib/core/api_client.dart')
-          api = api_path.read_text()
-          retry_count = api.count('return send(false);')
-          if retry_count != 3:
-              raise SystemExit(f'Expected exactly 3 auth retry returns, found {retry_count}')
-          api = api.replace('return send(false);', 'return await send(false);')
-          api_path.write_text(api)
-          PY
+          cd ../..
+          python mobile/customer_app/tool/apply_continuation2_fix.py
           cd mobile/customer_app
           dart fix --apply
           dart format lib test tool/verify_customer_contract.dart
           git checkout HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
-      - name: Require clean analyzer
-        working-directory: mobile/customer_app
-        shell: bash
-        run: |
-          set -o pipefail
-          mkdir -p cleanup-evidence
-          flutter analyze 2>&1 | tee cleanup-evidence/analyze.log
-          printf 'PASS — flutter analyze: No issues found\n' > cleanup-evidence/analyze-result.txt
-      - name: Verify scope and frozen contract
+          dart format --output=none --set-exit-if-changed lib test tool/verify_customer_contract.dart
+          flutter analyze
+      - name: Verify frozen contract and commit source-only fixes
         shell: bash
         run: |
           set -euo pipefail
@@ -233,28 +57,13 @@ jobs:
             docs/API_V1_CUSTOMER_REPRODUCIBILITY.md \
             contracts/customer-api-v1-manifest.json \
             contracts/customer-api-v1-fixtures.json
-          bad="$(git status --porcelain | awk '{print $2}' | grep -vE '^mobile/customer_app/(lib/|test/|tool/verify_customer_contract\.dart$|cleanup-evidence/)' || true)"
-          test -z "$bad" || { printf '%s\n' "$bad"; exit 1; }
-      - name: Commit analyzer-clean Flutter sources
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf mobile/customer_app/cleanup-evidence
-          git add mobile/customer_app/lib mobile/customer_app/test mobile/customer_app/tool/verify_customer_contract.dart
-          if git diff --cached --quiet; then
-            echo 'No source changes to commit.'
-            exit 0
-          fi
+          rm mobile/customer_app/tool/apply_continuation2_fix.py
+          git add -A mobile/customer_app/lib mobile/customer_app/test \
+            mobile/customer_app/tool/verify_customer_contract.dart \
+            mobile/customer_app/tool/apply_continuation2_fix.py
           git diff --cached --check
+          test -n "$(git diff --cached --name-only)"
           git config user.name "FABINZI CI"
           git config user.email "actions@users.noreply.github.com"
           git commit -m "fix(mobile): clear Flutter analyzer diagnostics"
           git push origin HEAD:work/flutter-customer-app
-      - name: Upload analyzer cleanup evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: flutter-customer-analyzer-cleanup
-          path: mobile/customer_app/cleanup-evidence
-          if-no-files-found: warn
-          retention-days: 7
