@@ -6,6 +6,12 @@ FABINZI is a digital fashion platform that connects **Customers, Designers, Manu
 
 The current Web product covers public discovery, Designer Artwork, ready-designed products, optional Customer Studio customization, manufacturer sourcing, Commerce, production, QC, fulfillment/tracking, finance, notifications and the OTP-protected `/Maneg/` Control Center.
 
+## WEB v1.0 release identity
+
+The authoritative semantic application version is **1.0.0** in `config/release.py`. `release-manifest.json` and `RELEASE_MANIFEST.md` freeze the WEB v1.0 release metadata. The exact Release Candidate identity is the Git commit containing those files and is recorded by CI/PR acceptance metadata rather than embedded inside the commit itself.
+
+Release runtime: **Python 3.12.14**. `requirements.txt` remains the supported dependency envelope; `constraints-release.txt` freezes the exact dependency resolution used to reproduce WEB v1.0.
+
 ## Business model
 
 - **Customer** — discovers published products/artwork, optionally customizes eligible products, checks out and follows persisted purchase/fulfillment state.
@@ -58,13 +64,13 @@ RFQ
 | `/manufacturer/` | Manufacturer Portal |
 | `/Maneg/` | MFA-protected Control Center |
 | `/api/v1/` | Versioned REST API |
-| `/healthz/`, `/readyz/` | Safe liveness/readiness endpoints |
+| `/healthz/`, `/readyz/` | Safe liveness/version/source identity and database readiness |
 
 Public trust information is available at `/about/`, `/terms/`, `/privacy/`, `/returns/`, `/shipping/`, and `/support/`. These repository pages are conservative baseline launch copy and are **not represented as lawyer-reviewed**. Jurisdiction-specific legal approval and public support coordinates remain operator responsibilities before a public production launch.
 
 ## Technology
 
-- Python 3.12
+- Python **3.12.14** for the WEB v1.0 release contract
 - Django 5.2 + Django REST Framework
 - PostgreSQL
 - Redis-compatible transport
@@ -79,14 +85,15 @@ Public trust information is available at `/about/`, `/terms/`, `/privacy/`, `/re
 
 ## Local setup
 
-Requirements: Python 3.12, PostgreSQL, and Redis 7+ or a compatible Redis-protocol service.
+Release reproduction requires Python 3.12.14, PostgreSQL, and Redis 7+ or a compatible Redis-protocol service.
 
 ```bash
 git clone https://github.com/waelbeso/FABINZI.git
 cd FABINZI
 python3.12 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt -c constraints-release.txt
+python -m pip check
 cp .env.example .env
 ```
 
@@ -123,13 +130,13 @@ Production requires explicit secure configuration including:
 - `REDIS_URL`
 - `INTEGRATION_ENCRYPTION_KEY`
 
-Production startup rejects the development secret fallback, non-HTTPS public origin and local private-media mode. See [Configuration](docs/CONFIGURATION.md).
+Production startup rejects the development secret fallback, non-HTTPS public origin and local private-media mode. See [WEB v1.0 Configuration Contract](docs/WEB_V1_CONFIGURATION_CONTRACT.md).
 
 ## Security
 
 The Web product includes tenant-aware authorization, `/Maneg/` OTP/MFA, CSRF/session protection, secure production cookies, SSL redirect/HSTS, frame denial, content-type/referrer/cross-origin security headers, private-surface `noindex`, encrypted integration secrets, private-media authorization, payment callback/webhook validation, API throttling, payout masking and audit/finance controls implemented by the accepted domain architecture.
 
-Health/readiness responses intentionally do not expose credentials or provider URLs. Render source identity may be exposed as non-secret branch/commit/service metadata for exact-deployment verification.
+`/healthz/` exposes only semantic application version and optional non-secret Render branch/commit/service source identity. It does not expose credentials, DSNs, provider secrets or environment dumps. `/readyz/` remains database readiness only.
 
 ## Localization, theme and responsive Web
 
@@ -142,7 +149,7 @@ Language and authenticated theme preferences are persisted by the existing accou
 
 ## Account lifecycle limitation
 
-Login/logout and privileged two-factor authentication are implemented. **The current repository does not implement a customer-facing automated password-reset flow or email-verification/activation-token flow.** These capabilities are not advertised or fabricated by the Production Launch Gate. The product owner must decide the intended account-provisioning/recovery policy before broad public account rollout.
+Login/logout and privileged two-factor authentication are implemented. **The current repository does not implement a customer-facing automated password-reset flow or email-verification/activation-token flow.** These capabilities are not advertised or fabricated. The product owner must decide the intended account-provisioning/recovery policy before broad public account rollout.
 
 ## Integrations
 
@@ -152,45 +159,37 @@ COD is internal and requires no external provider credential. Production private
 
 ## QA/demo safety
 
-Deterministic QA data is created only by:
-
-```bash
-python manage.py seed_demo
-```
-
-and only when `FABINZI_DEMO_SEED_ENABLED=true` with protected QA credentials. Controlled QA Admin TOTP provisioning uses `python manage.py provision_demo_admin_otp` with a protected base32 secret. Neither operation is part of production startup.
+Deterministic QA data is created only by `python manage.py seed_demo` when `FABINZI_DEMO_SEED_ENABLED=true` with protected QA credentials. Controlled QA Admin TOTP provisioning uses `python manage.py provision_demo_admin_otp` with a protected base32 secret. Neither operation is part of production startup.
 
 ## Deferred live validation
 
-The Global Live E2E checkpoint was intentionally passed forward **source-side complete but not live-accepted** because the isolated QA environment and protected configuration were unavailable. Its complete unresolved register is [docs/DEFERRED_LIVE_E2E.md](docs/DEFERRED_LIVE_E2E.md). Those items must be resumed after Flutter; they are not converted to PASS by repository launch-readiness work.
+The Global Live E2E checkpoint remains explicitly **UNRESOLVED** for its deferred external items. Its durable register is [docs/DEFERRED_LIVE_E2E.md](docs/DEFERRED_LIVE_E2E.md). Those items return after Flutter; WEB v1.0 release preparation does not convert them to PASS.
 
 ## Testing
 
-CI uses PostgreSQL + Redis and runs:
-
-```bash
-python manage.py makemigrations --check --dry-run
-python manage.py reconcile_migration_state
-python manage.py migrate --noinput
-python manage.py check
-python manage.py collectstatic --noinput
-python manage.py check --deploy   # production settings
-pytest -q
-```
-
-It preserves the existing Web, Artwork/Studio, Designer, Manufacturer and `/Maneg/` browser evidence and adds focused Production Launch Gate browser evidence.
+CI checks out the exact PR head SHA, uses Python 3.12.14 plus `constraints-release.txt`, then runs dependency validation, migration/static freeze checks, migration drift/reconciliation/fresh migrate, Django checks, `collectstatic`, production `check --deploy`, the full pytest/browser regressions and release-contract tests. Successful runs also upload a `web-v1-release-contract` evidence artifact.
 
 ## Render deployment
 
-`render.yaml` defines the repository-side production topology: Django/Gunicorn web, paid PostgreSQL, Redis-compatible Key Value, Celery worker and Celery Beat. The production Blueprint tracks `main`; branch/PR checkpoints must not be treated as deployed production until the explicit release process occurs.
+`render.yaml` defines the repository-side production topology: Django/Gunicorn web, paid PostgreSQL, Redis-compatible Key Value, Celery worker and Celery Beat. The production Blueprint tracks `main`; branch/PR checkpoints must not be treated as deployed production until an explicit release process occurs.
 
-See [Deployment](docs/DEPLOYMENT.md) and [Backup & Recovery](docs/BACKUP_AND_RECOVERY.md).
+See [Deployment](docs/DEPLOYMENT.md), [WEB v1.0 Deployment & Rollback](docs/WEB_V1_DEPLOYMENT_ROLLBACK.md) and [Backup & Recovery](docs/BACKUP_AND_RECOVERY.md).
 
-## Documentation
+## Release documentation
 
+- [Release Manifest](RELEASE_MANIFEST.md)
+- [Machine-readable Release Manifest](release-manifest.json)
+- [Changelog](CHANGELOG.md)
+- [Release Preparation](docs/WEB_V1_RELEASE_PREPARATION.md)
+- [Accepted Limitations](docs/WEB_V1_LIMITATIONS.md)
+- [Canonical Route Inventory](docs/WEB_V1_ROUTE_INVENTORY.md)
+- [Capability Inventory](docs/WEB_V1_CAPABILITY_INVENTORY.md)
+- [Migration Baseline](docs/WEB_V1_MIGRATION_BASELINE.md)
+- [Production Configuration Contract](docs/WEB_V1_CONFIGURATION_CONTRACT.md)
+- [Deployment & Rollback Contract](docs/WEB_V1_DEPLOYMENT_ROLLBACK.md)
+- [Build Reproducibility](docs/WEB_V1_BUILD_REPRODUCIBILITY.md)
+- [Preliminary API v1 Inventory](docs/WEB_V1_API_V1_INVENTORY.md)
 - [Architecture](docs/ARCHITECTURE.md)
-- [Configuration](docs/CONFIGURATION.md)
-- [Deployment](docs/DEPLOYMENT.md)
 - [Backup & Recovery](docs/BACKUP_AND_RECOVERY.md)
 - [Demo & QA](docs/DEMO_QA.md)
 - [Deferred Global Live E2E](docs/DEFERRED_LIVE_E2E.md)

@@ -7,6 +7,7 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
 
+from config.release import APP_VERSION
 from apps.artwork.models import Artwork, ArtworkAsset, ArtworkVersion
 from apps.manufacturer_marketplace.models import ManufacturerCapability, ManufacturerListing
 from apps.organizations.models import Organization
@@ -256,7 +257,7 @@ def _deployment_identity():
 
 
 def healthz(request):
-    payload = {"status": "ok", "service": "fabinzi"}
+    payload = {"status": "ok", "service": "fabinzi", "version": APP_VERSION}
     deployment = _deployment_identity()
     if deployment is not None:
         payload["deployment"] = deployment

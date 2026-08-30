@@ -4,6 +4,7 @@ from apps.accounts.models import User
 from apps.audit.models import AuditEvent
 from apps.integrations.models import IntegrationConfig
 from apps.platform_ops.models import MaintenanceWindow, PlatformAnnouncement
+from config.release import APP_VERSION
 from django.utils import timezone
 
 @pytest.mark.django_db
@@ -58,6 +59,7 @@ def test_health_exposes_only_non_secret_render_source_identity(client, monkeypat
     assert payload == {
         "status": "ok",
         "service": "fabinzi",
+        "version": APP_VERSION,
         "deployment": {
             "branch": "work/global-live-e2e-qa",
             "commit": "0123456789abcdef0123456789abcdef01234567",
@@ -73,4 +75,4 @@ def test_health_omits_deployment_identity_outside_supported_host_runtime(client,
         monkeypatch.delenv(key, raising=False)
     response = client.get("/healthz/")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "service": "fabinzi"}
+    assert response.json() == {"status": "ok", "service": "fabinzi", "version": APP_VERSION}

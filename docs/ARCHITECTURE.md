@@ -1,5 +1,7 @@
 # FABINZI Web Architecture
 
+WEB v1.0 semantic application version is defined only in `config/release.py`; release metadata/inventories are frozen by `release-manifest.json` and the `WEB_V1_*` release documents. This versioning layer does not alter the accepted domain architecture below.
+
 ## Runtime shape
 
 FABINZI is a Django application with server-rendered responsive web surfaces and a versioned Django REST Framework boundary at `/api/v1/`. PostgreSQL is the transactional system of record. Redis-compatible transport supports Celery worker/Beat. Gunicorn serves Django in production and WhiteNoise serves collected static assets.
@@ -100,4 +102,4 @@ The isolated QA Blueprint is separate and remains part of the deferred live-vali
 
 ## API boundary
 
-The existing `/api/v1/` API shares the same business/service layer and persistence model as the SSR web product. This Production Launch Gate does not freeze the future Customer API contract and does not start Flutter work.
+The existing `/api/v1/` API shares the same business/service layer and persistence model as the SSR Web product. WEB v1.0 release preparation records a **preliminary read-only inventory only** in `WEB_V1_API_V1_INVENTORY.md`; it does not freeze the future Customer API contract, choose Flutter authentication semantics, or start Flutter work.
