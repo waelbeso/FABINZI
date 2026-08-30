@@ -66,7 +66,7 @@ class _StudioProjectsScreenState extends State<StudioProjectsScreen> {
       child: ListView.separated(
         padding: const EdgeInsets.all(16),
         itemCount: rows.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        separatorBuilder: (_, _) => const SizedBox(height: 10),
         itemBuilder: (context, index) {
           final project = rows[index];
           return Card(
@@ -229,19 +229,21 @@ class _StudioEditorScreenState extends State<StudioEditorScreen> {
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
           var allowed = zone.supportedMethods;
-          if (artwork != null)
+          if (artwork != null) {
             allowed = allowed
                 .where(artwork.productionMethods.contains)
                 .toList();
-          if (allowed.isNotEmpty && !allowed.contains(method))
+          }
+          if (allowed.isNotEmpty && !allowed.contains(method)) {
             method = allowed.first;
+          }
           return AlertDialog(
             title: Text(L10n.t(context, 'zone')),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 DropdownButtonFormField<DecorationZone>(
-                  value: zone,
+                  initialValue: zone,
                   decoration: InputDecoration(
                     labelText: L10n.t(context, 'zone'),
                   ),
@@ -263,7 +265,7 @@ class _StudioEditorScreenState extends State<StudioEditorScreen> {
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  value: allowed.contains(method) ? method : null,
+                  initialValue: allowed.contains(method) ? method : null,
                   decoration: InputDecoration(
                     labelText: L10n.t(context, 'productionMethod'),
                   ),
@@ -348,11 +350,12 @@ class _StudioEditorScreenState extends State<StudioEditorScreen> {
         rightsConfirmed: false,
         sortOrder: elements.length,
       );
-      if (mounted)
+      if (mounted) {
         setState(() {
           elements.add(element);
           selectedElementId = element.id;
         });
+      }
     } catch (error) {
       if (mounted) await showProblem(context, error);
     }
@@ -413,11 +416,12 @@ class _StudioEditorScreenState extends State<StudioEditorScreen> {
         rightsConfirmed: false,
         sortOrder: elements.length,
       );
-      if (mounted)
+      if (mounted) {
         setState(() {
           elements.add(element);
           selectedElementId = element.id;
         });
+      }
     } catch (error) {
       if (mounted) await showProblem(context, error);
     }
@@ -432,7 +436,7 @@ class _StudioEditorScreenState extends State<StudioEditorScreen> {
         lower.endsWith('.jpg') ||
         lower.endsWith('.jpeg') ||
         lower.endsWith('.webp'))) {
-      if (mounted)
+      if (mounted) {
         await showDialog<void>(
           context: context,
           builder: (context) => AlertDialog(
@@ -445,11 +449,12 @@ class _StudioEditorScreenState extends State<StudioEditorScreen> {
             ],
           ),
         );
+      }
       return;
     }
     final bytes = await picked.readAsBytes();
     if (bytes.length > 10485760) {
-      if (mounted)
+      if (mounted) {
         await showDialog<void>(
           context: context,
           builder: (context) => AlertDialog(
@@ -462,6 +467,7 @@ class _StudioEditorScreenState extends State<StudioEditorScreen> {
             ],
           ),
         );
+      }
       return;
     }
     if (!mounted) return;
@@ -510,11 +516,12 @@ class _StudioEditorScreenState extends State<StudioEditorScreen> {
         rightsConfirmed: true,
         sortOrder: elements.length,
       );
-      if (mounted)
+      if (mounted) {
         setState(() {
           elements.add(element);
           selectedElementId = element.id;
         });
+      }
     } catch (error) {
       if (mounted) await showProblem(context, error);
     } finally {
@@ -527,11 +534,12 @@ class _StudioEditorScreenState extends State<StudioEditorScreen> {
     if (id == null || !project.isDraft) return;
     try {
       await widget.controller.api.deleteStudioElement(project.id, id);
-      if (mounted)
+      if (mounted) {
         setState(() {
           elements.removeWhere((value) => value.id == id);
           selectedElementId = null;
         });
+      }
     } catch (error) {
       if (mounted) await showProblem(context, error);
     }
@@ -579,11 +587,12 @@ class _StudioEditorScreenState extends State<StudioEditorScreen> {
         return;
       }
       final ready = await widget.controller.api.markStudioReady(project.id);
-      if (mounted)
+      if (mounted) {
         setState(() {
           project = ready;
           elements = [...ready.elements];
         });
+      }
     } catch (error) {
       if (mounted) await showProblem(context, error);
     } finally {
@@ -598,12 +607,13 @@ class _StudioEditorScreenState extends State<StudioEditorScreen> {
         studioProjectId: project.id,
         quantity: project.quantity,
       );
-      if (mounted)
+      if (mounted) {
         await Navigator.of(context).push(
           MaterialPageRoute<void>(
             builder: (_) => CartScreen(controller: widget.controller),
           ),
         );
+      }
     } catch (error) {
       if (mounted) await showProblem(context, error);
     }
@@ -612,7 +622,7 @@ class _StudioEditorScreenState extends State<StudioEditorScreen> {
   Future<void> directCheckout() async {
     try {
       final checkout = await widget.controller.api.studioCheckout(project.id);
-      if (mounted)
+      if (mounted) {
         await Navigator.of(context).push(
           MaterialPageRoute<void>(
             builder: (_) => CheckoutScreen(
@@ -621,6 +631,7 @@ class _StudioEditorScreenState extends State<StudioEditorScreen> {
             ),
           ),
         );
+      }
     } catch (error) {
       if (mounted) await showProblem(context, error);
     }
@@ -839,7 +850,7 @@ class _StudioCanvas extends StatelessWidget {
                                   .resolveApplicationUrl(image.url)
                                   .toString(),
                               fit: BoxFit.contain,
-                              errorBuilder: (_, __, ___) => ColoredBox(
+                              errorBuilder: (_, _, _) => ColoredBox(
                                 color: Theme.of(context)
                                     .colorScheme
                                     .surfaceContainerHighest,
@@ -942,7 +953,7 @@ class _StudioCanvas extends StatelessWidget {
       'artwork' when element.sourceUrl != null => Image.network(
         controller.config.resolveApplicationUrl(element.sourceUrl!).toString(),
         fit: BoxFit.contain,
-        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined),
+        errorBuilder: (_, _, _) => const Icon(Icons.broken_image_outlined),
       ),
       _ => const Center(child: Icon(Icons.image_outlined)),
     };

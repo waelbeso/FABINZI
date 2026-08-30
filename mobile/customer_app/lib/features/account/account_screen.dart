@@ -73,21 +73,25 @@ class AccountScreen extends StatelessWidget {
         style: Theme.of(context).textTheme.titleMedium
             ?.copyWith(fontWeight: FontWeight.w900),
       ),
-      RadioListTile<String>(
-        value: 'en',
+      RadioGroup<String>(
         groupValue: controller.locale.languageCode,
         onChanged: (value) {
-          if (value != null) controller.setLocale(value);
+          if (value != null) {
+            controller.setLocale(value);
+          }
         },
-        title: Text(L10n.t(context, 'english')),
-      ),
-      RadioListTile<String>(
-        value: 'ar',
-        groupValue: controller.locale.languageCode,
-        onChanged: (value) {
-          if (value != null) controller.setLocale(value);
-        },
-        title: Text(L10n.t(context, 'arabic')),
+        child: Column(
+          children: [
+            RadioListTile<String>(
+              value: 'en',
+              title: Text(L10n.t(context, 'english')),
+            ),
+            RadioListTile<String>(
+              value: 'ar',
+              title: Text(L10n.t(context, 'arabic')),
+            ),
+          ],
+        ),
       ),
       const Divider(height: 28),
       Text(
@@ -95,29 +99,29 @@ class AccountScreen extends StatelessWidget {
         style: Theme.of(context).textTheme.titleMedium
             ?.copyWith(fontWeight: FontWeight.w900),
       ),
-      RadioListTile<ThemeMode>(
-        value: ThemeMode.system,
+      RadioGroup<ThemeMode>(
         groupValue: controller.themeMode,
         onChanged: (value) {
-          if (value != null) controller.setThemeMode(value);
+          if (value != null) {
+            controller.setThemeMode(value);
+          }
         },
-        title: Text(L10n.t(context, 'system')),
-      ),
-      RadioListTile<ThemeMode>(
-        value: ThemeMode.light,
-        groupValue: controller.themeMode,
-        onChanged: (value) {
-          if (value != null) controller.setThemeMode(value);
-        },
-        title: Text(L10n.t(context, 'light')),
-      ),
-      RadioListTile<ThemeMode>(
-        value: ThemeMode.dark,
-        groupValue: controller.themeMode,
-        onChanged: (value) {
-          if (value != null) controller.setThemeMode(value);
-        },
-        title: Text(L10n.t(context, 'dark')),
+        child: Column(
+          children: [
+            RadioListTile<ThemeMode>(
+              value: ThemeMode.system,
+              title: Text(L10n.t(context, 'system')),
+            ),
+            RadioListTile<ThemeMode>(
+              value: ThemeMode.light,
+              title: Text(L10n.t(context, 'light')),
+            ),
+            RadioListTile<ThemeMode>(
+              value: ThemeMode.dark,
+              title: Text(L10n.t(context, 'dark')),
+            ),
+          ],
+        ),
       ),
       const Divider(height: 28),
       ListTile(

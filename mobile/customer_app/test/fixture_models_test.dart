@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter_test/flutter_test.dart';
 import 'package:fabinzi_customer_app/core/models.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 Map<String, dynamic> fixtures() => jsonDecode(
   File('../../contracts/customer-api-v1-fixtures.json').readAsStringSync(),

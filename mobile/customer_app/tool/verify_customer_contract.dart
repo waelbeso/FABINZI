@@ -20,10 +20,12 @@ void main() {
   final deferred = File('${root.path}/docs/DEFERRED_LIVE_E2E.md')
       .readAsStringSync();
 
-  if (manifest['contract'] != 'FABINZI Customer API v1')
+  if (manifest['contract'] != 'FABINZI Customer API v1') {
     _fail('Unexpected Customer contract identity.');
-  if (manifest['api_version'] != 'v1')
+  }
+  if (manifest['api_version'] != 'v1') {
     _fail('Unexpected Customer API version.');
+  }
   final auth = manifest['auth'] as Map<String, dynamic>;
   if (auth['scheme'] != 'Bearer JWT' ||
       auth['access_seconds'] != 900 ||
@@ -34,29 +36,35 @@ void main() {
   }
   final pagination = manifest['pagination'] as Map<String, dynamic>;
   if (pagination['default_page_size'] != 20 ||
-      pagination['max_page_size'] != 50)
+      pagination['max_page_size'] != 50) {
     _fail('Frozen pagination drifted.');
+  }
   final uploads = manifest['uploads'] as Map<String, dynamic>;
-  if (uploads['max_bytes'] != 10485760 || uploads['private_by_default'] != true)
+  if (uploads['max_bytes'] != 10485760 ||
+      uploads['private_by_default'] != true) {
     _fail('Frozen private upload policy drifted.');
+  }
   final mimeTypes = (uploads['mime_types'] as List)
       .map((value) => value.toString())
       .toSet();
   if (!mimeTypes.containsAll({'image/png', 'image/jpeg', 'image/webp'}) ||
-      mimeTypes.length != 3)
+      mimeTypes.length != 3) {
     _fail('Frozen upload MIME set drifted.');
+  }
 
   final paths = openapi['paths'] as Map<String, dynamic>;
-  if (paths.keys.any((path) => !path.startsWith('/api/v1/customer/')))
+  if (paths.keys.any((path) => !path.startsWith('/api/v1/customer/'))) {
     _fail('Non-Customer path entered frozen OpenAPI.');
+  }
   const methods = {'get', 'post', 'patch', 'delete'};
   var operations = 0;
   for (final value in paths.values) {
     final item = value as Map<String, dynamic>;
     operations += item.keys.where(methods.contains).length;
   }
-  if (operations != manifest['operation_count'] || operations != 41)
+  if (operations != manifest['operation_count'] || operations != 41) {
     _fail('OpenAPI operation count mismatch: $operations.');
+  }
 
   const forbidden = [
     '/Maneg/',
@@ -67,13 +75,15 @@ void main() {
     '/webhook/',
   ];
   for (final path in paths.keys) {
-    if (forbidden.any(path.contains))
+    if (forbidden.any(path.contains)) {
       _fail('Forbidden internal route in Customer OpenAPI: $path');
+    }
   }
 
   final metadata = fixtures['metadata'] as Map<String, dynamic>;
-  if (metadata['synthetic_only'] != true)
+  if (metadata['synthetic_only'] != true) {
     _fail('Customer fixtures must remain synthetic.');
+  }
   final encodedFixtures = jsonEncode(fixtures).toLowerCase();
   for (final forbiddenKey in [
     'secret_key',
@@ -83,12 +93,14 @@ void main() {
     'manufacturer_cost',
     'payout_amount',
   ]) {
-    if (encodedFixtures.contains(forbiddenKey))
+    if (encodedFixtures.contains(forbiddenKey)) {
       _fail('Sensitive/internal fixture field detected: $forbiddenKey');
+    }
   }
 
-  if (!deferred.contains('UNRESOLVED'))
+  if (!deferred.contains('UNRESOLVED')) {
     _fail('Deferred Global Live E2E must remain UNRESOLVED.');
+  }
   stdout.writeln(
     'FABINZI Customer API v1 compatibility: PASS ($operations operations).',
   );

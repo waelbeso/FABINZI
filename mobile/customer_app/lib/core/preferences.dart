@@ -2,7 +2,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 class AppPreferences {
-  AppPreferences({SharedPreferences? preferences}) : _preferences = preferences;
+  AppPreferences({this._preferences});
 
   SharedPreferences? _preferences;
   static const _localeKey = 'fabinzi.locale';
@@ -27,8 +27,7 @@ abstract interface class PlacementKeyStore {
 }
 
 class PreferencesPlacementKeyStore implements PlacementKeyStore {
-  PreferencesPlacementKeyStore({SharedPreferences? preferences})
-    : _preferences = preferences;
+  PreferencesPlacementKeyStore({this._preferences});
 
   SharedPreferences? _preferences;
   final Uuid _uuid = const Uuid();

@@ -2,13 +2,13 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 import 'package:fabinzi_customer_app/core/api_client.dart';
 import 'package:fabinzi_customer_app/core/config.dart';
 import 'package:fabinzi_customer_app/core/models.dart';
 import 'package:fabinzi_customer_app/core/secure_store.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 class MemoryTokenStore implements TokenStore {
   String? access;
@@ -69,11 +69,12 @@ void main() {
       config: AppConfig(serverBaseUrl: 'https://api.example.test'),
       tokens: store,
       httpClient: MockClient((request) async {
-        if (request.url.path.endsWith('/auth/login/'))
+        if (request.url.path.endsWith('/auth/login/')) {
           return jsonResponse({
             'access': 'access-1',
             'refresh': 'refresh-1',
           }, 200);
+        }
         if (request.url.path.endsWith('/me/')) {
           expect(request.headers['authorization'], 'Bearer access-1');
           return jsonResponse(mePayload(), 200);
@@ -98,8 +99,9 @@ void main() {
       tokens: store,
       httpClient: MockClient((request) async {
         if (request.url.path.endsWith('/me/')) {
-          if (request.headers['authorization'] == 'Bearer expired-access')
+          if (request.headers['authorization'] == 'Bearer expired-access') {
             return jsonResponse(error('token_expired'), 401);
+          }
           expect(request.headers['authorization'], 'Bearer access-new');
           return jsonResponse(mePayload(), 200);
         }
@@ -130,10 +132,12 @@ void main() {
       config: AppConfig(serverBaseUrl: 'https://api.example.test'),
       tokens: store,
       httpClient: MockClient((request) async {
-        if (request.url.path.endsWith('/me/'))
+        if (request.url.path.endsWith('/me/')) {
           return jsonResponse(error('token_expired'), 401);
-        if (request.url.path.endsWith('/auth/refresh/'))
+        }
+        if (request.url.path.endsWith('/auth/refresh/')) {
           return jsonResponse(error('invalid_refresh_token'), 401);
+        }
         return jsonResponse(error('not_found'), 404);
       }),
     );

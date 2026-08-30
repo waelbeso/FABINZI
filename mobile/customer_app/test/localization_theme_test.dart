@@ -1,8 +1,8 @@
+import 'package:fabinzi_customer_app/core/l10n.dart';
+import 'package:fabinzi_customer_app/core/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fabinzi_customer_app/core/l10n.dart';
-import 'package:fabinzi_customer_app/core/theme.dart';
 
 void main() {
   test(

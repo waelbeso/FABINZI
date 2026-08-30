@@ -1,6 +1,6 @@
+import 'package:fabinzi_customer_app/core/preferences.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:fabinzi_customer_app/core/preferences.dart';
 
 void main() {
   test('placement key is stable per checkout/provider and distinct across providers', () async {

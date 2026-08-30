@@ -157,8 +157,9 @@ class AppController extends ChangeNotifier {
   Future<void> handleApiProblem(ApiProblem problem) async {
     if (problem.code == 'invalid_refresh_token' ||
         problem.code == 'authentication_required' ||
-        problem.code == 'invalid_token')
+        problem.code == 'invalid_token') {
       await expireSession();
+    }
   }
 
   Future<void> _adoptServerPreferences(UserProfile value) async {

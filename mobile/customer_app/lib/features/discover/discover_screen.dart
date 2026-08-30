@@ -47,8 +47,9 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   void _onScroll() {
     if (scroll.position.pixels > scroll.position.maxScrollExtent - 500 &&
         !loadingMore &&
-        products.length < total)
+        products.length < total) {
       loadMore();
+    }
   }
 
   Future<void> load() async {
@@ -141,7 +142,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                   ),
                   scrollDirection: Axis.horizontal,
                   itemCount: stores.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  separatorBuilder: (_, _) => const SizedBox(width: 8),
                   itemBuilder: (context, index) => ActionChip(
                     avatar: const Icon(Icons.storefront_outlined, size: 18),
                     label: Text(stores[index].name),
@@ -156,11 +157,12 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                         final result = await widget.controller.api.products(
                           store: stores[index].slug,
                         );
-                        if (mounted)
+                        if (mounted) {
                           setState(() {
                             products = result.results;
                             total = result.count;
                           });
+                        }
                       } catch (value) {
                         if (mounted) setState(() => error = value);
                       } finally {
@@ -354,8 +356,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   Future<void> addToCart() async {
     final item = detail;
     final variant = selected;
-    if (item == null || variant == null || !await widget.requestSignIn())
+    if (item == null || variant == null || !await widget.requestSignIn()) {
       return;
+    }
     try {
       await widget.controller.api.addCartItem(
         kind: item.kind,
@@ -363,10 +366,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         productSlug: item.slug,
         variantSku: variant.sku,
       );
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(L10n.t(context, 'addToCart'))));
+      }
     } catch (error) {
       if (mounted) await showProblem(context, error);
     }
@@ -378,15 +382,16 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     if (item == null ||
         variant == null ||
         !item.customizationEnabled ||
-        !await widget.requestSignIn())
+        !await widget.requestSignIn()) {
       return;
+    }
     try {
       final project = await widget.controller.api.createStudio(
         storeSlug: item.storeSlug,
         productSlug: item.slug,
         variantSku: variant.sku,
       );
-      if (mounted)
+      if (mounted) {
         await Navigator.of(context).push(
           MaterialPageRoute<void>(
             builder: (_) => StudioEditorScreen(
@@ -395,6 +400,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             ),
           ),
         );
+      }
     } catch (error) {
       if (mounted) await showProblem(context, error);
     }

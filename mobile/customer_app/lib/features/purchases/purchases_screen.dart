@@ -51,17 +51,18 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
   Widget build(BuildContext context) {
     if (loading) return const BusyView();
     if (error != null) return FailureView(error: error!, onRetry: load);
-    if (rows.isEmpty)
+    if (rows.isEmpty) {
       return EmptyView(
         icon: Icons.receipt_long_outlined,
         title: L10n.t(context, 'noPurchases'),
       );
+    }
     return RefreshIndicator(
       onRefresh: load,
       child: ListView.separated(
         padding: const EdgeInsets.all(16),
         itemCount: rows.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        separatorBuilder: (_, _) => const SizedBox(height: 10),
         itemBuilder: (context, index) {
           final row = rows[index];
           return Card(

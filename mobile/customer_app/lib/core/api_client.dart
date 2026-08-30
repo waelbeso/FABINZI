@@ -19,16 +19,13 @@ class NetworkProblem implements Exception {
 
 class CustomerApiClient {
   CustomerApiClient({
-    required AppConfig config,
-    required TokenStore tokens,
+    required this._config,
+    required this._tokens,
     http.Client? httpClient,
     String Function()? language,
-    Duration timeout = const Duration(seconds: 20),
-  }) : _config = config,
-       _tokens = tokens,
-       _http = httpClient ?? http.Client(),
-       _language = language ?? (() => 'en'),
-       _timeout = timeout;
+    this._timeout = const Duration(seconds: 20),
+  }) : _http = httpClient ?? http.Client(),
+       _language = language ?? (() => 'en');
 
   final AppConfig _config;
   final TokenStore _tokens;
@@ -95,7 +92,7 @@ class CustomerApiClient {
         if (!problem.isAuthenticationFailure) rethrow;
         await _refreshTokens();
         refresh = await _tokens.readRefresh();
-        if (refresh != null && refresh!.isNotEmpty) {
+        if (refresh != null && refresh.isNotEmpty) {
           await _json(
             'POST',
             'auth/logout/',
@@ -201,7 +198,7 @@ class CustomerApiClient {
       body: {
         'store_slug': storeSlug,
         'product_slug': productSlug,
-        if (variantSku != null) 'variant_sku': variantSku,
+        'variant_sku': ?variantSku,
         'quantity': quantity,
         'customer_notes': customerNotes,
       },
@@ -254,8 +251,8 @@ class CustomerApiClient {
         'decoration_zone': zone,
         'kind': kind,
         'text': text,
-        if (mediaAssetId != null) 'media_asset_id': mediaAssetId,
-        if (artworkVersionId != null) 'artwork_version_id': artworkVersionId,
+        'media_asset_id': ?mediaAssetId,
+        'artwork_version_id': ?artworkVersionId,
         'production_method': productionMethod,
         'rights_confirmed': rightsConfirmed,
         'transform': transform.toJson(),
@@ -318,8 +315,9 @@ class CustomerApiClient {
         _config.customerUri('studio-projects/$projectId/uploads/'),
       );
       request.headers['Accept-Language'] = _language() == 'ar' ? 'ar' : 'en';
-      if (access != null && access.isNotEmpty)
+      if (access != null && access.isNotEmpty) {
         request.headers['Authorization'] = 'Bearer $access';
+      }
       request.files.add(
         http.MultipartFile.fromBytes('file', bytes, filename: filename),
       );
@@ -327,12 +325,13 @@ class CustomerApiClient {
         final streamed = await _http.send(request).timeout(_timeout);
         final response = await http.Response.fromStream(streamed);
         final payload = _decode(response.bodyBytes);
-        if (response.statusCode >= 200 && response.statusCode < 300)
+        if (response.statusCode >= 200 && response.statusCode < 300) {
           return UploadAsset.fromJson(payload);
+        }
         final problem = ApiProblem.fromPayload(response.statusCode, payload);
         if (retryAuth && problem.isAuthenticationFailure) {
           await _refreshTokens();
-          return send(false);
+          return await send(false);
         }
         throw problem;
       } on TimeoutException {
@@ -353,32 +352,36 @@ class CustomerApiClient {
         _config.resolveApplicationUrl(accessUrl),
       )..followRedirects = false;
       request.headers['Accept-Language'] = _language() == 'ar' ? 'ar' : 'en';
-      if (access != null && access.isNotEmpty)
+      if (access != null && access.isNotEmpty) {
         request.headers['Authorization'] = 'Bearer $access';
+      }
       try {
         final streamed = await _http.send(request).timeout(_timeout);
         final response = await http.Response.fromStream(streamed);
         if (response.statusCode >= 300 && response.statusCode < 400) {
           final location = response.headers['location'];
-          if (location == null || location.isEmpty)
+          if (location == null || location.isEmpty) {
             throw const NetworkProblem(
               'invalid_response',
               'Private media redirect omitted Location.',
             );
+          }
           final signed = await _http.get(Uri.parse(location)).timeout(_timeout);
-          if (signed.statusCode >= 200 && signed.statusCode < 300)
+          if (signed.statusCode >= 200 && signed.statusCode < 300) {
             return signed.bodyBytes;
+          }
           throw const NetworkProblem('media_unavailable');
         }
-        if (response.statusCode >= 200 && response.statusCode < 300)
+        if (response.statusCode >= 200 && response.statusCode < 300) {
           return response.bodyBytes;
+        }
         final problem = ApiProblem.fromPayload(
           response.statusCode,
           _decode(response.bodyBytes),
         );
         if (retryAuth && problem.isAuthenticationFailure) {
           await _refreshTokens();
-          return send(false);
+          return await send(false);
         }
         throw problem;
       } on TimeoutException {
@@ -406,10 +409,10 @@ class CustomerApiClient {
       'cart/items/',
       body: {
         'kind': kind,
-        if (storeSlug != null) 'store_slug': storeSlug,
-        if (productSlug != null) 'product_slug': productSlug,
-        if (variantSku != null) 'variant_sku': variantSku,
-        if (studioProjectId != null) 'studio_project_id': studioProjectId,
+        'store_slug': ?storeSlug,
+        'product_slug': ?productSlug,
+        'variant_sku': ?variantSku,
+        'studio_project_id': ?studioProjectId,
         'quantity': quantity,
       },
     ),
@@ -517,15 +520,16 @@ class CustomerApiClient {
         final payload = response.bodyBytes.isEmpty
             ? null
             : _decode(response.bodyBytes);
-        if (response.statusCode >= 200 && response.statusCode < 300)
+        if (response.statusCode >= 200 && response.statusCode < 300) {
           return payload;
+        }
         final problem = ApiProblem.fromPayload(response.statusCode, payload);
         if (auth &&
             canRefresh &&
             retryAuth &&
             problem.isAuthenticationFailure) {
           await _refreshTokens();
-          return send(false);
+          return await send(false);
         }
         throw problem;
       } on TimeoutException {
@@ -587,8 +591,9 @@ class CustomerApiClient {
       if (response.statusCode < 200 || response.statusCode >= 300) {
         final problem = ApiProblem.fromPayload(response.statusCode, payload);
         if (problem.code == 'invalid_refresh_token' ||
-            problem.isAuthenticationFailure)
+            problem.isAuthenticationFailure) {
           await _tokens.clear();
+        }
         throw problem;
       }
       final json = asMap(payload);

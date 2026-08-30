@@ -214,7 +214,7 @@ class PublicImage extends StatelessWidget {
         height: height,
         width: double.infinity,
         fit: fit,
-        errorBuilder: (_, __, ___) => Container(
+        errorBuilder: (_, _, _) => Container(
           height: height,
           color: Theme.of(context).colorScheme.surfaceContainerHighest,
           child: const Center(
@@ -257,18 +257,21 @@ class _ProtectedImageState extends State<ProtectedImage> {
   @override
   void didUpdateWidget(covariant ProtectedImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.url != widget.url)
+    if (oldWidget.url != widget.url) {
       _future = widget.controller.api.protectedMedia(widget.url);
+    }
   }
 
   @override
   Widget build(BuildContext context) => FutureBuilder<Uint8List>(
     future: _future,
     builder: (context, snapshot) {
-      if (snapshot.connectionState != ConnectionState.done)
+      if (snapshot.connectionState != ConnectionState.done) {
         return const Center(child: CircularProgressIndicator());
-      if (snapshot.hasError || snapshot.data == null)
+      }
+      if (snapshot.hasError || snapshot.data == null) {
         return const Center(child: Icon(Icons.broken_image_outlined));
+      }
       return Image.memory(
         snapshot.data!,
         fit: widget.fit,

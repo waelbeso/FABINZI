@@ -55,11 +55,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       } catch (_) {
         value = item;
       }
-      if (mounted)
+      if (mounted) {
         setState(() {
           final index = rows.indexWhere((row) => row.id == item.id);
           if (index >= 0) rows[index] = value;
         });
+      }
     }
     if (value.targetResource == 'purchase' &&
         value.targetReference != null &&
@@ -120,7 +121,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             child: ListView.separated(
               padding: const EdgeInsets.all(16),
               itemCount: rows.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              separatorBuilder: (_, _) => const SizedBox(height: 8),
               itemBuilder: (context, index) {
                 final row = rows[index];
                 return Card(

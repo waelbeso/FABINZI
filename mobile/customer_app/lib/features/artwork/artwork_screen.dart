@@ -41,8 +41,9 @@ class _ArtworkScreenState extends State<ArtworkScreen> {
   void _scroll() {
     if (scroll.position.pixels > scroll.position.maxScrollExtent - 400 &&
         rows.length < total &&
-        !loadingMore)
+        !loadingMore) {
       loadMore();
+    }
   }
 
   Future<void> load() async {
@@ -56,11 +57,12 @@ class _ArtworkScreenState extends State<ArtworkScreen> {
         query: search.text.trim(),
         method: method,
       );
-      if (mounted)
+      if (mounted) {
         setState(() {
           rows = result.results;
           total = result.count;
         });
+      }
     } catch (value) {
       if (mounted) setState(() => error = value);
     } finally {
@@ -76,12 +78,13 @@ class _ArtworkScreenState extends State<ArtworkScreen> {
         method: method,
         page: page + 1,
       );
-      if (mounted)
+      if (mounted) {
         setState(() {
           page++;
           rows.addAll(result.results);
           total = result.count;
         });
+      }
     } finally {
       if (mounted) setState(() => loadingMore = false);
     }

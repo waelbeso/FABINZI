@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_stripe/flutter_stripe.dart';
+import 'package:flutter_stripe/flutter_stripe.dart' as stripe;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/app_controller.dart';
@@ -103,11 +103,12 @@ class _CartScreenState extends State<CartScreen> {
 
   Widget _body(BuildContext context) {
     final value = cart!;
-    if (value.items.isEmpty)
+    if (value.items.isEmpty) {
       return EmptyView(
         icon: Icons.shopping_bag_outlined,
         title: L10n.t(context, 'emptyCart'),
       );
+    }
     return Column(
       children: [
         Expanded(
@@ -117,7 +118,7 @@ class _CartScreenState extends State<CartScreen> {
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(16),
               itemCount: value.items.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              separatorBuilder: (_, _) => const SizedBox(height: 10),
               itemBuilder: (context, index) {
                 final item = value.items[index];
                 final locked = mutatingId == item.id;
@@ -334,11 +335,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   Future<void> loadOptions() async {
     try {
       final value = await widget.controller.api.paymentOptions();
-      if (mounted)
+      if (mounted) {
         setState(() {
           options = value;
           provider = value.isEmpty ? null : value.first.provider;
         });
+      }
     } catch (error) {
       if (mounted) await showProblem(context, error);
     } finally {
@@ -464,15 +466,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         return;
       }
       try {
-        await Stripe.instance.initPaymentSheet(
-          paymentSheetParameters: SetupPaymentSheetParameters(
+        await stripe.Stripe.instance.initPaymentSheet(
+          paymentSheetParameters: stripe.SetupPaymentSheetParameters(
             paymentIntentClientSecret: secret,
             merchantDisplayName: 'FABINZI',
           ),
         );
-        await Stripe.instance.presentPaymentSheet();
-      } on StripeException catch (error) {
-        if (error.error.code == FailureCode.Canceled) return;
+        await stripe.Stripe.instance.presentPaymentSheet();
+      } on stripe.StripeException catch (error) {
+        if (error.error.code == stripe.FailureCode.Canceled) return;
         rethrow;
       }
     }
@@ -539,14 +541,22 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           else if (options.isEmpty)
             Text(L10n.t(context, 'paymentOptionsUnavailable'))
           else
-            ...options.map(
-              (option) => RadioListTile<String>(
-                value: option.provider,
-                groupValue: provider,
-                onChanged: placing
-                    ? null
-                    : (value) => setState(() => provider = value),
-                title: Text(option.label),
+            RadioGroup<String>(
+              groupValue: provider,
+              onChanged: (value) {
+                if (!placing && value != null) {
+                  setState(() => provider = value);
+                }
+              },
+              child: Column(
+                children: [
+                  for (final option in options)
+                    RadioListTile<String>(
+                      value: option.provider,
+                      enabled: !placing,
+                      title: Text(option.label),
+                    ),
+                ],
               ),
             ),
           const SizedBox(height: 18),
