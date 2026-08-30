@@ -1,49 +1,72 @@
-name: Flutter Customer Preparation
+name: Flutter Customer
 
 on:
   pull_request:
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: flutter-customer-preparation-${{ github.event.pull_request.number }}
+  group: flutter-customer-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  FLUTTER_VERSION: "3.47.0"
+  FLUTTER_INTEGRATION_BASE_SHA: 101b62220222f6372b11dfd5c76bd71aee1ab420
+
 jobs:
-  prepare:
-    if: github.event.pull_request.head.ref == 'work/flutter-customer-app'
+  quality-android:
+    name: Flutter quality + Android
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-      - name: Verify locked preparation source
+      - name: Verify exact source checkout
         shell: bash
         run: |
-          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
-          test "$(git rev-parse origin/feature/web-productization)" = "101b62220222f6372b11dfd5c76bd71aee1ab420"
-          test -f mobile/customer_app/tool/prepare_checkpoint_fix.py
+          expected="${{ github.event.pull_request.head.sha || github.sha }}"
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$expected"
+          echo "FABINZI_SOURCE_SHA=$actual" >> "$GITHUB_ENV"
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           flutter-version: "3.47.0"
           channel: stable
           cache: true
-      - name: Apply narrow hardening and exact Dart formatting
+      - name: Verify pinned Flutter and Dart toolchain
+        shell: bash
+        run: |
+          mkdir -p mobile/customer_app/build-evidence
+          flutter --version --machine | tee mobile/customer_app/build-evidence/flutter-version.json
+          dart --version 2>&1 | tee mobile/customer_app/build-evidence/dart-version.txt
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('mobile/customer_app/build-evidence/flutter-version.json').read_text())
+          assert data['frameworkVersion'] == '3.47.0', data
+          assert data['dartSdkVersion'].startswith('3.13.'), data
+          PY
+      - name: Generate standard Android and iOS hosts
+        working-directory: mobile/customer_app
+        run: flutter create --empty --no-pub --platforms=android,ios --org com.fabinzi --project-name fabinzi_customer_app .
+      - name: Verify committed locked dependencies
+        working-directory: mobile/customer_app
         shell: bash
         run: |
           set -euo pipefail
-          python mobile/customer_app/tool/prepare_checkpoint_fix.py
-          cd mobile/customer_app
-          flutter pub get
-          dart --version
-          dart format lib test tool/verify_customer_contract.dart
           test -s pubspec.lock
-          cd ../..
-          git checkout HEAD -- mobile/customer_app/analysis_options.yaml
-          git diff --check
-          git diff --exit-code 101b62220222f6372b11dfd5c76bd71aee1ab420...HEAD -- \
+          flutter pub get --enforce-lockfile
+          cp pubspec.lock build-evidence/pubspec.lock
+          sha256sum pubspec.lock > build-evidence/dependency-lock-sha256.txt
+          flutter pub deps --style=compact > build-evidence/resolved-dependencies.txt
+          grep -A7 -E '^  (flutter_stripe|stripe_ios|stripe_android|stripe_platform_interface):' pubspec.lock > build-evidence/stripe-resolution.txt
+      - name: Verify frozen Customer API has no drift
+        shell: bash
+        run: |
+          git diff --exit-code "$FLUTTER_INTEGRATION_BASE_SHA"...HEAD -- \
             docs/api/fabinzi-customer-api-v1.openapi.json \
             docs/API_V1_CUSTOMER_CONTRACT.md \
             docs/FLUTTER_API_HANDOFF.md \
@@ -51,15 +74,195 @@ jobs:
             docs/API_V1_CUSTOMER_REPRODUCIBILITY.md \
             contracts/customer-api-v1-manifest.json \
             contracts/customer-api-v1-fixtures.json
-      - name: Commit prepared mobile tree only to working branch
+      - name: Formatting
+        working-directory: mobile/customer_app
+        shell: bash
+        run: |
+          set -o pipefail
+          dart format --output=none --set-exit-if-changed lib test tool/verify_customer_contract.dart 2>&1 | tee build-evidence/format.log
+          printf 'PASS\n' > build-evidence/format-result.txt
+      - name: Static analysis
+        working-directory: mobile/customer_app
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter analyze 2>&1 | tee build-evidence/analyze.log
+          printf 'PASS\n' > build-evidence/analyze-result.txt
+      - name: Flutter unit and widget tests
+        working-directory: mobile/customer_app
+        shell: bash
+        run: |
+          set -o pipefail
+          find test -type f -name '*_test.dart' -print | sort > build-evidence/test-inventory.txt
+          flutter test --reporter expanded 2>&1 | tee build-evidence/tests.log
+          printf 'PASS\n' > build-evidence/test-result.txt
+      - name: Arabic English RTL LTR and theme evidence
+        working-directory: mobile/customer_app
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter test test/localization_theme_test.dart --reporter expanded 2>&1 | tee build-evidence/localization-theme.log
+          printf 'PASS — English/LTR, Arabic/RTL, Light/Dark/System contract covered\n' > build-evidence/localization-theme-result.txt
+      - name: Frozen Customer contract compatibility
+        working-directory: mobile/customer_app
+        shell: bash
+        run: |
+          set -o pipefail
+          dart run tool/verify_customer_contract.dart 2>&1 | tee build-evidence/contract.log
+          printf 'PASS — 41 frozen Customer operations; no contract drift\n' > build-evidence/contract-result.txt
+      - name: Android debug build
+        working-directory: mobile/customer_app
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter build apk --debug 2>&1 | tee build-evidence/android-build.log
+          apk=build/app/outputs/flutter-apk/app-debug.apk
+          test -s "$apk"
+          printf 'PASS\n' > build-evidence/android-build-result.txt
+          sha256sum "$apk" > build-evidence/android-build-sha256.txt
+      - name: Changed-file inventory
+        shell: bash
+        run: git diff --name-status "$FLUTTER_INTEGRATION_BASE_SHA"...HEAD > mobile/customer_app/build-evidence/changed-files.txt
+      - name: Upload Flutter quality evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: flutter-customer-quality
+          path: mobile/customer_app/build-evidence
+          if-no-files-found: error
+          retention-days: 30
+
+  ios:
+    name: Flutter iOS no-code-sign build
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Verify exact source checkout
+        shell: bash
+        run: |
+          expected="${{ github.event.pull_request.head.sha || github.sha }}"
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$expected"
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: "3.47.0"
+          channel: stable
+          cache: true
+      - name: Select Xcode 26.3 for Stripe iOS 26.3
+        working-directory: mobile/customer_app
+        shell: bash
+        run: |
+          mkdir -p build-evidence-ios
+          sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
+          xcodebuild -version | tee build-evidence-ios/xcode-version.txt
+      - name: Generate standard hosts and restore locked dependencies
+        working-directory: mobile/customer_app
+        run: |
+          flutter create --empty --no-pub --platforms=android,ios --org com.fabinzi --project-name fabinzi_customer_app .
+          flutter pub get --enforce-lockfile
+      - name: iOS debug build without code signing
+        working-directory: mobile/customer_app
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter build ios --debug --no-codesign 2>&1 | tee build-evidence-ios/ios-build.log
+          test -d build/ios/iphoneos/Runner.app
+          printf 'PASS — flutter build ios --debug --no-codesign\n' > build-evidence-ios/ios-build-result.txt
+      - name: Upload iOS evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: flutter-customer-ios
+          path: mobile/customer_app/build-evidence-ios
+          if-no-files-found: error
+          retention-days: 30
+
+  checkpoint-evidence:
+    name: Flutter checkpoint evidence
+    runs-on: ubuntu-latest
+    needs: [quality-android, ios]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: flutter-customer-quality
+          path: evidence/quality
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: flutter-customer-ios
+          path: evidence/ios
+      - name: Assemble deterministic checkpoint evidence
         shell: bash
         run: |
           set -euo pipefail
-          git checkout HEAD -- .github/workflows/flutter-customer.yml
-          git config user.name "FABINZI CI"
-          git config user.email "actions@users.noreply.github.com"
-          git add mobile/customer_app
-          git status --short
-          test -n "$(git status --porcelain)"
-          git commit -m "fix(mobile): complete Flutter verification hardening"
-          git push origin HEAD:work/flutter-customer-app
+          out=artifacts/flutter-customer-app-checkpoint
+          mkdir -p "$out"
+          printf '%s\n' "$(git rev-parse HEAD)" > "$out/source-sha.txt"
+          printf '%s\n' "$FLUTTER_INTEGRATION_BASE_SHA" > "$out/integration-baseline-sha.txt"
+          cmp mobile/customer_app/pubspec.lock evidence/quality/pubspec.lock
+          cp evidence/quality/flutter-version.json "$out/"
+          cp evidence/quality/dart-version.txt "$out/"
+          cp evidence/quality/pubspec.lock "$out/"
+          cp evidence/quality/dependency-lock-sha256.txt "$out/"
+          cp evidence/quality/resolved-dependencies.txt "$out/"
+          cp evidence/quality/stripe-resolution.txt "$out/"
+          cp evidence/quality/format-result.txt "$out/"
+          cp evidence/quality/analyze-result.txt "$out/"
+          cp evidence/quality/test-result.txt "$out/"
+          cp evidence/quality/test-inventory.txt "$out/"
+          cp evidence/quality/localization-theme-result.txt "$out/"
+          cp evidence/quality/contract-result.txt "$out/"
+          cp evidence/quality/android-build-result.txt "$out/"
+          cp evidence/quality/android-build-sha256.txt "$out/"
+          cp evidence/ios/xcode-version.txt "$out/"
+          cp evidence/ios/ios-build-result.txt "$out/"
+          cp mobile/customer_app/KNOWN_LIMITATIONS.md "$out/"
+          git diff --name-status "$FLUTTER_INTEGRATION_BASE_SHA"...HEAD > "$out/changed-files.txt"
+          sha256sum \
+            docs/api/fabinzi-customer-api-v1.openapi.json \
+            docs/API_V1_CUSTOMER_CONTRACT.md \
+            docs/FLUTTER_API_HANDOFF.md \
+            contracts/customer-api-v1-manifest.json \
+            contracts/customer-api-v1-fixtures.json \
+            > "$out/frozen-contract-sha256.txt"
+          python - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+          out = Path('artifacts/flutter-customer-app-checkpoint')
+          flutter = json.loads((out / 'flutter-version.json').read_text())
+          payload = {
+              'checkpoint': 'FABINZI — Flutter Customer App Productization',
+              'source_sha': subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(),
+              'integration_baseline_sha': '101b62220222f6372b11dfd5c76bd71aee1ab420',
+              'flutter_version': flutter['frameworkVersion'],
+              'dart_version': flutter['dartSdkVersion'],
+              'flutter_framework_revision': flutter.get('frameworkRevision'),
+              'stripe_flutter_version': '14.0.0',
+              'stripe_ios_native_version': '26.3.0',
+              'ios_xcode': (out / 'xcode-version.txt').read_text().strip(),
+              'format': 'PASS',
+              'analyze': 'PASS',
+              'flutter_tests': 'PASS',
+              'android_build': 'PASS',
+              'ios_no_codesign_build': 'PASS',
+              'customer_api_compatibility': 'PASS',
+              'localization': {'en_ltr': 'PASS', 'ar_rtl': 'PASS'},
+              'themes': {'light': 'PASS', 'dark': 'PASS', 'system': 'PASS'},
+              'deferred_global_live_e2e': 'UNRESOLVED',
+          }
+          (out / 'checkpoint-manifest.json').write_text(json.dumps(payload, indent=2, sort_keys=True) + '\n')
+          PY
+      - name: Upload final Flutter checkpoint artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: flutter-customer-app-checkpoint
+          path: artifacts/flutter-customer-app-checkpoint
+          if-no-files-found: error
+          retention-days: 30
