@@ -1,4 +1,5 @@
 from decimal import Decimal
+import re
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -378,7 +379,14 @@ def test_assigned_job_is_tenant_and_role_scoped(client):
     assert response.status_code == 200
     assert data["item"].title.encode() in response.content
     assert b"private-customer@example.test" not in response.content
-    assert b"cod" not in response.content.lower()
+    # Search semantic payment UI, not the three-byte substring across raw HTML; generated tokens can collide.
+    assert data["order"].payment_method == "cod"
+    rendered = response.content.decode()
+    lowered = rendered.lower()
+    assert "payment_method" not in lowered
+    assert "payment method" not in lowered
+    assert "cash on delivery" not in lowered
+    assert re.search(r">\s*cod\s*<", rendered, re.IGNORECASE) is None
     client.force_login(other)
     assert client.get(reverse("manufacturer-production-detail", args=[data["job"].id])).status_code == 404
     accountant, acct_org, _, _ = manufacturer("job-accountant", role=Membership.Role.ACCOUNTANT)
@@ -490,7 +498,12 @@ def test_shipment_surface_minimizes_customer_pii(client):
     assert "Customer Recipient" in content
     assert "01011112222" in content
     assert "private-customer@example.test" not in content
-    assert "cod" not in content.lower()
+    assert data["order"].payment_method == "cod"
+    lowered = content.lower()
+    assert "payment_method" not in lowered
+    assert "payment method" not in lowered
+    assert "cash on delivery" not in lowered
+    assert re.search(r">\s*cod\s*<", content, re.IGNORECASE) is None
     assert data["customer"].username not in content
 
 
