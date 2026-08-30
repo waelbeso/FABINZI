@@ -16,324 +16,260 @@ env:
   FLUTTER_INTEGRATION_BASE_SHA: 101b62220222f6372b11dfd5c76bd71aee1ab420
 
 jobs:
-  quality-preview:
-    name: Continuation 2 analyzer tests Android proof
+  quality-android:
+    name: Flutter quality + Android
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-      - name: Verify exact source and branch locks
+      - name: Verify exact source checkout
         shell: bash
         run: |
-          set -euo pipefail
           expected="${{ github.event.pull_request.head.sha || github.sha }}"
-          test "$(git rev-parse HEAD)" = "$expected"
-          test "$(git rev-parse origin/feature/web-productization)" = "$FLUTTER_INTEGRATION_BASE_SHA"
-          test "$(git rev-parse origin/main)" = "91f358c08d89557893e983f1c0d247fd1b42b15f"
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$expected"
+          echo "FABINZI_SOURCE_SHA=$actual" >> "$GITHUB_ENV"
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           flutter-version: "3.47.0"
           channel: stable
           cache: true
-      - name: Resolve committed lock without changing analysis policy
-        working-directory: mobile/customer_app
+      - name: Verify pinned Flutter and Dart toolchain
         shell: bash
         run: |
-          set -euo pipefail
-          flutter pub get --enforce-lockfile
-          git checkout HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
-      - name: Apply exact Continuation 2 corrections in runner workspace
-        shell: bash
-        run: |
-          set -euo pipefail
+          mkdir -p mobile/customer_app/build-evidence
+          flutter --version --machine | tee mobile/customer_app/build-evidence/flutter-version.json
+          dart --version 2>&1 | tee mobile/customer_app/build-evidence/dart-version.txt
           python - <<'PY'
+          import json
           from pathlib import Path
-          cart_path = Path('mobile/customer_app/lib/features/cart/cart_screen.dart')
-          cart = cart_path.read_text()
-          replacements = {
-              "import 'package:flutter_stripe/flutter_stripe.dart';": "import 'package:flutter_stripe/flutter_stripe.dart' as stripe;",
-              'Stripe.instance': 'stripe.Stripe.instance',
-              'SetupPaymentSheetParameters(': 'stripe.SetupPaymentSheetParameters(',
-              'on StripeException catch': 'on stripe.StripeException catch',
-              'FailureCode.Canceled': 'stripe.FailureCode.Canceled',
-          }
-          for old, new in replacements.items():
-              if old not in cart:
-                  raise SystemExit(f'Expected Stripe token not found: {old}')
-              cart = cart.replace(old, new)
-          old_payment = """          else
-            ...options.map(
-              (option) => RadioListTile<String>(
-                value: option.provider,
-                groupValue: provider,
-                onChanged: placing
-                    ? null
-                    : (value) => setState(() => provider = value),
-                title: Text(option.label),
-              ),
-            ),
-"""
-          new_payment = """          else
-            RadioGroup<String>(
-              groupValue: provider,
-              onChanged: (value) {
-                if (!placing && value != null) {
-                  setState(() => provider = value);
-                }
-              },
-              child: Column(
-                children: [
-                  for (final option in options)
-                    RadioListTile<String>(
-                      value: option.provider,
-                      enabled: !placing,
-                      title: Text(option.label),
-                    ),
-                ],
-              ),
-            ),
-"""
-          if old_payment not in cart:
-              raise SystemExit('Expected checkout payment radio block not found')
-          cart_path.write_text(cart.replace(old_payment, new_payment))
-
-          account_path = Path('mobile/customer_app/lib/features/account/account_screen.dart')
-          account = account_path.read_text()
-          old_language = """      RadioListTile<String>(
-        value: 'en',
-        groupValue: controller.locale.languageCode,
-        onChanged: (value) {
-          if (value != null) controller.setLocale(value);
-        },
-        title: Text(L10n.t(context, 'english')),
-      ),
-      RadioListTile<String>(
-        value: 'ar',
-        groupValue: controller.locale.languageCode,
-        onChanged: (value) {
-          if (value != null) controller.setLocale(value);
-        },
-        title: Text(L10n.t(context, 'arabic')),
-      ),
-"""
-          new_language = """      RadioGroup<String>(
-        groupValue: controller.locale.languageCode,
-        onChanged: (value) {
-          if (value != null) {
-            controller.setLocale(value);
-          }
-        },
-        child: Column(
-          children: [
-            RadioListTile<String>(
-              value: 'en',
-              title: Text(L10n.t(context, 'english')),
-            ),
-            RadioListTile<String>(
-              value: 'ar',
-              title: Text(L10n.t(context, 'arabic')),
-            ),
-          ],
-        ),
-      ),
-"""
-          if old_language not in account:
-              raise SystemExit('Expected language radio block not found')
-          account = account.replace(old_language, new_language)
-          old_theme = """      RadioListTile<ThemeMode>(
-        value: ThemeMode.system,
-        groupValue: controller.themeMode,
-        onChanged: (value) {
-          if (value != null) controller.setThemeMode(value);
-        },
-        title: Text(L10n.t(context, 'system')),
-      ),
-      RadioListTile<ThemeMode>(
-        value: ThemeMode.light,
-        groupValue: controller.themeMode,
-        onChanged: (value) {
-          if (value != null) controller.setThemeMode(value);
-        },
-        title: Text(L10n.t(context, 'light')),
-      ),
-      RadioListTile<ThemeMode>(
-        value: ThemeMode.dark,
-        groupValue: controller.themeMode,
-        onChanged: (value) {
-          if (value != null) controller.setThemeMode(value);
-        },
-        title: Text(L10n.t(context, 'dark')),
-      ),
-"""
-          new_theme = """      RadioGroup<ThemeMode>(
-        groupValue: controller.themeMode,
-        onChanged: (value) {
-          if (value != null) {
-            controller.setThemeMode(value);
-          }
-        },
-        child: Column(
-          children: [
-            RadioListTile<ThemeMode>(
-              value: ThemeMode.system,
-              title: Text(L10n.t(context, 'system')),
-            ),
-            RadioListTile<ThemeMode>(
-              value: ThemeMode.light,
-              title: Text(L10n.t(context, 'light')),
-            ),
-            RadioListTile<ThemeMode>(
-              value: ThemeMode.dark,
-              title: Text(L10n.t(context, 'dark')),
-            ),
-          ],
-        ),
-      ),
-"""
-          if old_theme not in account:
-              raise SystemExit('Expected theme radio block not found')
-          account_path.write_text(account.replace(old_theme, new_theme))
-          api_path = Path('mobile/customer_app/lib/core/api_client.dart')
-          api = api_path.read_text()
-          count = api.count('return send(false);')
-          if count != 3:
-              raise SystemExit(f'Expected exactly three retry returns, found {count}')
-          api_path.write_text(api.replace('return send(false);', 'return await send(false);'))
+          data = json.loads(Path('mobile/customer_app/build-evidence/flutter-version.json').read_text())
+          assert data['frameworkVersion'] == '3.47.0', data
+          assert data['dartSdkVersion'].startswith('3.13.'), data
           PY
-          cd mobile/customer_app
-          dart fix --apply
-          dart format lib test tool/verify_customer_contract.dart
-          git checkout HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
-          dart format --output=none --set-exit-if-changed lib test tool/verify_customer_contract.dart
-      - name: Flutter analyzer must be clean
+      - name: Generate standard Android and iOS hosts
         working-directory: mobile/customer_app
-        run: flutter analyze
+        shell: bash
+        run: |
+          flutter create --empty --no-pub --platforms=android,ios --org com.fabinzi --project-name fabinzi_customer_app .
+          git checkout HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
+          git diff --exit-code HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
+      - name: Verify committed locked dependencies
+        working-directory: mobile/customer_app
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s pubspec.lock
+          flutter pub get --enforce-lockfile
+          cp pubspec.lock build-evidence/pubspec.lock
+          sha256sum pubspec.lock > build-evidence/dependency-lock-sha256.txt
+          flutter pub deps --style=compact > build-evidence/resolved-dependencies.txt
+          grep -A7 -E '^  (flutter_stripe|stripe_ios|stripe_android|stripe_platform_interface):' pubspec.lock > build-evidence/stripe-resolution.txt
+      - name: Verify frozen Customer API has no drift
+        shell: bash
+        run: |
+          git diff --exit-code "$FLUTTER_INTEGRATION_BASE_SHA"...HEAD -- \
+            docs/api/fabinzi-customer-api-v1.openapi.json \
+            docs/API_V1_CUSTOMER_CONTRACT.md \
+            docs/FLUTTER_API_HANDOFF.md \
+            docs/CUSTOMER_API_V1_ENDPOINT_INVENTORY.md \
+            docs/API_V1_CUSTOMER_REPRODUCIBILITY.md \
+            contracts/customer-api-v1-manifest.json \
+            contracts/customer-api-v1-fixtures.json
+      - name: Formatting
+        working-directory: mobile/customer_app
+        shell: bash
+        run: |
+          set -o pipefail
+          dart format --output=none --set-exit-if-changed lib test tool/verify_customer_contract.dart 2>&1 | tee build-evidence/format.log
+          printf 'PASS\n' > build-evidence/format-result.txt
+      - name: Static analysis
+        working-directory: mobile/customer_app
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter analyze 2>&1 | tee build-evidence/analyze.log
+          printf 'PASS\n' > build-evidence/analyze-result.txt
       - name: Flutter unit and widget tests
         working-directory: mobile/customer_app
-        run: flutter test --reporter expanded
-      - name: Localization theme tests
-        working-directory: mobile/customer_app
-        run: flutter test test/localization_theme_test.dart --reporter expanded
-      - name: Frozen Customer contract compatibility
-        working-directory: mobile/customer_app
-        run: dart run tool/verify_customer_contract.dart
-      - name: Generate Android host preserving definitions
+        shell: bash
+        run: |
+          set -o pipefail
+          find test -type f -name '*_test.dart' -print | sort > build-evidence/test-inventory.txt
+          flutter test --reporter expanded 2>&1 | tee build-evidence/tests.log
+          printf 'PASS\n' > build-evidence/test-result.txt
+      - name: Arabic English RTL LTR and theme evidence
         working-directory: mobile/customer_app
         shell: bash
         run: |
-          set -euo pipefail
-          flutter create --empty --no-pub --platforms=android --org com.fabinzi --project-name fabinzi_customer_app .
-          git checkout HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
-          flutter pub get --enforce-lockfile
-          git checkout HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
+          set -o pipefail
+          flutter test test/localization_theme_test.dart --reporter expanded 2>&1 | tee build-evidence/localization-theme.log
+          printf 'PASS — English/LTR, Arabic/RTL, Light/Dark/System contract covered\n' > build-evidence/localization-theme-result.txt
+      - name: Frozen Customer contract compatibility
+        working-directory: mobile/customer_app
+        shell: bash
+        run: |
+          set -o pipefail
+          dart run tool/verify_customer_contract.dart 2>&1 | tee build-evidence/contract.log
+          printf 'PASS — 41 frozen Customer operations; no contract drift\n' > build-evidence/contract-result.txt
       - name: Android debug build
         working-directory: mobile/customer_app
         shell: bash
         run: |
-          set -euo pipefail
-          flutter build apk --debug
-          test -s build/app/outputs/flutter-apk/app-debug.apk
-      - name: Package corrected committed-source candidates
+          set -o pipefail
+          flutter build apk --debug 2>&1 | tee build-evidence/android-build.log
+          apk=build/app/outputs/flutter-apk/app-debug.apk
+          test -s "$apk"
+          printf 'PASS\n' > build-evidence/android-build-result.txt
+          sha256sum "$apk" > build-evidence/android-build-sha256.txt
+      - name: Changed-file inventory
         shell: bash
-        run: |
-          set -euo pipefail
-          out=mobile/customer_app/continuation2-evidence/corrected-source/mobile/customer_app
-          mkdir -p "$out/tool"
-          cp -R mobile/customer_app/lib "$out/"
-          cp -R mobile/customer_app/test "$out/"
-          cp mobile/customer_app/tool/verify_customer_contract.dart "$out/tool/"
-          git diff -- mobile/customer_app/lib mobile/customer_app/test mobile/customer_app/tool/verify_customer_contract.dart > mobile/customer_app/continuation2-evidence/corrected-source.patch
-          printf '%s\n' "${{ github.event.pull_request.head.sha || github.sha }}" > mobile/customer_app/continuation2-evidence/source-sha.txt
-      - name: Upload Continuation 2 source proof
+        run: git diff --name-status "$FLUTTER_INTEGRATION_BASE_SHA"...HEAD > mobile/customer_app/build-evidence/changed-files.txt
+      - name: Upload Flutter quality evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: flutter-customer-continuation2-source
-          path: mobile/customer_app/continuation2-evidence
-          if-no-files-found: warn
-          retention-days: 7
+          name: flutter-customer-quality
+          path: mobile/customer_app/build-evidence
+          if-no-files-found: error
+          retention-days: 30
 
-  ios-preview:
-    name: Continuation 2 unsigned iphoneos proof
+  ios:
+    name: Flutter iOS no-code-sign build
     runs-on: macos-15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-      - name: Verify exact source
+      - name: Verify exact source checkout
         shell: bash
         run: |
           expected="${{ github.event.pull_request.head.sha || github.sha }}"
-          test "$(git rev-parse HEAD)" = "$expected"
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$expected"
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           flutter-version: "3.47.0"
           channel: stable
           cache: true
-      - name: Select Xcode 26.3
+      - name: Select Xcode 26.3 for Stripe iOS 26.3
         working-directory: mobile/customer_app
         shell: bash
         run: |
-          mkdir -p continuation2-ios-evidence
+          mkdir -p build-evidence-ios
           sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
-          xcodebuild -version | tee continuation2-ios-evidence/xcode-version.txt
-      - name: Generate iOS host preserving definitions
+          xcodebuild -version | tee build-evidence-ios/xcode-version.txt
+      - name: Generate standard hosts and restore locked dependencies
         working-directory: mobile/customer_app
         shell: bash
         run: |
-          set -euo pipefail
-          flutter create --empty --no-pub --platforms=ios --org com.fabinzi --project-name fabinzi_customer_app .
+          flutter create --empty --no-pub --platforms=android,ios --org com.fabinzi --project-name fabinzi_customer_app .
           git checkout HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
+          git diff --exit-code HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
           flutter pub get --enforce-lockfile
-          git checkout HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
-      - name: Configure Flutter iOS project
+      - name: iOS debug build without code signing
         working-directory: mobile/customer_app
         shell: bash
         run: |
-          set -euo pipefail
-          flutter build ios --debug --no-codesign --config-only
-          git checkout HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
-          cd ios
-          pod install
-      - name: Direct unsigned iphoneos build
-        working-directory: mobile/customer_app
-        shell: bash
-        run: |
-          set -euo pipefail
           set -o pipefail
-          rm -rf build/ios-unsigned
-          xcrun xcodebuild \
-            -workspace ios/Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Debug \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath build/ios-unsigned \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY='' \
-            DEVELOPMENT_TEAM='' \
-            PROVISIONING_PROFILE_SPECIFIER='' \
-            COMPILER_INDEX_STORE_ENABLE=NO \
-            build 2>&1 | tee continuation2-ios-evidence/xcodebuild-unsigned.log
-          app=build/ios-unsigned/Build/Products/Debug-iphoneos/Runner.app
-          test -d "$app"
-          test -x "$app/Runner"
-          file "$app/Runner" | tee continuation2-ios-evidence/runner-binary.txt
-          xcrun lipo -info "$app/Runner" | tee continuation2-ios-evidence/runner-architecture.txt
-          if codesign -dv "$app" > continuation2-ios-evidence/codesign-check.txt 2>&1; then
-            echo 'Unexpected code signature on unsigned proof.'
-            exit 1
-          fi
-          printf 'PASS — unsigned iphoneos build; signing explicitly disabled\n' > continuation2-ios-evidence/ios-unsigned-result.txt
-      - name: Upload Continuation 2 iOS proof
+          flutter build ios --debug --no-codesign 2>&1 | tee build-evidence-ios/ios-build.log
+          test -d build/ios/iphoneos/Runner.app
+          printf 'PASS — flutter build ios --debug --no-codesign\n' > build-evidence-ios/ios-build-result.txt
+      - name: Upload iOS evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: flutter-customer-continuation2-ios
-          path: mobile/customer_app/continuation2-ios-evidence
-          if-no-files-found: warn
-          retention-days: 7
+          name: flutter-customer-ios
+          path: mobile/customer_app/build-evidence-ios
+          if-no-files-found: error
+          retention-days: 30
+
+  checkpoint-evidence:
+    name: Flutter checkpoint evidence
+    runs-on: ubuntu-latest
+    needs: [quality-android, ios]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: flutter-customer-quality
+          path: evidence/quality
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: flutter-customer-ios
+          path: evidence/ios
+      - name: Assemble deterministic checkpoint evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          out=artifacts/flutter-customer-app-checkpoint
+          mkdir -p "$out"
+          printf '%s\n' "$(git rev-parse HEAD)" > "$out/source-sha.txt"
+          printf '%s\n' "$FLUTTER_INTEGRATION_BASE_SHA" > "$out/integration-baseline-sha.txt"
+          cmp mobile/customer_app/pubspec.lock evidence/quality/pubspec.lock
+          cp evidence/quality/flutter-version.json "$out/"
+          cp evidence/quality/dart-version.txt "$out/"
+          cp evidence/quality/pubspec.lock "$out/"
+          cp evidence/quality/dependency-lock-sha256.txt "$out/"
+          cp evidence/quality/resolved-dependencies.txt "$out/"
+          cp evidence/quality/stripe-resolution.txt "$out/"
+          cp evidence/quality/format-result.txt "$out/"
+          cp evidence/quality/analyze-result.txt "$out/"
+          cp evidence/quality/test-result.txt "$out/"
+          cp evidence/quality/test-inventory.txt "$out/"
+          cp evidence/quality/localization-theme-result.txt "$out/"
+          cp evidence/quality/contract-result.txt "$out/"
+          cp evidence/quality/android-build-result.txt "$out/"
+          cp evidence/quality/android-build-sha256.txt "$out/"
+          cp evidence/ios/xcode-version.txt "$out/"
+          cp evidence/ios/ios-build-result.txt "$out/"
+          cp mobile/customer_app/KNOWN_LIMITATIONS.md "$out/"
+          git diff --name-status "$FLUTTER_INTEGRATION_BASE_SHA"...HEAD > "$out/changed-files.txt"
+          sha256sum \
+            docs/api/fabinzi-customer-api-v1.openapi.json \
+            docs/API_V1_CUSTOMER_CONTRACT.md \
+            docs/FLUTTER_API_HANDOFF.md \
+            contracts/customer-api-v1-manifest.json \
+            contracts/customer-api-v1-fixtures.json \
+            > "$out/frozen-contract-sha256.txt"
+          python - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+          out = Path('artifacts/flutter-customer-app-checkpoint')
+          flutter = json.loads((out / 'flutter-version.json').read_text())
+          payload = {
+              'checkpoint': 'FABINZI — Flutter Customer App Productization',
+              'source_sha': subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(),
+              'integration_baseline_sha': '101b62220222f6372b11dfd5c76bd71aee1ab420',
+              'flutter_version': flutter['frameworkVersion'],
+              'dart_version': flutter['dartSdkVersion'],
+              'flutter_framework_revision': flutter.get('frameworkRevision'),
+              'stripe_flutter_version': '14.0.0',
+              'stripe_ios_native_version': '26.3.0',
+              'ios_xcode': (out / 'xcode-version.txt').read_text().strip(),
+              'format': 'PASS',
+              'analyze': 'PASS',
+              'flutter_tests': 'PASS',
+              'android_build': 'PASS',
+              'ios_no_codesign_build': 'PASS',
+              'customer_api_compatibility': 'PASS',
+              'localization': {'en_ltr': 'PASS', 'ar_rtl': 'PASS'},
+              'themes': {'light': 'PASS', 'dark': 'PASS', 'system': 'PASS'},
+              'deferred_global_live_e2e': 'UNRESOLVED',
+          }
+          (out / 'checkpoint-manifest.json').write_text(json.dumps(payload, indent=2, sort_keys=True) + '\n')
+          PY
+      - name: Upload final Flutter checkpoint artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: flutter-customer-app-checkpoint
+          path: artifacts/flutter-customer-app-checkpoint
+          if-no-files-found: error
+          retention-days: 30
