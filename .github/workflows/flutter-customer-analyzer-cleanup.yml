@@ -43,6 +43,7 @@ jobs:
           git checkout HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
           dart format --output=none --set-exit-if-changed lib test tool/verify_customer_contract.dart
           flutter analyze
+          git checkout HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
       - name: Verify frozen contract and commit source-only fixes
         shell: bash
         run: |
