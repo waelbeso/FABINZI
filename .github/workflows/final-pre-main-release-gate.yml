@@ -1,0 +1,558 @@
+name: Final Pre-Main Release Gate
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: final-pre-main-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12.14"
+  CUSTOMER_API_FREEZE_SHA: 101b62220222f6372b11dfd5c76bd71aee1ab420
+  ACCEPTED_FLUTTER_SHA: bbe1d36eeb149dd876e685da91823ae09f74fbc4
+  FLUTTER_INTEGRATION_SHA: bbe1d36eeb149dd876e685da91823ae09f74fbc4
+  FINAL_PRE_MAIN_BASE_SHA: bbe1d36eeb149dd876e685da91823ae09f74fbc4
+  HISTORICAL_MAIN_SHA: 91f358c08d89557893e983f1c0d247fd1b42b15f
+
+jobs:
+  source-backend:
+    name: Source, security, migrations + backend
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16.15
+        env:
+          POSTGRES_DB: fabinzi
+          POSTGRES_USER: fabinzi
+          POSTGRES_PASSWORD: fabinzi
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:7.4.11
+        ports: ["6379:6379"]
+    env:
+      DJANGO_SECRET_KEY: ci-secret-not-production-but-long-enough-for-django-checks-123456
+      DJANGO_DEBUG: "true"
+      ENVIRONMENT: test
+      DATABASE_URL: postgresql://fabinzi:fabinzi@localhost:5432/fabinzi
+      REDIS_URL: redis://localhost:6379/0
+      FABINZI_PUBLIC_BASE_URL: http://localhost:8000
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Verify exact source and repository locks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/pre-main-source
+          expected="${{ github.event.pull_request.head.sha || github.sha }}"
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$expected"
+          test "$(git rev-parse origin/feature/web-productization)" = "$FINAL_PRE_MAIN_BASE_SHA"
+          test "$(git rev-parse origin/main)" = "$HISTORICAL_MAIN_SHA"
+          git merge-base --is-ancestor "$ACCEPTED_FLUTTER_SHA" HEAD
+          printf '%s\n' "$actual" > artifacts/pre-main-source/candidate-sha.txt
+          printf '%s\n' "$FINAL_PRE_MAIN_BASE_SHA" > artifacts/pre-main-source/final-pre-main-base-sha.txt
+          printf '%s\n' "$ACCEPTED_FLUTTER_SHA" > artifacts/pre-main-source/accepted-flutter-sha.txt
+          printf '%s\n' "$FLUTTER_INTEGRATION_SHA" > artifacts/pre-main-source/flutter-integration-sha.txt
+          printf '%s\n' "$HISTORICAL_MAIN_SHA" > artifacts/pre-main-source/historical-main-sha.txt
+          printf 'PASS — exact source, feature integration SHA, historical main SHA, accepted Flutter ancestry\n' > artifacts/pre-main-source/repository-lock-result.txt
+      - name: Frozen Customer API zero drift
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code "$CUSTOMER_API_FREEZE_SHA"...HEAD -- \
+            docs/api/fabinzi-customer-api-v1.openapi.json \
+            docs/API_V1_CUSTOMER_CONTRACT.md \
+            docs/FLUTTER_API_HANDOFF.md \
+            docs/CUSTOMER_API_V1_ENDPOINT_INVENTORY.md \
+            docs/API_V1_CUSTOMER_REPRODUCIBILITY.md \
+            contracts/customer-api-v1-manifest.json \
+            contracts/customer-api-v1-fixtures.json
+          sha256sum \
+            docs/api/fabinzi-customer-api-v1.openapi.json \
+            docs/API_V1_CUSTOMER_CONTRACT.md \
+            docs/FLUTTER_API_HANDOFF.md \
+            docs/CUSTOMER_API_V1_ENDPOINT_INVENTORY.md \
+            docs/API_V1_CUSTOMER_REPRODUCIBILITY.md \
+            contracts/customer-api-v1-manifest.json \
+            contracts/customer-api-v1-fixtures.json \
+            > artifacts/pre-main-source/frozen-contract-sha256.txt
+          printf 'PASS — seven frozen Customer API files unchanged from API-freeze SHA\n' > artifacts/pre-main-source/frozen-api-result.txt
+      - name: Repository hygiene and CI permission audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git ls-files | sort > artifacts/pre-main-source/tracked-files.txt
+          if git ls-files | grep -E '(^|/)\.env$'; then
+            echo 'Tracked .env file is not allowed.' >&2
+            exit 1
+          fi
+          if git ls-files | grep -Ei '(^|/)(continuation|autofix|one[-_]?shot|fixer)([-_/]|$)'; then
+            echo 'Temporary mutation/fixer path remains tracked.' >&2
+            exit 1
+          fi
+          if git ls-files | grep -E '(^|/)(build|\.dart_tool|Pods|\.gradle|__pycache__)(/|$)|\.pyc$'; then
+            echo 'Generated build/cache output is tracked.' >&2
+            exit 1
+          fi
+          if grep -R -n -E 'contents:[[:space:]]*write|git[[:space:]]+push([[:space:]]|$)' .github/workflows; then
+            echo 'Repository-writing CI permission/helper detected.' >&2
+            exit 1
+          fi
+          {
+            echo 'PASS — no tracked .env; no temporary Continuation/autofix/one-shot/fixer paths; no tracked build/cache output.'
+            echo 'PASS — no contents: write and no git push helper in retained workflows.'
+            echo 'Retained workflow permission declarations:'
+            grep -R -n -A2 '^permissions:' .github/workflows || true
+          } > artifacts/pre-main-source/repository-hygiene-ci-permissions.txt
+      - name: High-confidence secrets-pattern audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import re
+          import subprocess
+          from pathlib import Path
+
+          self_path = '.github/workflows/final-pre-main-release-gate.yml'
+          patterns = {
+              'private_key': re.compile(r'-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'),
+              'stripe_live_secret': re.compile(r'\b(?:sk|rk)_live_[A-Za-z0-9]{16,}\b'),
+              'aws_access_key': re.compile(r'\bAKIA[0-9A-Z]{16}\b'),
+              'github_pat': re.compile(r'\bgh[pousr]_[A-Za-z0-9]{30,}\b'),
+              'slack_token': re.compile(r'\bxox[baprs]-[A-Za-z0-9-]{20,}\b'),
+              'google_api_key': re.compile(r'\bAIza[0-9A-Za-z_-]{30,}\b'),
+          }
+          hits = []
+          for name in subprocess.check_output(['git', 'ls-files'], text=True).splitlines():
+              if name == self_path:
+                  continue
+              path = Path(name)
+              try:
+                  data = path.read_bytes()
+              except OSError:
+                  continue
+              if b'\0' in data or len(data) > 2_000_000:
+                  continue
+              text = data.decode('utf-8', errors='ignore')
+              for label, pattern in patterns.items():
+                  if pattern.search(text):
+                      hits.append((name, label))
+          if hits:
+              raise SystemExit('High-confidence secret pattern(s): ' + repr(hits))
+          Path('artifacts/pre-main-source/secrets-pattern-audit.txt').write_text(
+              'PASS — no private-key, live Stripe secret, AWS access-key, GitHub PAT, Slack token or Google API-key pattern in tracked source.\n'
+          )
+          PY
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12.14"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            constraints-release.txt
+      - name: Exact dependency resolution
+        shell: bash
+        run: |
+          set -euo pipefail
+          python --version | tee artifacts/pre-main-source/python-version.txt
+          python -m pip install -r requirements.txt -c constraints-release.txt
+          python -m pip check | tee artifacts/pre-main-source/pip-check.txt
+          python -m pip freeze --all | sort > artifacts/pre-main-source/pip-freeze.txt
+      - name: Migration graph and safety
+        shell: bash
+        run: |
+          set -euo pipefail
+          python manage.py makemigrations --check --dry-run | tee artifacts/pre-main-source/makemigrations-check.txt
+          git diff --name-only "$HISTORICAL_MAIN_SHA"...HEAD -- ':(glob)apps/*/migrations/*.py' | sort > artifacts/pre-main-source/migrations-since-main.txt
+          python - <<'PY'
+          from pathlib import Path
+          expected = {
+              'apps/checkout/migrations/0002_commerce_parent_cart.py',
+              'apps/storefront/migrations/0002_visual_studio_elements.py',
+          }
+          found = set(Path('artifacts/pre-main-source/migrations-since-main.txt').read_text().splitlines())
+          assert found == expected, (found, expected)
+          for name in found:
+              text = Path(name).read_text()
+              for marker in ('migrations.DeleteModel', 'migrations.RemoveField', 'migrations.RenameModel', 'migrations.RenameField', 'migrations.RunSQL'):
+                  assert marker not in text, (name, marker)
+          checkout = Path('apps/checkout/migrations/0002_commerce_parent_cart.py').read_text()
+          assert 'backfill_customer_purchases' in checkout
+          assert '.delete(' not in checkout
+          Path('artifacts/pre-main-source/migration-safety-review.txt').write_text(
+              'PASS — deterministic delta: additive commerce-parent backfill + additive Studio fields; no DeleteModel/RemoveField/Rename/RunSQL or data deletion.\n'
+          )
+          PY
+          python manage.py reconcile_migration_state | tee artifacts/pre-main-source/reconcile-migration-state.txt
+          python manage.py migrate --noinput | tee artifacts/pre-main-source/fresh-migrate.txt
+          python manage.py showmigrations --plan > artifacts/pre-main-source/migration-plan.txt
+      - name: Django, static and production checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python manage.py check | tee artifacts/pre-main-source/django-check.txt
+          python manage.py collectstatic --noinput | tee artifacts/pre-main-source/collectstatic.txt
+          find staticfiles -type f | wc -l | tr -d ' ' > artifacts/pre-main-source/collected-static-file-count.txt
+          DJANGO_DEBUG=false \
+          ENVIRONMENT=production \
+          PRIVATE_MEDIA_STORAGE_MODE=s3 \
+          INTEGRATION_ENCRYPTION_KEY=ci-arbitrary-secret-managed-by-render \
+          FABINZI_PUBLIC_BASE_URL=https://fabinzi.example \
+          DJANGO_ALLOWED_HOSTS=fabinzi.example \
+          DJANGO_CSRF_TRUSTED_ORIGINS=https://fabinzi.example \
+          DJANGO_SECURE_SSL_REDIRECT=true \
+          python manage.py check --deploy | tee artifacts/pre-main-source/production-check.txt
+      - name: Full backend test suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          pytest -q 2>&1 | tee /tmp/backend-tests.log
+          tail -n 12 /tmp/backend-tests.log > artifacts/pre-main-source/backend-tests-result.txt
+      - name: Release, Render and Deferred E2E source audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from config.release import APP_VERSION, RELEASE_LABEL, RELEASE_PYTHON_VERSION
+
+          assert APP_VERSION == '1.0.0'
+          assert RELEASE_LABEL == 'FABINZI WEB v1.0'
+          assert RELEASE_PYTHON_VERSION == '3.12.14'
+          manifest = json.loads(Path('release-manifest.json').read_text())
+          assert manifest['version'] == APP_VERSION
+          assert manifest['release_label'] == RELEASE_LABEL
+          assert manifest['deferred_live_e2e']['status'] == 'UNRESOLVED'
+          deferred = Path('docs/DEFERRED_LIVE_E2E.md').read_text()
+          assert 'Status: **UNRESOLVED' in deferred
+          render = Path('render.yaml').read_text()
+          for token in ('name: fabinzi-web', 'name: fabinzi-db', 'name: fabinzi-redis', 'name: fabinzi-worker', 'name: fabinzi-beat', 'PRIVATE_MEDIA_STORAGE_MODE', 'value: s3', 'healthCheckPath: /readyz/', 'branch: main'):
+              assert token in render, token
+          start = Path('render-start.sh').read_text()
+          for token in ('reconcile_migration_state', 'migrate --noinput', 'collectstatic --noinput', 'gunicorn config.wsgi:application'):
+              assert token in start, token
+          Path('artifacts/pre-main-source/release-render-deferred-audit.txt').write_text(
+              'PASS — FABINZI WEB v1.0 / 1.0.0 / Python 3.12.14 coherent; Render web+DB+Redis+worker+Beat source topology present; S3 private-media policy and /readyz/ configured; Deferred Global Live E2E remains UNRESOLVED.\n'
+          )
+          PY
+          cat > artifacts/pre-main-source/external-production-configuration-required.txt <<'EOF'
+          EXTERNAL PRODUCTION CONFIGURATION STILL REQUIRED
+          - Actual Render deployment of the later explicitly approved main SHA.
+          - Stable production DJANGO_SECRET_KEY and INTEGRATION_ENCRYPTION_KEY retention.
+          - Production Amazon S3 IntegrationConfig, bucket and credentials; connection/authorization validation.
+          - Paymob/Stripe credentials and webhook secrets only for providers intentionally enabled; provider connection validation.
+          - Mailgun/Twilio/Sentry credentials only where intentionally enabled.
+          - Actual Celery worker/Beat runtime-health validation.
+          - Actual Render PostgreSQL PITR window/export state and an operator restore drill / recovery evidence.
+          - Public legal/support operational approvals where required.
+          - Apple/Google signing, store credentials and publication processes are outside this source-side gate.
+          - Deferred Global Live E2E remains to be executed only after the explicitly authorized main merge and production deployment sequence.
+          EOF
+      - name: Cross-surface Web API Flutter security review
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          checks = {
+              'parent_purchase': ('apps/checkout/models.py', 'class CustomerPurchase'),
+              'child_orders': ('apps/checkout/models.py', 'related_name="child_orders"'),
+              'backend_payment_secret': ('apps/checkout/gateways.py', 'secrets.get("secret_key")'),
+              'mobile_publishable_only': ('mobile/customer_app/lib/core/config.dart', 'stripePublishableKey'),
+              'mobile_secure_store': ('mobile/customer_app/lib/core/secure_store.dart', 'FlutterSecureStorage'),
+              'manufacturer_job_scope': ('apps/media/manufacturer_views.py', 'require_manufacturer_job_access'),
+              'mfa_admin': ('apps/integrations/admin_site.py', 'AdminSiteOTPRequired'),
+              'jwt_rotation': ('config/settings.py', '"ROTATE_REFRESH_TOKENS": True'),
+              'jwt_blacklist': ('config/settings.py', '"BLACKLIST_AFTER_ROTATION": True'),
+              'private_media_fail_closed': ('apps/media/services.py', 'Private local media storage is not permitted outside development/test'),
+          }
+          for label, (name, needle) in checks.items():
+              assert needle in Path(name).read_text(), (label, name)
+          mobile = '\n'.join(p.read_text(errors='ignore') for p in Path('mobile/customer_app').rglob('*.dart'))
+          assert 'sk_live_' not in mobile
+          Path('artifacts/pre-main-source/cross-surface-security-review.txt').write_text(
+              'PASS — Parent CustomerPurchase/child operations, backend payment authority, publishable-only Flutter config, secure mobile token storage, Manufacturer job scope, MFA, JWT rotation/blacklist and private-media fail-closed invariants present. Full backend and Flutter contract tests remain authoritative for behavior.\n'
+          )
+          PY
+          git diff --name-status "$FINAL_PRE_MAIN_BASE_SHA"...HEAD > artifacts/pre-main-source/changed-files.txt
+      - name: Upload source/backend evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pre-main-source-backend-evidence
+          path: artifacts/pre-main-source
+          if-no-files-found: error
+          retention-days: 30
+
+  flutter-quality:
+    name: Flutter quality + Android evidence
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Verify exact source and base locks
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${{ github.event.pull_request.head.sha || github.sha }}"
+          test "$(git rev-parse HEAD)" = "$expected"
+          test "$(git rev-parse origin/feature/web-productization)" = "$FINAL_PRE_MAIN_BASE_SHA"
+          test "$(git rev-parse origin/main)" = "$HISTORICAL_MAIN_SHA"
+          git merge-base --is-ancestor "$ACCEPTED_FLUTTER_SHA" HEAD
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: "3.47.0"
+          channel: stable
+          cache: true
+      - name: Flutter toolchain and locked dependencies
+        working-directory: mobile/customer_app
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p pre-main-evidence
+          flutter --version --machine | tee pre-main-evidence/flutter-version.json
+          dart --version 2>&1 | tee pre-main-evidence/dart-version.txt
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('pre-main-evidence/flutter-version.json').read_text())
+          assert data['frameworkVersion'] == '3.47.0', data
+          assert data['dartSdkVersion'].startswith('3.13.'), data
+          PY
+          flutter create --empty --no-pub --platforms=android,ios --org com.fabinzi --project-name fabinzi_customer_app .
+          git checkout HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
+          flutter pub get --enforce-lockfile
+          git checkout HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
+          git diff --exit-code HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
+          sha256sum pubspec.lock > pre-main-evidence/pubspec-lock-sha256.txt
+          flutter pub deps --style=compact > pre-main-evidence/resolved-dependencies.txt
+          grep -A7 -E '^  (flutter_stripe|stripe_ios|stripe_android|stripe_platform_interface):' pubspec.lock > pre-main-evidence/stripe-resolution.txt
+      - name: Frozen contract, format, analyze and tests
+        working-directory: mobile/customer_app
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C ../.. diff --exit-code "$CUSTOMER_API_FREEZE_SHA"...HEAD -- \
+            docs/api/fabinzi-customer-api-v1.openapi.json \
+            docs/API_V1_CUSTOMER_CONTRACT.md \
+            docs/FLUTTER_API_HANDOFF.md \
+            docs/CUSTOMER_API_V1_ENDPOINT_INVENTORY.md \
+            docs/API_V1_CUSTOMER_REPRODUCIBILITY.md \
+            contracts/customer-api-v1-manifest.json \
+            contracts/customer-api-v1-fixtures.json
+          dart format --output=none --set-exit-if-changed lib test tool/verify_customer_contract.dart | tee pre-main-evidence/format.txt
+          printf 'PASS — formatter changed 0 committed files\n' > pre-main-evidence/format-result.txt
+          flutter analyze | tee pre-main-evidence/analyze.txt
+          grep -F 'No issues found!' pre-main-evidence/analyze.txt
+          printf 'PASS — No issues found\n' > pre-main-evidence/analyze-result.txt
+          flutter test --reporter expanded 2>&1 | tee /tmp/flutter-tests.log
+          grep -F 'checkout submission guard allows only one active placement per checkout' /tmp/flutter-tests.log
+          grep -F 'checkout placement sends the persisted Idempotency-Key unchanged' /tmp/flutter-tests.log
+          grep -F 'Studio quantity update uses the frozen PATCH quantity field' /tmp/flutter-tests.log
+          printf 'PASS — complete Flutter tests, auth/session/refresh, checkout/idempotency, Studio quantity\n' > pre-main-evidence/flutter-tests-result.txt
+          flutter test test/localization_theme_test.dart --reporter expanded >/tmp/localization-theme.log 2>&1
+          printf 'PASS — English/LTR, Arabic/RTL, Light/Dark/System\n' > pre-main-evidence/localization-theme-result.txt
+          dart run tool/verify_customer_contract.dart | tee pre-main-evidence/customer-contract.txt
+          printf 'PASS — frozen Customer API compatibility\n' > pre-main-evidence/customer-contract-result.txt
+      - name: Android debug build
+        working-directory: mobile/customer_app
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter build apk --debug >/tmp/android-build.log 2>&1
+          apk=build/app/outputs/flutter-apk/app-debug.apk
+          test -s "$apk"
+          sha256sum "$apk" > pre-main-evidence/android-build-sha256.txt
+          printf 'PASS — Android debug APK\n' > pre-main-evidence/android-build-result.txt
+      - name: Upload Flutter evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pre-main-flutter-evidence
+          path: mobile/customer_app/pre-main-evidence
+          if-no-files-found: error
+          retention-days: 30
+
+  flutter-ios:
+    name: Flutter real unsigned iphoneos evidence
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Verify exact source and base locks
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${{ github.event.pull_request.head.sha || github.sha }}"
+          test "$(git rev-parse HEAD)" = "$expected"
+          test "$(git rev-parse origin/feature/web-productization)" = "$FINAL_PRE_MAIN_BASE_SHA"
+          test "$(git rev-parse origin/main)" = "$HISTORICAL_MAIN_SHA"
+          git merge-base --is-ancestor "$ACCEPTED_FLUTTER_SHA" HEAD
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: "3.47.0"
+          channel: stable
+          cache: true
+      - name: Xcode 26.3 and locked iOS host
+        working-directory: mobile/customer_app
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p pre-main-ios-evidence
+          sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
+          xcodebuild -version | tee pre-main-ios-evidence/xcode-version.txt
+          flutter create --empty --no-pub --platforms=ios --org com.fabinzi --project-name fabinzi_customer_app .
+          git checkout HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
+          flutter pub get --enforce-lockfile
+          git checkout HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
+          git diff --exit-code HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
+          flutter build ios --debug --no-codesign --config-only
+          git checkout HEAD -- pubspec.yaml pubspec.lock analysis_options.yaml
+          cd ios
+          pod install
+      - name: Build genuine unsigned iphoneos device application
+        working-directory: mobile/customer_app
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          rm -rf build/ios-unsigned
+          xcrun xcodebuild \
+            -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Debug \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/ios-unsigned \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            DEVELOPMENT_TEAM='' \
+            PROVISIONING_PROFILE_SPECIFIER='' \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            build >/tmp/ios-build.log 2>&1
+          app=build/ios-unsigned/Build/Products/Debug-iphoneos/Runner.app
+          test -d "$app"
+          test -x "$app/Runner"
+          file "$app/Runner" | tee pre-main-ios-evidence/runner-binary.txt
+          xcrun lipo -info "$app/Runner" | tee pre-main-ios-evidence/runner-architecture.txt
+          if codesign -dv "$app" > pre-main-ios-evidence/codesign-check.txt 2>&1; then
+            echo 'Unexpected code signature on unsigned build.' >&2
+            exit 1
+          fi
+          printf 'PASS — genuine unsigned iphoneos build; generic/platform=iOS; signing disabled\n' > pre-main-ios-evidence/ios-build-result.txt
+      - name: Upload iOS evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pre-main-ios-evidence
+          path: mobile/customer_app/pre-main-ios-evidence
+          if-no-files-found: error
+          retention-days: 30
+
+  final-evidence:
+    name: Final Pre-Main release evidence
+    runs-on: ubuntu-latest
+    needs: [source-backend, flutter-quality, flutter-ios]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: pre-main-source-backend-evidence
+          path: evidence/source
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: pre-main-flutter-evidence
+          path: evidence/flutter
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: pre-main-ios-evidence
+          path: evidence/ios
+      - name: Assemble deterministic non-secret release artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          out=artifacts/final-pre-main-release-gate
+          mkdir -p "$out/source" "$out/flutter" "$out/ios"
+          cp -R evidence/source/. "$out/source/"
+          cp -R evidence/flutter/. "$out/flutter/"
+          cp -R evidence/ios/. "$out/ios/"
+          cp docs/WEB_V1_LIMITATIONS.md "$out/"
+          cp mobile/customer_app/KNOWN_LIMITATIONS.md "$out/FLUTTER_KNOWN_LIMITATIONS.md"
+          cp docs/DEFERRED_LIVE_E2E.md "$out/"
+          printf '%s\n' "$(git rev-parse HEAD)" > "$out/candidate-sha.txt"
+          cat > "$out/integration-record.txt" <<EOF
+          pre_flutter_integration_feature_sha=101b62220222f6372b11dfd5c76bd71aee1ab420
+          accepted_flutter_sha=$ACCEPTED_FLUTTER_SHA
+          integration_method=non-forced fast-forward
+          resulting_feature_sha=$FLUTTER_INTEGRATION_SHA
+          final_pre_main_branch_base_sha=$FINAL_PRE_MAIN_BASE_SHA
+          historical_main_sha=$HISTORICAL_MAIN_SHA
+          EOF
+          python - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+          out = Path('artifacts/final-pre-main-release-gate')
+          flutter = json.loads((out / 'flutter/flutter-version.json').read_text())
+          manifest = {
+              'checkpoint': 'FABINZI — Final Pre-Main Release Gate',
+              'candidate_sha': subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(),
+              'pre_flutter_integration_feature_sha': '101b62220222f6372b11dfd5c76bd71aee1ab420',
+              'accepted_flutter_sha': 'bbe1d36eeb149dd876e685da91823ae09f74fbc4',
+              'flutter_integration_method': 'non-forced fast-forward',
+              'resulting_feature_sha': 'bbe1d36eeb149dd876e685da91823ae09f74fbc4',
+              'final_pre_main_base_sha': 'bbe1d36eeb149dd876e685da91823ae09f74fbc4',
+              'historical_main_sha': '91f358c08d89557893e983f1c0d247fd1b42b15f',
+              'python': '3.12.14',
+              'backend': 'PASS — full suite executed in this workflow',
+              'migrations': 'PASS — deterministic/additive reviewed delta + fresh migrate',
+              'collectstatic': 'PASS',
+              'production_check': 'PASS',
+              'web_v1_release': 'FABINZI WEB v1.0 / 1.0.0',
+              'customer_api_zero_drift': 'PASS',
+              'flutter': flutter['frameworkVersion'],
+              'dart': flutter['dartSdkVersion'],
+              'flutter_framework_revision': flutter.get('frameworkRevision'),
+              'flutter_quality_android': 'PASS',
+              'ios_unsigned_iphoneos': 'PASS',
+              'repository_hygiene': 'PASS',
+              'ci_permission_audit': 'PASS — no write permission/helper found',
+              'secrets_pattern_audit': 'PASS — high-confidence tracked-source scan',
+              'render_source_side_readiness': 'PASS — topology/config present; external configuration still required',
+              'cross_surface_web_api_flutter': 'PASS',
+              'deferred_global_live_e2e': 'UNRESOLVED',
+              'production_deployed_by_checkpoint': False,
+          }
+          (out / 'final-pre-main-manifest.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
+          PY
+          if grep -R -n -E '-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----|\b(sk|rk)_live_[A-Za-z0-9]{16,}\b|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{30,}\b' "$out"; then
+            echo 'Secret material detected in final artifact.' >&2
+            exit 1
+          fi
+      - name: Upload final pre-main release gate artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: final-pre-main-release-gate
+          path: artifacts/final-pre-main-release-gate
+          if-no-files-found: error
+          retention-days: 30
