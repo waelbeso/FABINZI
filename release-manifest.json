@@ -1,0 +1,74 @@
+{
+  "schema": 1,
+  "product": "FABINZI WEB",
+  "version": "1.0.0",
+  "release_label": "FABINZI WEB v1.0",
+  "candidate_identity": {
+    "policy": "git_commit_containing_this_manifest",
+    "embedded_sha": null,
+    "reason": "Embedding the candidate SHA in the commit that defines that SHA is self-referential. The exact candidate is recorded by CI, PR #9 metadata and the final acceptance report."
+  },
+  "integration_base_sha": "802dc0f091287f778d4e623caa375a32c67f97dc",
+  "production_launch_gate": {
+    "accepted_sha": "b05b2b0f3bed174aaf867bff9d10ef0b7cb3fbaa",
+    "ci_number": 342,
+    "run_id": 33281214335,
+    "tests_passed": 241,
+    "tests_failed": 0,
+    "warnings": 1,
+    "artifact_id": 9723100271,
+    "artifact_digest": "sha256:87c3ba0244639d086a4d729f55828ff31d3550c35d34072338b0847e0c33ee42",
+    "manual_screenshot_review": "12/12 PASS"
+  },
+  "runtime": {
+    "python": "3.12.14",
+    "requirements_envelope": "requirements.txt",
+    "exact_constraints": "constraints-release.txt",
+    "web": "Django/Gunicorn",
+    "database": "PostgreSQL",
+    "async": "Redis-compatible transport + Celery worker/Beat",
+    "static": "WhiteNoise collected static files"
+  },
+  "architecture_locks": {
+    "commerce": "Cart -> Checkout -> one Parent CustomerPurchase; each CartItem -> one CustomerOrder -> one OrderItem -> one ProductionJob -> one FulfillmentRecord",
+    "manufacturer": "RFQ -> Manufacturing Quote -> Selection -> ProductionJob -> QC -> Packing -> Ready to Ship -> canonical FulfillmentRecord -> Shipment/Tracking",
+    "manufacturer_role": "production partner, not catalog seller"
+  },
+  "local_migrations": [
+    "apps/accounts/migrations/0001_initial.py",
+    "apps/accounts/migrations/0002_alter_user_is_active.py",
+    "apps/artwork/migrations/0001_initial.py",
+    "apps/audit/migrations/0001_initial.py",
+    "apps/checkout/migrations/0001_initial.py",
+    "apps/checkout/migrations/0002_commerce_parent_cart.py",
+    "apps/design/migrations/0001_initial.py",
+    "apps/finance/migrations/0001_initial.py",
+    "apps/integrations/migrations/0001_initial.py",
+    "apps/integrations/migrations/0002_seed_providers.py",
+    "apps/manufacturer_marketplace/migrations/0001_initial.py",
+    "apps/media/migrations/0001_initial.py",
+    "apps/media/migrations/0002_rename_media_asset_index.py",
+    "apps/notifications/migrations/0001_initial.py",
+    "apps/notifications/migrations/0002_preferences_and_delivery.py",
+    "apps/operations/migrations/0001_initial.py",
+    "apps/organizations/migrations/0001_initial.py",
+    "apps/organizations/migrations/0002_align_index_names.py",
+    "apps/platform_ops/migrations/0001_initial.py",
+    "apps/storefront/migrations/0001_initial.py",
+    "apps/storefront/migrations/0002_visual_studio_elements.py"
+  ],
+  "static_asset_policy": "No accepted static source asset may change during this release-preparation branch without invalidating the candidate and rerunning full CI.",
+  "known_limitations_document": "docs/WEB_V1_LIMITATIONS.md",
+  "route_inventory": "docs/WEB_V1_ROUTE_INVENTORY.md",
+  "capability_inventory": "docs/WEB_V1_CAPABILITY_INVENTORY.md",
+  "migration_baseline": "docs/WEB_V1_MIGRATION_BASELINE.md",
+  "configuration_contract": "docs/WEB_V1_CONFIGURATION_CONTRACT.md",
+  "deployment_rollback": "docs/WEB_V1_DEPLOYMENT_ROLLBACK.md",
+  "build_reproducibility": "docs/WEB_V1_BUILD_REPRODUCIBILITY.md",
+  "api_v1_preliminary_inventory": "docs/WEB_V1_API_V1_INVENTORY.md",
+  "deferred_live_e2e": {
+    "document": "docs/DEFERRED_LIVE_E2E.md",
+    "status": "UNRESOLVED",
+    "planned_return": "after Flutter"
+  }
+}
