@@ -1,12 +1,15 @@
 class AppConfig {
-  AppConfig({String? serverBaseUrl})
+  AppConfig({String? serverBaseUrl, String? stripePublishableKey})
       : serverBaseUrl = serverBaseUrl ??
             const String.fromEnvironment(
               'FABINZI_API_BASE_URL',
               defaultValue: 'http://localhost:8000',
-            );
+            ),
+        stripePublishableKey = stripePublishableKey ??
+            const String.fromEnvironment('FABINZI_STRIPE_PUBLISHABLE_KEY');
 
   final String serverBaseUrl;
+  final String stripePublishableKey;
 
   Uri get serverBaseUri {
     final value = serverBaseUrl.endsWith('/') ? serverBaseUrl : '$serverBaseUrl/';
