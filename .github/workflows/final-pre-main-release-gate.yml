@@ -179,6 +179,9 @@ jobs:
           out=artifacts/pre-main-source
           pytest -q 2>&1 | tee /tmp/backend-tests.log
           tail -n 12 /tmp/backend-tests.log > "$out/backend-tests-result.txt"
+          pytest -q tests/test_web_v1_release_contract.py 2>&1 | tee "$out/web-v1-contract-result.txt"
+          pytest -q tests/test_customer_api_v1_*.py 2>&1 | tee "$out/customer-api-v1-contract-result.txt"
+          printf 'SOURCE-SIDE ONLY — no new live browser/device screenshot review is claimed by this gate.\n' > "$out/visual-evidence-scope.txt"
           python - <<'PY'
           import json
           from pathlib import Path
@@ -418,10 +421,12 @@ jobs:
             'resulting_feature_sha':'bbe1d36eeb149dd876e685da91823ae09f74fbc4',
             'historical_main_sha':'91f358c08d89557893e983f1c0d247fd1b42b15f',
             'python':'3.12.14','backend':'PASS','migrations':'PASS','production_check':'PASS',
-            'web_release':'FABINZI WEB v1.0 / 1.0.0','customer_api_zero_drift':'PASS',
+            'web_release':'FABINZI WEB v1.0 / 1.0.0','web_v1_contract':'PASS',
+            'customer_api_v1_contract':'PASS','customer_api_zero_drift':'PASS',
             'flutter':f['frameworkVersion'],'dart':f['dartSdkVersion'],'flutter_revision':f.get('frameworkRevision'),
             'flutter_quality_android':'PASS','ios_unsigned_iphoneos':'PASS','repository_hygiene':'PASS',
             'ci_permission_audit':'PASS','secrets_pattern_audit':'PASS','cross_surface':'PASS',
+            'visual_evidence_scope':'SOURCE-SIDE ONLY — no new live browser/device screenshot review claimed',
             'render_source_side_readiness':'PASS — external production configuration still required',
             'deferred_global_live_e2e':'UNRESOLVED','production_deployed_by_checkpoint':False,
           }
