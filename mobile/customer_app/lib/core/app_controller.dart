@@ -14,14 +14,19 @@ class AppController extends ChangeNotifier {
     PlacementKeyStore? placementKeys,
     CustomerApiClient? api,
   })  : config = config ?? AppConfig(),
-        tokens = tokens ?? SecureTokenStore(),
+        tokens = tokens ?? SessionAwareTokenStore(SecureTokenStore()),
         preferences = preferences ?? AppPreferences(),
         placementKeys = placementKeys ?? PreferencesPlacementKeyStore() {
-    this.api = api ?? CustomerApiClient(
-      config: this.config,
-      tokens: this.tokens,
-      language: () => locale.languageCode,
-    );
+    this.api = api ?? CustomerApiClient(config: this.config, tokens: this.tokens, language: () => locale.languageCode);
+    final sessionAware = this.tokens;
+    if (sessionAware is SessionAwareTokenStore) {
+      sessionAware.onCleared = () {
+        if (profile != null) {
+          profile = null;
+          notifyListeners();
+        }
+      };
+    }
   }
 
   final AppConfig config;
@@ -64,11 +69,7 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> retryInitialize() async {
-    initializationError = null;
-    initialized = false;
-    await initialize();
-  }
+  Future<void> retryInitialize() async { initializationError = null; initialized = false; await initialize(); }
 
   Future<void> login(String username, String password) async {
     profile = await api.login(username, password);
@@ -77,19 +78,11 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> logout() async {
-    try {
-      await api.logout();
-    } finally {
-      profile = null;
-      notifyListeners();
-    }
+    try { await api.logout(); }
+    finally { profile = null; notifyListeners(); }
   }
 
-  Future<void> expireSession() async {
-    await tokens.clear();
-    profile = null;
-    notifyListeners();
-  }
+  Future<void> expireSession() async { await tokens.clear(); profile = null; notifyListeners(); }
 
   Future<void> setLocale(String code) async {
     final clean = code == 'ar' ? 'ar' : 'en';
@@ -97,54 +90,32 @@ class AppController extends ChangeNotifier {
     await preferences.writeLocale(clean);
     notifyListeners();
     if (profile != null) {
-      try {
-        profile = await api.updateMe(language: clean);
-      } on ApiProblem catch (problem) {
-        await handleApiProblem(problem);
-        rethrow;
-      }
+      try { profile = await api.updateMe(language: clean); }
+      on ApiProblem catch (problem) { await handleApiProblem(problem); rethrow; }
       notifyListeners();
     }
   }
 
   Future<void> setThemeMode(ThemeMode mode) async {
     themeMode = mode;
-    final value = switch (mode) {
-      ThemeMode.light => 'light',
-      ThemeMode.dark => 'dark',
-      ThemeMode.system => 'system',
-    };
+    final value = switch (mode) { ThemeMode.light => 'light', ThemeMode.dark => 'dark', ThemeMode.system => 'system' };
     await preferences.writeTheme(value);
     notifyListeners();
     if (profile != null) {
-      try {
-        profile = await api.updateMe(theme: value);
-      } on ApiProblem catch (problem) {
-        await handleApiProblem(problem);
-        rethrow;
-      }
+      try { profile = await api.updateMe(theme: value); }
+      on ApiProblem catch (problem) { await handleApiProblem(problem); rethrow; }
       notifyListeners();
     }
   }
 
   Future<void> refreshProfile() async {
     if (!isAuthenticated) return;
-    try {
-      profile = await api.me();
-      await _adoptServerPreferences(profile!);
-      notifyListeners();
-    } on ApiProblem catch (problem) {
-      await handleApiProblem(problem);
-      rethrow;
-    }
+    try { profile = await api.me(); await _adoptServerPreferences(profile!); notifyListeners(); }
+    on ApiProblem catch (problem) { await handleApiProblem(problem); rethrow; }
   }
 
   Future<void> handleApiProblem(ApiProblem problem) async {
-    if (problem.code == 'invalid_refresh_token' ||
-        problem.code == 'authentication_required' ||
-        problem.code == 'invalid_token') {
-      await expireSession();
-    }
+    if (problem.code == 'invalid_refresh_token' || problem.code == 'authentication_required' || problem.code == 'invalid_token') await expireSession();
   }
 
   Future<void> _adoptServerPreferences(UserProfile value) async {
@@ -154,15 +125,8 @@ class AppController extends ChangeNotifier {
     await preferences.writeTheme(value.theme);
   }
 
-  ThemeMode _themeFromValue(String value) => switch (value) {
-        'light' => ThemeMode.light,
-        'dark' => ThemeMode.dark,
-        _ => ThemeMode.system,
-      };
+  ThemeMode _themeFromValue(String value) => switch (value) { 'light' => ThemeMode.light, 'dark' => ThemeMode.dark, _ => ThemeMode.system };
 
   @override
-  void dispose() {
-    api.close();
-    super.dispose();
-  }
+  void dispose() { api.close(); super.dispose(); }
 }
