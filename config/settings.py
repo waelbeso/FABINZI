@@ -89,6 +89,7 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES":["rest_framework.authentication.SessionAuthentication"],
     "DEFAULT_PERMISSION_CLASSES":["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_VERSIONING_CLASS":"rest_framework.versioning.NamespaceVersioning",
+    "EXCEPTION_HANDLER":"api.exceptions.customer_aware_exception_handler",
     "DEFAULT_THROTTLE_CLASSES":["rest_framework.throttling.AnonRateThrottle","rest_framework.throttling.UserRateThrottle"],
     "DEFAULT_THROTTLE_RATES":{
         "anon":env("API_ANON_RATE",default="120/hour"),
