@@ -1,5 +1,8 @@
-# FABINZI WEB v1.0 exact dependency resolution.
-# Derived from the fully-green Production Launch Gate CI #342 / Run 33281214335.
+# FABINZI WEB v1.0 exact dependency resolution, extended intentionally for
+# FABINZI Customer API v1 contract freeze.
+# Base resolution: fully-green Production Launch Gate CI #342 / Run 33281214335.
+# Customer API addition: djangorestframework-simplejwt 5.5.1; its PyJWT runtime
+# dependency was already present in the proven WEB v1.0 resolution.
 # Install with: python -m pip install -r requirements.txt -c constraints-release.txt
 amqp==5.3.1
 asgiref==3.12.1
@@ -23,6 +26,7 @@ django-otp==1.7.0
 django-phonenumber-field==8.5.0
 django-two-factor-auth==1.18.1
 djangorestframework==3.18.0
+djangorestframework-simplejwt==5.5.1
 gunicorn==23.0.0
 h11==0.16.0
 idna==3.19
