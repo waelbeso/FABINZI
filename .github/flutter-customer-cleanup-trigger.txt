@@ -1,1 +1,1 @@
-Temporary pre-candidate trigger for analyzer cleanup; remove before candidate designation.
+Temporary pre-candidate trigger for Continuation #2 preview; remove before candidate designation.
