@@ -1,12 +1,16 @@
 from pathlib import Path
 
 import pytest
+from dateutil.relativedelta import relativedelta
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.urls import resolve
 
 from apps.artwork.models import Artwork, ArtworkVersion
 from apps.design.models import GarmentDesign, GarmentDesignVersion
 from apps.organizations.models import Membership, OnboardingApplication, Organization
+from apps.subscriptions.models import MembershipPlanSuspension, OrganizationSubscription
+from .v2_3_support import v2_3_reference_rows
 
 User = get_user_model()
 
@@ -37,71 +41,168 @@ def _org(owner, *, kind=Organization.Kind.DESIGNER, status=Organization.Verifica
     return org
 
 
-@pytest.mark.django_db
-def test_application_approval_is_explicit_subscription_provisioning_boundary(monkeypatch):
-    from apps.organizations.services import review_application
-    from apps.subscriptions import services as subscription_services
-
-    owner = _user("v23-approval-owner")
-    reviewer = _user("v23-approval-reviewer", staff=True)
-    org = _org(owner, status=Organization.VerificationStatus.PENDING)
+def _submitted_application(owner, *, kind=Organization.Kind.DESIGNER):
+    org = _org(owner, kind=kind, status=Organization.VerificationStatus.PENDING)
     application = OnboardingApplication.objects.create(
         organization=org,
         status=OnboardingApplication.Status.SUBMITTED,
-        submitted_at=reviewer.date_joined,
     )
-    calls = []
+    return org, application
 
-    class SubscriptionEvidence:
-        pk = 731
 
-    def fake_ensure(organization, **kwargs):
-        calls.append((organization.pk, organization.verification_status, kwargs))
-        return SubscriptionEvidence()
+@pytest.mark.django_db
+def test_application_approval_sets_active_and_creates_exactly_one_subscription(v2_3_reference_rows):
+    from apps.organizations.services import review_application
 
-    monkeypatch.setattr(subscription_services, "ensure_subscription_for_organization", fake_ensure)
+    owner = _user("v23-approval-owner")
+    reviewer = _user("v23-approval-reviewer", staff=True)
+    org, application = _submitted_application(owner)
+
     review_application(
         application=application,
         reviewer=reviewer,
         decision=OnboardingApplication.Status.APPROVED,
     )
     org.refresh_from_db()
+    application.refresh_from_db()
+    assert application.status == OnboardingApplication.Status.APPROVED
     assert org.verification_status == Organization.VerificationStatus.ACTIVE
-    assert calls and calls[0][0] == org.pk
-    assert calls[0][1] == Organization.VerificationStatus.ACTIVE
+    assert OrganizationSubscription.objects.filter(organization=org).count() == 1
+    assert org.professional_subscription.current_plan.code == "designer_starter"
 
 
 @pytest.mark.django_db
-def test_maneg_reactivation_uses_same_idempotent_subscription_boundary(monkeypatch):
-    from apps.platform_ops.maneg_services import reactivate_organization
-    from apps.subscriptions import services as subscription_services
+def test_manufacturer_approval_creates_one_six_month_trial(v2_3_reference_rows):
+    from apps.organizations.services import review_application
+
+    owner = _user("v23-manufacturer-approval-owner")
+    reviewer = _user("v23-manufacturer-approval-reviewer", staff=True)
+    org, application = _submitted_application(owner, kind=Organization.Kind.MANUFACTURER)
+
+    review_application(
+        application=application,
+        reviewer=reviewer,
+        decision=OnboardingApplication.Status.APPROVED,
+    )
+    sub = OrganizationSubscription.objects.get(organization=org)
+    assert sub.status == OrganizationSubscription.Status.TRIALING
+    assert sub.current_plan.code == "manufacturer_pro"
+    assert sub.trial_consumed is True
+    assert sub.trial_ends_at == sub.trial_started_at + relativedelta(months=6)
+    assert OrganizationSubscription.objects.filter(organization=org).count() == 1
+
+
+@pytest.mark.django_db
+def test_maneg_reactivation_reuses_existing_subscription_and_trial(v2_3_reference_rows):
+    from apps.platform_ops.maneg_services import reactivate_organization, suspend_organization
+    from apps.subscriptions.services import ensure_subscription_for_organization
 
     owner = _user("v23-reactivation-owner")
     staff = _user("v23-reactivation-staff", staff=True)
-    org = _org(
-        owner,
-        kind=Organization.Kind.MANUFACTURER,
-        status=Organization.VerificationStatus.SUSPENDED,
-    )
-    OnboardingApplication.objects.create(
+    org = _org(owner, kind=Organization.Kind.MANUFACTURER)
+    application = OnboardingApplication.objects.create(
         organization=org,
         status=OnboardingApplication.Status.APPROVED,
         reviewed_at=staff.date_joined,
     )
-    called = []
+    sub = ensure_subscription_for_organization(org, activation_at=application.reviewed_at)
+    original = (sub.pk, sub.trial_started_at, sub.trial_ends_at)
 
-    class SubscriptionEvidence:
-        pk = 732
-
-    def fake_ensure(organization, **kwargs):
-        called.append((organization.pk, organization.verification_status))
-        return SubscriptionEvidence()
-
-    monkeypatch.setattr(subscription_services, "ensure_subscription_for_organization", fake_ensure)
+    suspend_organization(organization=org, actor=staff)
     reactivate_organization(organization=org, actor=staff)
-    org.refresh_from_db()
+    reused = OrganizationSubscription.objects.get(organization=org)
+    assert (reused.pk, reused.trial_started_at, reused.trial_ends_at) == original
+    assert OrganizationSubscription.objects.filter(organization=org).count() == 1
+
+
+@pytest.mark.django_db
+def test_pre_approval_team_member_creation_remains_allowed_without_subscription():
+    from apps.organizations.services import add_or_update_member
+
+    owner = _user("v23-preactive-owner")
+    member = _user("v23-preactive-member")
+    org = _org(owner, status=Organization.VerificationStatus.DRAFT)
+
+    created = add_or_update_member(
+        organization=org,
+        actor=owner,
+        user=member,
+        role=Membership.Role.DESIGNER,
+    )
+    assert created.is_active is True
+    assert not OrganizationSubscription.objects.filter(organization=org).exists()
+
+
+@pytest.mark.django_db
+def test_activation_plan_suspends_excess_preapproval_team_without_deleting(v2_3_reference_rows):
+    from apps.organizations.services import add_or_update_member, review_application
+
+    owner = _user("v23-reconcile-owner")
+    reviewer = _user("v23-reconcile-reviewer", staff=True)
+    org, application = _submitted_application(owner)
+    members = []
+    for index in range(3):
+        user = _user(f"v23-reconcile-member-{index}")
+        members.append(
+            add_or_update_member(
+                organization=org,
+                actor=owner,
+                user=user,
+                role=Membership.Role.DESIGNER,
+            )
+        )
+    assert Membership.objects.filter(organization=org).count() == 4
+
+    review_application(
+        application=application,
+        reviewer=reviewer,
+        decision=OnboardingApplication.Status.APPROVED,
+    )
+    active_non_owners = list(
+        Membership.objects.filter(organization=org, is_active=True)
+        .exclude(role=Membership.Role.OWNER)
+        .order_by("joined_at", "id")
+    )
+    assert [row.pk for row in active_non_owners] == [members[0].pk]
+    assert Membership.objects.filter(organization=org).count() == 4
+    assert MembershipPlanSuspension.objects.filter(
+        membership__organization=org,
+        suspended_by_plan=True,
+        restored_at__isnull=True,
+    ).count() == 2
+
+
+@pytest.mark.django_db
+def test_active_organization_team_seat_limit_remains_enforced(v2_3_reference_rows):
+    from apps.organizations.services import add_or_update_member
+    from apps.subscriptions.services import ensure_subscription_for_organization
+
+    owner = _user("v23-active-team-owner")
+    org = _org(owner)
+    ensure_subscription_for_organization(org)
+    first = _user("v23-active-team-first")
+    second = _user("v23-active-team-second")
+    add_or_update_member(
+        organization=org,
+        actor=owner,
+        user=first,
+        role=Membership.Role.DESIGNER,
+    )
+    with pytest.raises(ValidationError):
+        add_or_update_member(
+            organization=org,
+            actor=owner,
+            user=second,
+            role=Membership.Role.DESIGNER,
+        )
+
+
+@pytest.mark.django_db
+def test_organization_save_does_not_auto_provision_subscription():
+    owner = _user("v23-no-signal-owner")
+    org = _org(owner)
     assert org.verification_status == Organization.VerificationStatus.ACTIVE
-    assert called == [(org.pk, Organization.VerificationStatus.ACTIVE)]
+    assert not OrganizationSubscription.objects.filter(organization=org).exists()
 
 
 @pytest.mark.django_db
