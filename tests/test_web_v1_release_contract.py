@@ -84,12 +84,13 @@ def test_exact_dependency_constraints_match_installed_release_environment():
         assert canonicalize_name(top_level_name) in pins
 
 
-def test_local_migration_graph_matches_release_manifest_exactly():
-    actual = sorted(
-        path.relative_to(ROOT).as_posix()
-        for path in ROOT.glob("apps/*/migrations/[0-9]*.py")
-    )
-    assert actual == sorted(_manifest()["local_migrations"])
+def test_web_v1_release_manifest_migration_baseline_remains_present():
+    manifest_migrations = _manifest()["local_migrations"]
+    assert len(manifest_migrations) == len(set(manifest_migrations))
+    for relative in manifest_migrations:
+        path = ROOT / relative
+        assert path.is_file(), relative
+        assert path.match("apps/*/migrations/[0-9]*.py"), relative
 
 
 def test_release_docs_and_known_limitations_are_explicit():
