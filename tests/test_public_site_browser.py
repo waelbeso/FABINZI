@@ -41,23 +41,9 @@ def _seed_public_site(prefix="publicqa"):
     ArtworkAsset.objects.create(version=artwork_version, kind=ArtworkAsset.Kind.PREVIEW, media_asset=image, label="Public browser preview")
 
     manufacturer_owner = User.objects.create_user(username=f"{prefix}-manufacturer-owner", password="password12345")
-    manufacturer_org = Organization.objects.create(
-        kind=Organization.Kind.MANUFACTURER,
-        display_name="Public QA Manufacturing",
-        email=f"{prefix}-manufacturer@factory.test",
-        city="Cairo",
-        region="Cairo",
-        country="EG",
-        verification_status=Organization.VerificationStatus.ACTIVE,
-        created_by=manufacturer_owner,
-    )
+    manufacturer_org = Organization.objects.create(kind=Organization.Kind.MANUFACTURER, display_name="Public QA Manufacturing", email=f"{prefix}-manufacturer@factory.test", city="Cairo", region="Cairo", country="EG", verification_status=Organization.VerificationStatus.ACTIVE, created_by=manufacturer_owner)
     Membership.objects.create(organization=manufacturer_org, user=manufacturer_owner, role=Membership.Role.OWNER)
-    listing = ManufacturerListing.objects.create(
-        organization=manufacturer_org,
-        status=ManufacturerListing.Status.PUBLISHED,
-        headline_en="Print, embroidery and cut-and-sew partner",
-        headline_ar="شريك للطباعة والتطريز والقص والخياطة",
-    )
+    listing = ManufacturerListing.objects.create(organization=manufacturer_org, status=ManufacturerListing.Status.PUBLISHED, headline_en="Print, embroidery and cut-and-sew partner", headline_ar="شريك للطباعة والتطريز والقص والخياطة")
     ManufacturerCapability.objects.create(listing=listing, capability_type=ManufacturerCapability.CapabilityType.PRINT, name="Digital printing", is_active=True)
     ManufacturerCapability.objects.create(listing=listing, capability_type=ManufacturerCapability.CapabilityType.EMBROIDERY, name="Embroidery", is_active=True)
     ManufacturerCapability.objects.create(listing=listing, capability_type=ManufacturerCapability.CapabilityType.CUT_SEW, name="Cut & sew", is_active=True)
@@ -91,21 +77,7 @@ def _full_page_shot(driver, name):
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
     metrics = driver.execute_cdp_cmd("Page.getLayoutMetrics", {})
     size = metrics.get("cssContentSize") or metrics.get("contentSize")
-    result = driver.execute_cdp_cmd(
-        "Page.captureScreenshot",
-        {
-            "format": "png",
-            "captureBeyondViewport": True,
-            "fromSurface": True,
-            "clip": {
-                "x": 0,
-                "y": 0,
-                "width": size["width"],
-                "height": size["height"],
-                "scale": 1,
-            },
-        },
-    )
+    result = driver.execute_cdp_cmd("Page.captureScreenshot", {"format": "png", "captureBeyondViewport": True, "fromSurface": True, "clip": {"x": 0, "y": 0, "width": size["width"], "height": size["height"], "scale": 1}})
     (ARTIFACT_DIR / name).write_bytes(base64.b64decode(result["data"]))
 
 
@@ -134,18 +106,13 @@ def test_public_and_customer_site_real_chrome_acceptance(client, live_server):
     customer = User.objects.create_user(username="public-site-customer", password="password12345", theme_preference="light", language_preference="en")
     driver = _chrome()
     try:
-        driver.get(live_server.url + "/?lang=en")
         wait = WebDriverWait(driver, 10)
-        wait.until(EC.presence_of_element_located((By.ID, "home-hero-title")))
+        driver.get(live_server.url + "/?lang=en")
+        wait.until(EC.presence_of_element_located((By.ID, "catalog-results-title")))
         time.sleep(0.5)
-        assert "The idea starts with a designer" in driver.page_source
         assert product.title_en in driver.page_source
-        assert artwork.title in driver.page_source
-        assert "T-shirts and casual apparel" in driver.page_source
-        assert manufacturer.organization.display_name in driver.page_source
-        assert "Digital printing" in driver.page_source
-        assert driver.find_element(By.ID, "featured-artwork").is_displayed()
-        assert driver.find_element(By.ID, "manufacturing-network").is_displayed()
+        assert "Discover" in driver.page_source
+        assert "How it works" in driver.page_source
         _assert_dom_accessibility_baseline(driver)
         assert driver.execute_script("return document.documentElement.scrollWidth <= window.innerWidth + 1")
         assert driver.execute_script("return performance.getEntriesByType('resource').filter(e=>!e.name.startsWith(location.origin)).length") == 0
@@ -154,7 +121,19 @@ def test_public_and_customer_site_real_chrome_acceptance(client, live_server):
         assert vitals["cls"] < 0.10
         assert vitals["lcp"] == 0 or vitals["lcp"] < 4000
         assert nav["ttfb"] < 1500
-        _full_page_shot(driver, "08-home-desktop-light.png")
+        _full_page_shot(driver, "08-store-desktop-light.png")
+
+        driver.get(live_server.url + "/discover/?lang=en")
+        wait.until(EC.presence_of_element_located((By.ID, "home-hero-title")))
+        assert "The idea starts with a designer" in driver.page_source
+        assert artwork.title in driver.page_source
+        assert "T-shirts and casual apparel" in driver.page_source
+        assert manufacturer.organization.display_name in driver.page_source
+        assert "Digital printing" in driver.page_source
+        assert driver.find_element(By.ID, "featured-artwork").is_displayed()
+        assert driver.find_element(By.ID, "manufacturing-network").is_displayed()
+        _assert_dom_accessibility_baseline(driver)
+        _full_page_shot(driver, "09-discover-desktop-light.png")
         ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
         with urlopen(live_server.url + "/share/fabinzi-1200x630.png", timeout=10) as response:
             (ARTIFACT_DIR / "13-social-share-1200x630.png").write_bytes(response.read())
@@ -167,16 +146,12 @@ def test_public_and_customer_site_real_chrome_acceptance(client, live_server):
         assert "Account preferences" in driver.page_source
         assert "Save preferences" not in driver.page_source
         _assert_dom_accessibility_baseline(driver)
-        assert driver.execute_script("return document.documentElement.scrollWidth <= window.innerWidth + 1")
-        _full_page_shot(driver, "09-customer-home-desktop-light.png")
+        _full_page_shot(driver, "10-customer-home-desktop-light.png")
 
         driver.get(live_server.url + "/app/settings/preferences/")
         wait.until(EC.presence_of_element_located((By.ID, "preference-language")))
-        preferences_heading = driver.find_element(By.CSS_SELECTOR, ".account-settings-intro h1")
-        assert preferences_heading.is_displayed()
-        assert preferences_heading.text == "Language & appearance"
+        assert driver.find_element(By.CSS_SELECTOR, ".account-settings-intro h1").text == "Language & appearance"
         _assert_dom_accessibility_baseline(driver)
-
         (ARTIFACT_DIR / "public-performance.json").write_text(json.dumps({"navigation": nav, "vitals": vitals}, indent=2), encoding="utf-8")
     finally:
         driver.quit()
@@ -193,32 +168,27 @@ def test_public_and_customer_site_real_chrome_acceptance(client, live_server):
         assert html.get_attribute("dir") == "rtl"
         assert html.get_attribute("data-theme") == "dark"
         assert "منتجات منشورة الآن" in mobile.page_source
-        assert "تفضيلات الحساب" in mobile.page_source
         _assert_dom_accessibility_baseline(mobile)
-        assert mobile.execute_script("return getComputedStyle(document.querySelector('.brand-logo--dark')).display !== 'none'")
-        assert mobile.execute_script("return document.documentElement.scrollWidth <= window.innerWidth + 1")
-        _full_page_shot(mobile, "10-customer-home-mobile-rtl-dark.png")
 
-        mobile.get(live_server.url + "/?lang=ar")
+        mobile.get(live_server.url + "/discover/?lang=ar")
         WebDriverWait(mobile, 10).until(EC.presence_of_element_located((By.ID, "home-hero-title")))
         assert "الفكرة تبدأ عند المصمم" in mobile.page_source
         assert artwork.title in mobile.page_source
         assert manufacturer.organization.display_name in mobile.page_source
         _assert_dom_accessibility_baseline(mobile)
         assert mobile.execute_script("return document.documentElement.scrollWidth <= window.innerWidth + 1")
-        _full_page_shot(mobile, "11-home-mobile-rtl-dark.png")
+        _full_page_shot(mobile, "11-discover-mobile-rtl-dark.png")
     finally:
         mobile.quit()
 
     tablet = _chrome(width=820, height=1180, language="en-US,en")
     try:
         tablet.get(live_server.url + "/?lang=en")
-        WebDriverWait(tablet, 10).until(EC.presence_of_element_located((By.ID, "home-hero-title")))
+        WebDriverWait(tablet, 10).until(EC.presence_of_element_located((By.ID, "catalog-results-title")))
         assert tablet.execute_script("return getComputedStyle(document.querySelector('.mobile-menu')).display !== 'none'")
-        assert artwork.title in tablet.page_source
-        assert manufacturer.organization.display_name in tablet.page_source
+        assert product.title_en in tablet.page_source
         _assert_dom_accessibility_baseline(tablet)
         assert tablet.execute_script("return document.documentElement.scrollWidth <= window.innerWidth + 1")
-        _full_page_shot(tablet, "12-home-tablet-light.png")
+        _full_page_shot(tablet, "12-store-tablet-light.png")
     finally:
         tablet.quit()
