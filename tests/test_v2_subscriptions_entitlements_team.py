@@ -34,13 +34,16 @@ from apps.subscriptions.services import (
     confirm_subscription_billing,
     create_team_invitation,
     downgrade_to_starter,
+    ensure_subscription_for_organization,
     entitlement_summary,
     generate_due_reminders,
     renew_paid_subscription,
     suspend_team_member,
 )
+from .v2_3_support import v2_3_reference_rows
 
 User = get_user_model()
+pytestmark = pytest.mark.usefixtures("v2_3_reference_rows")
 
 
 def make_user(name, *, staff=False, superuser=False):
@@ -66,6 +69,7 @@ def active_org(owner, kind, name):
         user=owner,
         role=Membership.Role.OWNER,
     )
+    ensure_subscription_for_organization(org)
     return org
 
 
