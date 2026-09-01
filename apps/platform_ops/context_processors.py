@@ -47,9 +47,10 @@ def _shell_identity(request):
 
     try:
         kinds = set(
-            user.business_memberships.filter(is_active=True).values_list(
-                "organization__kind", flat=True
-            )
+            user.business_memberships.filter(
+                is_active=True,
+                organization__verification_status=Organization.VerificationStatus.ACTIVE,
+            ).values_list("organization__kind", flat=True)
         )
         identity["designer"] = Organization.Kind.DESIGNER in kinds
         identity["manufacturer"] = Organization.Kind.MANUFACTURER in kinds
