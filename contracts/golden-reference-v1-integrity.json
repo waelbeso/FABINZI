@@ -1,0 +1,40 @@
+{
+  "contract": "FABINZI_GOLDEN_REFERENCE_INTEGRITY_V1",
+  "version": "1.0",
+  "products": [
+    {
+      "product_ref": "GP001",
+      "filename": "FABINZI_GP001_Golden_Reference_v1.0.zip",
+      "sha256": "acece3e05f13143624e805d1e9ea57b494e0e1d58120d833144565c47e2f9edf"
+    },
+    {
+      "product_ref": "GP002",
+      "filename": "FABINZI_GP002_Golden_Reference_v1.0.zip",
+      "sha256": "a8f44ab55eda7bab03b0dd5a92a71dd62b794d81f2e89ae7c37633062a24123e"
+    },
+    {
+      "product_ref": "GP003",
+      "filename": "FABINZI_GP003_Golden_Reference_v1.0.zip",
+      "sha256": "7fee3a6362bdaa0fbd0c03f2c2a42234d960228405dd4946e40fc20d8ff6a463"
+    },
+    {
+      "product_ref": "GP004",
+      "filename": "FABINZI_GP004_Golden_Reference_v1.0.zip",
+      "sha256": "b05405620189e7c9f8d564db3650a683880a9ca1670124fc7266713ead1ed75f"
+    },
+    {
+      "product_ref": "GP005",
+      "filename": "FABINZI_GP005_Golden_Reference_v1.0.zip",
+      "sha256": "39fdc2beb5fa38476f42235c1e11931309f73655c9fa88ee254626518d09c19c"
+    }
+  ],
+  "frozen_contract_sha256": {
+    "golden_product_machine_contract_v1_0": "46235ca6f221575c45645a1388ffa410e331320470508d8cf8374f7c02616a6f",
+    "golden_image_role_qa_contract_v1_0": "74f4fb0a388ace493b06cfb6c68e7c4a8b61d73bce1b82a3c7d44fca9b3b0176"
+  },
+  "policy": {
+    "binary_verification_required_before_import_acceptance": true,
+    "semantic_validation_required_before_v2_4_acceptance": true,
+    "reference_approval_is_not_production_approval": true
+  }
+}
