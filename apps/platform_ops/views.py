@@ -5,6 +5,7 @@ from django.db import connection
 from django.db.models import Prefetch
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
+from django.templatetags.static import static
 from django.urls import reverse
 
 from config.release import APP_VERSION
@@ -197,8 +198,9 @@ def site_manifest(request):
         "background_color": "#f7f7fb",
         "theme_color": "#6d4aff",
         "icons": [
-            {"src": reverse("site-icon-192"), "sizes": "192x192", "type": "image/png"},
-            {"src": reverse("site-icon-512"), "sizes": "512x512", "type": "image/png"},
+            {"src": static("brand/fabinzi-icon.svg"), "sizes": "any", "type": "image/svg+xml"},
+            {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"},
         ],
     }
     response = JsonResponse(manifest, json_dumps_params={"ensure_ascii": False})
@@ -214,6 +216,8 @@ def _brand_binary(payload, content_type, max_age=604800):
     return response
 
 
+# Legacy raster compatibility endpoints only. They are not canonical V2 brand
+# masters and are never used as master-equivalence evidence.
 def favicon(request):
     return _brand_binary(favicon_ico(), "image/x-icon")
 

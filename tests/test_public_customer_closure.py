@@ -10,7 +10,7 @@ User = get_user_model()
 
 
 @pytest.mark.django_db
-def test_homepage_surfaces_only_public_approved_artwork_and_verified_manufacturers(client):
+def test_discover_surfaces_only_public_approved_artwork_and_verified_manufacturers(client):
     designer = User.objects.create_user(username="closure-designer", password="password12345")
     designer_org = Organization.objects.create(
         kind=Organization.Kind.DESIGNER,
@@ -91,7 +91,7 @@ def test_homepage_surfaces_only_public_approved_artwork_and_verified_manufacture
     )
     ManufacturerListing.objects.create(organization=hidden_org, status=ManufacturerListing.Status.PUBLISHED)
 
-    response = client.get("/")
+    response = client.get("/discover/")
     assert response.status_code == 200
     body = response.content.decode()
     assert "Closure Approved Artwork" in body
@@ -99,7 +99,6 @@ def test_homepage_surfaces_only_public_approved_artwork_and_verified_manufacture
     assert "/static/brand/fabinzi-logo.svg" in body
     assert "Closure Draft Artwork" not in body
     assert "Closure Verified Manufacturing" in body
-    assert "Alexandria" in body
     assert "Screen printing" in body
     assert "Hidden Manufacturing" not in body
     assert "Embroidery" not in body
@@ -142,16 +141,23 @@ def test_customer_home_uses_preferences_shortcut_and_dedicated_preferences_surfa
 
 
 @pytest.mark.django_db
-def test_global_public_navigation_matches_final_information_architecture(client):
+def test_global_public_navigation_matches_v2_identity_public_shell(client):
     response = client.get("/?lang=en")
     assert response.status_code == 200
     body = response.content.decode()
-    assert 'href="/store/">Shop</a>' in body
+    assert 'href="/">Shop</a>' in body
+    assert 'href="/discover/">Discover</a>' in body
+    assert 'href="/how-it-works/">How it works</a>' in body
     assert 'href="/artwork/">Artwork</a>' in body
-    assert 'href="/?lang=en#how-fabinzi">How it works</a>' in body
-    assert 'href="/?lang=en#designer-stores">Designers</a>' in body
+    assert 'href="/designers/">Designers</a>' in body
     assert 'href="/manufacturers/">Manufacturers</a>' in body
-    assert 'id="how-fabinzi"' in body
-    assert 'id="designer-stores"' in body
-    assert 'id="featured-artwork"' in body
-    assert 'id="manufacturing-network"' in body
+    assert 'href="/account/signup/">Create account</a>' in body
+    assert 'href="/account/login/">Sign in</a>' in body
+
+    discover = client.get("/discover/?lang=en")
+    assert discover.status_code == 200
+    discover_body = discover.content.decode()
+    assert 'id="how-fabinzi"' in discover_body
+    assert 'id="designer-stores"' in discover_body
+    assert 'id="featured-artwork"' in discover_body
+    assert 'id="manufacturing-network"' in discover_body

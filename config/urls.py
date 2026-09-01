@@ -1,6 +1,8 @@
+from django.contrib.auth import views as auth_views
 from django.urls import include, path
+from django.views.generic import RedirectView
 from two_factor.urls import urlpatterns as tf_urls
-from apps.accounts.views import app_home, profile_preferences
+from apps.accounts.views import app_home, profile_preferences, sign_out, signup
 from apps.artwork.media_views import public_artwork_preview_media
 from apps.artwork.views import artwork_detail, artwork_marketplace
 from apps.checkout.views import (
@@ -25,6 +27,7 @@ from apps.media.views import private_studio_media
 from apps.notifications.views import notification_center
 from apps.operations.views import order_operations
 from apps.platform_ops.launch_views import bad_request as public_handler400
+from apps.platform_ops.public_shell_views import discover, how_it_works, robots_txt, sitemap_xml
 from apps.platform_ops.views import (
     apple_touch_icon,
     favicon,
@@ -32,13 +35,10 @@ from apps.platform_ops.views import (
     handler404 as public_handler404,
     handler500 as public_handler500,
     healthz,
-    home,
     readyz,
-    robots_txt,
     site_icon_192,
     site_icon_512,
     site_manifest,
-    sitemap_xml,
     social_share_image,
 )
 from apps.integrations.admin_site import fabinzi_admin_site
@@ -75,12 +75,22 @@ from apps.organizations.manufacturer_views import (
     manufacturer_shipment,
     manufacturer_team,
 )
+from apps.organizations.public_views import designer_directory
 from apps.organizations.views import edit_onboarding, submit_onboarding
 from apps.storefront.studio_views import studio, studio_project
 from apps.storefront.views import public_product, public_storefront, store_marketplace
 
 urlpatterns = [
-    path("", home, name="home"),
+    # V2 public shell: Store is the primary public surface. The legacy /store/
+    # path redirects to the same canonical catalog while existing reverse-name
+    # callers continue to resolve directly to the root Store.
+    path("", store_marketplace, name="home"),
+    path("", store_marketplace, name="store-marketplace"),
+    path("store/", RedirectView.as_view(pattern_name="home", permanent=True, query_string=True), name="store-legacy"),
+    path("discover/", discover, name="discover"),
+    path("how-it-works/", how_it_works, name="how-it-works"),
+    path("designers/", designer_directory, name="designer-directory"),
+
     path("robots.txt", robots_txt, name="robots-txt"),
     path("sitemap.xml", sitemap_xml, name="sitemap-xml"),
     path("site.webmanifest", site_manifest, name="site-manifest"),
@@ -90,10 +100,55 @@ urlpatterns = [
     path("icon-512.png", site_icon_512, name="site-icon-512"),
     path("share/fabinzi-1200x630.png", social_share_image, name="social-share-image"),
     path("", include("apps.platform_ops.launch_urls")),
+
+    # Web-session identity lifecycle. Customer API v1 remains untouched.
+    path("account/signup/", signup, name="signup"),
+    path("account/logout/", sign_out, name="logout"),
+    path(
+        "account/password/change/",
+        auth_views.PasswordChangeView.as_view(
+            template_name="registration/password_change_form.html",
+            success_url="/account/password/change/done/",
+        ),
+        name="password-change",
+    ),
+    path(
+        "account/password/change/done/",
+        auth_views.PasswordChangeDoneView.as_view(template_name="registration/password_change_done.html"),
+        name="password-change-done",
+    ),
+    path(
+        "account/password/reset/",
+        auth_views.PasswordResetView.as_view(
+            template_name="registration/password_reset_form.html",
+            email_template_name="registration/password_reset_email.txt",
+            subject_template_name="registration/password_reset_subject.txt",
+            success_url="/account/password/reset/done/",
+        ),
+        name="password-reset",
+    ),
+    path(
+        "account/password/reset/done/",
+        auth_views.PasswordResetDoneView.as_view(template_name="registration/password_reset_done.html"),
+        name="password-reset-done",
+    ),
+    path(
+        "account/password/reset/<uidb64>/<token>/",
+        auth_views.PasswordResetConfirmView.as_view(
+            template_name="registration/password_reset_confirm.html",
+            success_url="/account/password/reset/complete/",
+        ),
+        name="password-reset-confirm",
+    ),
+    path(
+        "account/password/reset/complete/",
+        auth_views.PasswordResetCompleteView.as_view(template_name="registration/password_reset_complete.html"),
+        name="password-reset-complete",
+    ),
+
     path("app/", app_home, name="app-home"),
     path("app/settings/preferences/", profile_preferences, name="profile-preferences"),
     path("notifications/", notification_center, name="notifications"),
-    path("store/", store_marketplace, name="store-marketplace"),
     path("store/<slug:slug>/", public_storefront, name="public-storefront"),
     path("store/<slug:store_slug>/<slug:product_slug>/", public_product, name="public-store-product"),
     path("cart/", cart, name="cart"),

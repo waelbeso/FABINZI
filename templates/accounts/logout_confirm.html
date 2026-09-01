@@ -1,0 +1,5 @@
+{% extends "base.html" %}{% load i18n %}{% get_current_language as LANGUAGE_CODE %}
+{% block title %}{% if LANGUAGE_CODE == 'ar' %}تسجيل الخروج | FABINZI{% else %}Sign out | FABINZI{% endif %}{% endblock %}
+{% block content %}
+<section class="identity-shell" aria-labelledby="logout-title"><div class="panel identity-panel"><div class="eyebrow">FABINZI IDENTITY</div><h1 class="page-title" id="logout-title">{% if LANGUAGE_CODE == 'ar' %}تسجيل الخروج؟{% else %}Sign out?{% endif %}</h1><p class="lead">{% if LANGUAGE_CODE == 'ar' %}سيتم إنهاء جلسة حسابك الحالية. لن تتغير بيانات حسابك أو عضويات أعمالك.{% else %}This ends your current account session. Your account and business memberships are not changed.{% endif %}</p><form method="post">{% csrf_token %}<div class="page-actions"><button class="button" type="submit">{% if LANGUAGE_CODE == 'ar' %}تسجيل الخروج{% else %}Sign out{% endif %}</button><a class="button button--ghost" href="{% url 'app-home' %}">{% if LANGUAGE_CODE == 'ar' %}إلغاء{% else %}Cancel{% endif %}</a></div></form></div></section>
+{% endblock %}

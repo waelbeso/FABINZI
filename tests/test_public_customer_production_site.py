@@ -60,12 +60,22 @@ def _published_product(prefix="seo"):
 
 
 @pytest.mark.django_db
-def test_public_home_has_bilingual_seo_identity_and_aeo(client):
-    response = client.get("/")
-    assert response.status_code == 200
-    body = response.content.decode()
+def test_store_is_primary_public_home_and_discover_preserves_bilingual_aeo(client):
+    store = client.get("/")
+    assert store.status_code == 200
+    store_body = store.content.decode()
+    assert "Designer products, one real catalog" in store_body
+    assert '<meta name="robots" content="index,follow' in store_body
+    assert '<link rel="canonical" href="http://localhost:8000/?lang=en">' in store_body
+    assert 'href="/discover/">Discover</a>' in store_body
+    assert 'href="/how-it-works/">How it works</a>' in store_body
+    assert 'href="/designers/">Designers</a>' in store_body
+
+    discover = client.get("/discover/")
+    assert discover.status_code == 200
+    body = discover.content.decode()
     assert '<meta name="robots" content="index,follow' in body
-    assert '<link rel="canonical" href="http://localhost:8000/?lang=en">' in body
+    assert '<link rel="canonical" href="http://localhost:8000/discover/?lang=en">' in body
     assert 'hreflang="ar"' in body
     assert 'property="og:image" content="http://localhost:8000/share/fabinzi-1200x630.png"' in body
     assert 'name="twitter:card" content="summary_large_image"' in body
@@ -73,22 +83,26 @@ def test_public_home_has_bilingual_seo_identity_and_aeo(client):
     assert 'site.webmanifest' in body
     assert 'apple-touch-icon.png' in body
 
-    ar = client.get("/?lang=ar")
+    ar = client.get("/discover/?lang=ar")
     assert ar.status_code == 200
     ar_body = ar.content.decode()
     assert '<html lang="ar" dir="rtl"' in ar_body
     assert 'الفكرة تبدأ عند المصمم' in ar_body
     assert '"inLanguage":"ar"' in ar_body
-    assert 'http://localhost:8000/?lang=ar' in ar_body
+    assert 'http://localhost:8000/discover/?lang=ar' in ar_body
 
 
 @pytest.mark.django_db
-def test_filtered_catalog_is_crawl_safe_and_unfiltered_catalog_is_indexable(client):
-    clean = client.get("/store/")
+def test_filtered_root_catalog_is_crawl_safe_and_legacy_store_redirects(client):
+    clean = client.get("/")
     assert clean.status_code == 200
     assert '<meta name="robots" content="index,follow' in clean.content.decode()
 
-    filtered = client.get("/store/?q=shirt&sort=price_asc")
+    legacy = client.get("/store/?q=shirt&sort=price_asc")
+    assert legacy.status_code == 301
+    assert legacy.headers["Location"].endswith("/?q=shirt&sort=price_asc")
+
+    filtered = client.get("/?q=shirt&sort=price_asc")
     assert filtered.status_code == 200
     body = filtered.content.decode()
     assert '<meta name="robots" content="noindex,follow">' in body
@@ -144,7 +158,14 @@ def test_brand_identity_endpoints_are_real_binary_assets(client):
     assert manifest.status_code == 200
     assert manifest.headers["Content-Type"].startswith("application/manifest+json")
     payload = json.loads(manifest.content)
-    assert {icon["sizes"] for icon in payload["icons"]} == {"192x192", "512x512"}
+    icons = payload["icons"]
+    assert {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"} in icons
+    assert {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"} in icons
+    assert {
+        "src": "/static/brand/fabinzi-icon.svg",
+        "sizes": "any",
+        "type": "image/svg+xml",
+    } in icons
 
 
 @pytest.mark.django_db
