@@ -199,6 +199,8 @@ def site_manifest(request):
         "theme_color": "#6d4aff",
         "icons": [
             {"src": static("brand/fabinzi-icon.svg"), "sizes": "any", "type": "image/svg+xml"},
+            {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"},
         ],
     }
     response = JsonResponse(manifest, json_dumps_params={"ensure_ascii": False})
