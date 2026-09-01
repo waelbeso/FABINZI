@@ -5,7 +5,9 @@ from django.conf import settings
 
 INDEXABLE_URL_NAMES = {
     "home",
-    "store-marketplace",
+    "discover",
+    "how-it-works",
+    "designer-directory",
     "public-storefront",
     "public-store-product",
     "artwork",
@@ -21,22 +23,34 @@ INDEXABLE_URL_NAMES = {
 }
 
 DEFAULT_DESCRIPTIONS = {
-    "en": "Discover designer fashion, ready-designed products and optional customization on FABINZI, where designers create, manufacturers produce and customers buy.",
-    "ar": "اكتشف أزياء المصممين والمنتجات ذات التصميمات الجاهزة والتخصيص الاختياري على FABINZI، حيث يبدع المصمم وينتج المصنع ويشتري العميل.",
+    "en": "Discover fashion, approved Artwork, optional customer customization and qualified production on FABINZI, where Customers, Designers and Manufacturers keep distinct roles.",
+    "ar": "اكتشف الأزياء والأعمال الفنية المعتمدة والتخصيص الاختياري والإنتاج المؤهل على FABINZI، مع الحفاظ على الأدوار المنفصلة للعملاء والمصممين والمصنعين.",
 }
 
 PUBLIC_PAGE_SEO = {
     "home": {
-        "en": ("FABINZI | From fashion idea to real product", "Shop original designer fashion, ready-designed products and optional customization while FABINZI connects design, manufacturing and customer commerce."),
-        "ar": ("FABINZI | من فكرة الأزياء إلى منتج حقيقي", "تسوّق أزياء المصممين والتصميمات الجاهزة والتخصيص الاختياري بينما تربط FABINZI التصميم والتصنيع والشراء في رحلة واحدة."),
+        "en": ("FABINZI Store | Fashion, ready designs & customization", "Shop the FABINZI catalog, including published fashion products, ready-designed products and optional customization where the product is eligible."),
+        "ar": ("متجر FABINZI | أزياء وتصميمات جاهزة وتخصيص", "تسوّق كتالوج FABINZI من منتجات الأزياء المنشورة والتصميمات الجاهزة والتخصيص الاختياري عندما يكون المنتج مؤهلًا."),
+    },
+    "discover": {
+        "en": ("Discover FABINZI | Fashion creation to commerce", "Discover the FABINZI ecosystem for Customers, Designers and qualified Manufacturers."),
+        "ar": ("اكتشف FABINZI | من ابتكار الأزياء إلى التجارة", "اكتشف منظومة FABINZI للعملاء والمصممين والمصنعين المؤهلين."),
+    },
+    "how-it-works": {
+        "en": ("How FABINZI works | Customers, Designers & Manufacturers", "See how FABINZI keeps garment design, Artwork, customer customization and manufacturing responsibilities distinct."),
+        "ar": ("كيف تعمل FABINZI | العملاء والمصممون والمصنعون", "تعرّف على فصل تصميم الملابس والعمل الفني وتخصيص العميل ومسؤوليات التصنيع داخل FABINZI."),
+    },
+    "designer-directory": {
+        "en": ("Designers | FABINZI", "Discover active Designer organizations with published storefront identities on FABINZI."),
+        "ar": ("المصممون | FABINZI", "اكتشف جهات المصممين النشطة ذات الهويات العامة المنشورة على FABINZI."),
     },
     "artwork": {
         "en": ("Artwork Marketplace | FABINZI", "Discover approved Designer Artwork that can be used on eligible FABINZI products."),
         "ar": ("سوق الأعمال الفنية | FABINZI", "اكتشف أعمال المصممين الفنية المعتمدة التي يمكن استخدامها على منتجات FABINZI المؤهلة."),
     },
     "manufacturer-marketplace": {
-        "en": ("Manufacturers | FABINZI", "Discover verified manufacturer businesses and their published production capabilities on FABINZI."),
-        "ar": ("المصنّعون | FABINZI", "استكشف جهات التصنيع الموثقة وقدرات الإنتاج المنشورة فعليًا على FABINZI."),
+        "en": ("Manufacturers | FABINZI", "Discover active manufacturing partners through explicitly published production capabilities on FABINZI."),
+        "ar": ("المصنّعون | FABINZI", "استكشف شركاء التصنيع النشطين من خلال قدرات الإنتاج المنشورة صراحةً على FABINZI."),
     },
 }
 
@@ -124,7 +138,7 @@ def seo_context(request):
         "inLanguage": ["en", "ar"],
         "potentialAction": {
             "@type": "SearchAction",
-            "target": f"{absolute_url('/store/')}?q={{search_term_string}}&lang={language}",
+            "target": f"{absolute_url('/')}?q={{search_term_string}}&lang={language}",
             "query-input": "required name=search_term_string",
         },
     }
