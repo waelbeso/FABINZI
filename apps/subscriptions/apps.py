@@ -7,12 +7,14 @@ class SubscriptionsConfig(AppConfig):
 
     def ready(self):
         # V2-3 correction layer: preserve the prepared implementation as the
-        # base while replacing the owner-reviewed lifecycle entry points with
-        # their corrected transactional implementations.
-        from . import corrections
+        # base while replacing owner-reviewed lifecycle entry points with the
+        # corrected transactional implementations.
+        from . import corrections, corrections_followup
         from . import services
 
         for name, implementation in corrections.SERVICE_OVERRIDES.items():
+            setattr(services, name, implementation)
+        for name, implementation in corrections_followup.SERVICE_OVERRIDES.items():
             setattr(services, name, implementation)
 
         # Preserve the existing canonical Manufacturer marketplace workflow;
@@ -28,11 +30,11 @@ class SubscriptionsConfig(AppConfig):
         # corrected lifecycle entry points without changing /Maneg/ structure.
         from . import admin as subscription_admin
 
-        subscription_admin.activate_paid_pro = corrections.activate_paid_pro
-        subscription_admin.confirm_subscription_billing = corrections.confirm_subscription_billing
+        subscription_admin.activate_paid_pro = corrections_followup.activate_paid_pro
+        subscription_admin.confirm_subscription_billing = corrections_followup.confirm_subscription_billing
         subscription_admin.downgrade_to_starter = corrections.downgrade_to_starter
 
         # Signals are imported only after the corrected service bindings are in
-        # place. The Manufacturer quota pre-save hook was intentionally removed
-        # in favor of the transactional canonical submit_quote integration.
+        # place. Manufacturer quota enforcement is intentionally integrated in
+        # the canonical transactional submit_quote service rather than pre_save.
         from . import signals  # noqa: F401
