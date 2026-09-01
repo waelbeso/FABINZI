@@ -4,6 +4,10 @@ from django.db import transaction
 from apps.audit.services import record_audit_event
 from apps.manufacturer_marketplace.models import ManufacturerCapability, ManufacturerListing
 from .models import Membership, Organization
+from .public_profile_services import (
+    current_public_profile_data,
+    propose_and_submit_public_profile_update,
+)
 from .services import require_org_access
 
 
@@ -27,42 +31,51 @@ def update_active_manufacturer_profile(
         roles=[Membership.Role.OWNER, Membership.Role.MANAGER],
     )
     if organization.verification_status != Organization.VerificationStatus.ACTIVE:
-        raise ValidationError("Only an active Manufacturer organization may update its live profile here.")
+        raise ValidationError("Only an active Manufacturer organization may update its profile here.")
 
-    editable_org_fields = {
-        "display_name",
+    private_org_fields = {
         "email",
         "phone",
-        "website",
         "address_line1",
         "address_line2",
-        "city",
-        "region",
-        "country",
     }
     for field, value in organization_data.items():
-        if field in editable_org_fields:
+        if field in private_org_fields:
             setattr(organization, field, value)
     organization.full_clean(exclude=["created_by"])
     organization.save()
 
     profile = organization.manufacturer_profile
-    editable_profile_fields = {
+    private_profile_fields = {
         "google_maps_url",
         "primary_contact_person",
         "contact_job_title",
         "whatsapp",
     }
     for field, value in profile_data.items():
-        if field in editable_profile_fields:
+        if field in private_profile_fields:
             setattr(profile, field, value)
     profile.full_clean()
     profile.save()
+
+    proposed_public = current_public_profile_data(organization)
+    for field in {"display_name", "website", "city", "region", "country"}:
+        if field in organization_data:
+            proposed_public["organization"][field] = organization_data[field]
+    revision = propose_and_submit_public_profile_update(
+        organization=organization,
+        actor=actor,
+        proposed_data=proposed_public,
+        request=request,
+    )
     record_audit_event(
         actor=actor,
         action="manufacturer.profile.updated",
         instance=organization,
-        metadata={"organization_id": organization.pk},
+        metadata={
+            "organization_id": organization.pk,
+            "public_revision_id": revision.pk if revision else None,
+        },
         request=request,
     )
     return organization
