@@ -24,8 +24,25 @@ def require_org_access(user, organization, *, roles=None):
     return True
 
 
+def _lock_and_reject_duplicate_application(*, user, kind):
+    # Serialize professional-application creation for one account without
+    # introducing a second identity/application-owner model.
+    user.__class__._default_manager.select_for_update().get(pk=user.pk)
+    existing_statuses = set(OnboardingApplication.Status.values)
+    if OnboardingApplication.objects.filter(
+        organization__created_by=user,
+        organization__kind=kind,
+        status__in=existing_statuses,
+    ).exists():
+        role_label = "Designer" if kind == Organization.Kind.DESIGNER else "Manufacturer"
+        raise ValidationError(
+            f"A {role_label} application already exists for this account; V2-2 does not create duplicate resubmission records."
+        )
+
+
 @transaction.atomic
 def create_designer_onboarding(*, user, organization_data, profile_data, request=None):
+    _lock_and_reject_duplicate_application(user=user, kind=Organization.Kind.DESIGNER)
     org = Organization.objects.create(kind=Organization.Kind.DESIGNER, created_by=user, **organization_data)
     Membership.objects.create(organization=org, user=user, role=Membership.Role.OWNER)
     DesignerProfile.objects.create(organization=org, **profile_data)
@@ -36,6 +53,7 @@ def create_designer_onboarding(*, user, organization_data, profile_data, request
 
 @transaction.atomic
 def create_manufacturer_onboarding(*, user, organization_data, profile_data, request=None):
+    _lock_and_reject_duplicate_application(user=user, kind=Organization.Kind.MANUFACTURER)
     org = Organization.objects.create(kind=Organization.Kind.MANUFACTURER, created_by=user, **organization_data)
     Membership.objects.create(organization=org, user=user, role=Membership.Role.OWNER)
     ManufacturerProfile.objects.create(organization=org, **profile_data)
@@ -77,6 +95,26 @@ def submit_application(*, application, actor, request=None):
     return application
 
 
+def _ensure_applicant_owner_membership(application):
+    organization = application.organization
+    membership, _ = Membership.objects.get_or_create(
+        organization=organization,
+        user=organization.created_by,
+        defaults={"role": Membership.Role.OWNER, "is_active": True},
+    )
+    changed = []
+    if membership.role != Membership.Role.OWNER:
+        membership.role = Membership.Role.OWNER
+        changed.append("role")
+    if not membership.is_active:
+        membership.is_active = True
+        changed.append("is_active")
+    if changed:
+        membership.full_clean()
+        membership.save(update_fields=changed)
+    return membership
+
+
 @transaction.atomic
 def review_application(*, application, reviewer, decision, notes="", request=None):
     if not reviewer.is_staff:
@@ -91,11 +129,13 @@ def review_application(*, application, reviewer, decision, notes="", request=Non
     application.review_notes = notes
     application.reviewed_by = reviewer
     application.reviewed_at = timezone.now()
+    applicant_membership = None
     if decision == OnboardingApplication.Status.REVISION_REQUIRED:
         application.revision_count += 1
         org_status = Organization.VerificationStatus.DRAFT
     elif decision == OnboardingApplication.Status.APPROVED:
         org_status = Organization.VerificationStatus.ACTIVE
+        applicant_membership = _ensure_applicant_owner_membership(application)
     else:
         org_status = Organization.VerificationStatus.REJECTED
 
@@ -107,7 +147,17 @@ def review_application(*, application, reviewer, decision, notes="", request=Non
     title_ar = {OnboardingApplication.Status.APPROVED: "تمت الموافقة على طلب النشاط", OnboardingApplication.Status.REJECTED: "تم رفض طلب النشاط", OnboardingApplication.Status.REVISION_REQUIRED: "طلب النشاط يحتاج إلى تعديلات"}[decision]
     for membership in application.organization.memberships.filter(is_active=True).select_related("user"):
         Notification.objects.create(recipient=membership.user, type="business_onboarding_review", title_en=title_en, title_ar=title_ar, body_en=notes, body_ar=notes, destination="/designer/" if application.organization.kind == Organization.Kind.DESIGNER else "/manufacturer/")
-    record_audit_event(actor=reviewer, action=f"onboarding.{decision}", instance=application, metadata={"organization_id": application.organization_id, "notes_present": bool(notes)}, request=request)
+    record_audit_event(
+        actor=reviewer,
+        action=f"onboarding.{decision}",
+        instance=application,
+        metadata={
+            "organization_id": application.organization_id,
+            "notes_present": bool(notes),
+            "activated_membership_id": applicant_membership.pk if applicant_membership else None,
+        },
+        request=request,
+    )
     return application
 
 
