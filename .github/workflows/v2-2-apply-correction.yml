@@ -51,9 +51,9 @@ jobs:
             | base64 -d | gzip -d > /tmp/v2-2-final-corrections.patch
           git apply --check /tmp/v2-2-final-corrections.patch
           git apply /tmp/v2-2-final-corrections.patch
+          rm -f .github/workflows/v2-2-focused.yml
           rm -f .github/v2-2-final-corrections.patch.gz.b64
           rm -f .github/v2-2-patch.part*
-          rm -f .github/workflows/v2-2-apply-correction.yml
           test ! -e tests/test_v2_source_export_temp.py
       - name: Quick Python compilation
         run: python -m compileall -q apps tests
