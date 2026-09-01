@@ -1,0 +1,20 @@
+{% extends "admin/change_form.html" %}
+{% block object-tools-items %}
+  {{ block.super }}
+  {% if original and original.status == "submitted" %}
+    <li>
+      <form method="post" action="{% url 'fabinzi_admin:organizations_publicprofilerevision_approve' original.pk %}">
+        {% csrf_token %}
+        <input type="text" name="review_notes" placeholder="Approval notes">
+        <button type="submit">Approve public revision</button>
+      </form>
+    </li>
+    <li>
+      <form method="post" action="{% url 'fabinzi_admin:organizations_publicprofilerevision_reject' original.pk %}">
+        {% csrf_token %}
+        <input type="text" name="review_notes" placeholder="Rejection notes">
+        <button type="submit">Reject public revision</button>
+      </form>
+    </li>
+  {% endif %}
+{% endblock %}
