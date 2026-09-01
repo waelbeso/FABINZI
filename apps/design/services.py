@@ -76,6 +76,18 @@ def submit_version(*, version, actor, request=None):
     if version.status != GarmentDesignVersion.Status.DRAFT:
         raise ValidationError("Only draft versions can be submitted.")
     validate_version_ready(version)
+
+    # V2-3 entitlement authority lives at the user-authorized transition into
+    # review, not on generic model save. The subscription row lock serializes
+    # competing submissions before the active-slot count is evaluated.
+    from apps.subscriptions.services import assert_designer_slot_available
+
+    assert_designer_slot_available(
+        organization=version.design.organization,
+        kind="design",
+        object_id=version.design_id,
+    )
+
     version.status = GarmentDesignVersion.Status.SUBMITTED; version.submitted_at = timezone.now(); version.save(update_fields=["status", "submitted_at"])
     version.design.status = GarmentDesign.Status.IN_REVIEW; version.design.save(update_fields=["status", "updated_at"])
     record_audit_event(actor=actor, action="design.version.submitted", instance=version, metadata={"design_id": version.design_id}, request=request)

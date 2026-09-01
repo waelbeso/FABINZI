@@ -12,19 +12,12 @@ from .models import TeamInvitation
 from .services import (
     ARTWORK_SLOT_STATUSES,
     DESIGN_SLOT_STATUSES,
-    DESIGNER_TEAM_ROLES,
-    MANUFACTURER_TEAM_ROLES,
     accept_team_invitation,
     apply_designer_downgrade,
     cancel_subscription,
-    change_team_member_role,
-    create_team_invitation,
     downgrade_to_starter,
     entitlement_summary,
     require_owner,
-    restore_team_member,
-    revoke_team_invitation,
-    suspend_team_member,
 )
 
 
@@ -140,92 +133,12 @@ def manufacturer_subscription(request):
     return render(request, "manufacturer/subscription.html", context)
 
 
-def _team_post(request, organization):
-    action = request.POST.get("action", "")
-    if not action:
-        return None
-    if action == "invite":
-        invitation, token = create_team_invitation(
-            organization=organization,
-            actor=request.user,
-            email=request.POST.get("email", ""),
-            role=request.POST.get("role", ""),
-            request=request,
-        )
-        return _localized(
-            request,
-            f"Invitation created. Secure acceptance link: /team/invitations/accept/{token}/",
-            f"تم إنشاء الدعوة. رابط القبول الآمن: /team/invitations/accept/{token}/",
-        )
-    if action == "revoke_invite":
-        invitation = get_object_or_404(TeamInvitation, pk=request.POST.get("invitation_id"), organization=organization)
-        revoke_team_invitation(invitation=invitation, actor=request.user, request=request)
-        return _localized(request, "Invitation revoked.", "تم إلغاء الدعوة.")
-    membership = get_object_or_404(Membership, pk=request.POST.get("membership_id"), organization=organization)
-    if action == "suspend_member":
-        suspend_team_member(membership=membership, actor=request.user, request=request)
-        return _localized(request, "Team member suspended.", "تم إيقاف عضو الفريق.")
-    if action == "restore_member":
-        restore_team_member(membership=membership, actor=request.user, request=request)
-        return _localized(request, "Team member restored.", "تمت استعادة عضو الفريق.")
-    if action == "change_role":
-        change_team_member_role(membership=membership, actor=request.user, role=request.POST.get("role", ""), request=request)
-        return _localized(request, "Team role updated.", "تم تحديث دور عضو الفريق.")
-    return None
-
-
-def _team_context(request, context, organization, *, designer):
-    summary = entitlement_summary(organization)
-    pending = TeamInvitation.objects.filter(
-        organization=organization,
-        status=TeamInvitation.Status.PENDING,
-    ).order_by("-created_at")
-    roles = DESIGNER_TEAM_ROLES if designer else MANUFACTURER_TEAM_ROLES
-    context.update({
-        "subscription_summary": summary,
-        "members": organization.memberships.select_related("user").order_by("joined_at", "id"),
-        "pending_invitations": pending,
-        "allowed_team_roles": [(value, label) for value, label in Membership.Role.choices if value in roles],
-        "is_team_owner": (context["designer_membership"] if designer else context["manufacturer_membership"]).role == Membership.Role.OWNER,
-    })
-    return context
-
-
-@login_required
-def designer_team_v2(request):
-    context, organization = _designer(request)
-    if request.method == "POST":
-        try:
-            success = _team_post(request, organization)
-        except (ValidationError, PermissionDenied) as exc:
-            messages.error(request, _error_text(exc))
-        else:
-            if success:
-                messages.success(request, success)
-        return redirect(f"/designer/team/?org={organization.pk}")
-    return render(request, "designer/team_v2_3.html", _team_context(request, context, organization, designer=True))
-
-
-@login_required
-def manufacturer_team_v2(request):
-    context, organization = _manufacturer(request)
-    if request.method == "POST":
-        try:
-            success = _team_post(request, organization)
-        except (ValidationError, PermissionDenied) as exc:
-            messages.error(request, _error_text(exc))
-        else:
-            if success:
-                messages.success(request, success)
-        return redirect(f"/manufacturer/team/?org={organization.pk}")
-    return render(request, "manufacturer/team_v2_3.html", _team_context(request, context, organization, designer=False))
-
-
 @login_required
 def team_invitation_accept(request, token):
     if request.method == "POST" and request.POST.get("action") == "decline":
         import hashlib
         from django.utils import timezone
+
         token_hash = hashlib.sha256(str(token).encode("utf-8")).hexdigest()
         invitation = get_object_or_404(TeamInvitation, token_hash=token_hash, status=TeamInvitation.Status.PENDING)
         if (request.user.email or "").strip().lower() != invitation.email.lower():

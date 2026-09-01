@@ -29,8 +29,6 @@ def require_org_access(user, organization, *, roles=None):
 
 
 def _lock_and_reject_duplicate_application(*, user, kind):
-    # Serialize professional-application creation for one account without
-    # introducing a second identity/application-owner model.
     user.__class__._default_manager.select_for_update().get(pk=user.pk)
     blocking_statuses = {
         OnboardingApplication.Status.DRAFT,
@@ -246,6 +244,20 @@ def review_application(*, application, reviewer, decision, notes="", request=Non
     application.organization.verification_status = org_status
     application.organization.save(update_fields=["verification_status", "updated_at"])
 
+    subscription = None
+    if decision == OnboardingApplication.Status.APPROVED:
+        # V2-3 provisioning is an explicit professional-activation side effect,
+        # not a hidden Organization.save() command. Re-entry is idempotent and
+        # therefore cannot restart an already-consumed Manufacturer trial.
+        from apps.subscriptions.services import ensure_subscription_for_organization
+
+        subscription = ensure_subscription_for_organization(
+            application.organization,
+            activation_at=application.reviewed_at,
+            actor=reviewer,
+            request=request,
+        )
+
     title_en = {OnboardingApplication.Status.APPROVED: "Business application approved", OnboardingApplication.Status.REJECTED: "Business application rejected", OnboardingApplication.Status.REVISION_REQUIRED: "Business application needs revision"}[decision]
     title_ar = {OnboardingApplication.Status.APPROVED: "تمت الموافقة على طلب النشاط", OnboardingApplication.Status.REJECTED: "تم رفض طلب النشاط", OnboardingApplication.Status.REVISION_REQUIRED: "طلب النشاط يحتاج إلى تعديلات"}[decision]
     for membership in application.organization.memberships.filter(is_active=True).select_related("user"):
@@ -258,6 +270,7 @@ def review_application(*, application, reviewer, decision, notes="", request=Non
             "organization_id": application.organization_id,
             "notes_present": bool(notes),
             "activated_membership_id": applicant_membership.pk if applicant_membership else None,
+            "subscription_id": subscription.pk if subscription else None,
         },
         request=request,
     )
@@ -283,9 +296,22 @@ def update_onboarding(*, application, actor, organization_data, profile_data, re
     return application
 
 
+def _assert_non_owner_team_capacity(*, organization, user):
+    target = Membership.objects.filter(organization=organization, user=user).first()
+    if target and target.is_active and target.role != Membership.Role.OWNER:
+        return
+    from apps.subscriptions.services import entitlement_summary
+
+    summary = entitlement_summary(organization)
+    if summary["team_used"] >= summary["team_limit"]:
+        raise ValidationError(f"The current plan allows {summary['team_limit']} active/pending subaccount seat(s).")
+
+
 @transaction.atomic
 def add_or_update_member(*, organization, actor, user, role, request=None):
     require_org_access(actor, organization, roles=[Membership.Role.OWNER, Membership.Role.MANAGER])
+    if role != Membership.Role.OWNER:
+        _assert_non_owner_team_capacity(organization=organization, user=user)
     membership, _ = Membership.objects.get_or_create(organization=organization, user=user, defaults={"role": role, "is_active": True})
     membership.role = role
     membership.is_active = True

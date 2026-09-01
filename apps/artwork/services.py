@@ -158,6 +158,17 @@ def validate_artwork_ready(version):
 def submit_artwork_version(*, version, actor, request=None):
     require_artwork_draft(version, actor)
     validate_artwork_ready(version)
+
+    # Enforce the V2-3 active Artwork slot at the canonical user transition
+    # into review rather than on generic model save.
+    from apps.subscriptions.services import assert_designer_slot_available
+
+    assert_designer_slot_available(
+        organization=version.artwork.organization,
+        kind="artwork",
+        object_id=version.artwork_id,
+    )
+
     version.status = ArtworkVersion.Status.SUBMITTED; version.submitted_at = timezone.now(); version.save(update_fields=["status", "submitted_at"])
     version.artwork.status = Artwork.Status.IN_REVIEW; version.artwork.save(update_fields=["status", "updated_at"])
     record_audit_event(actor=actor, action="artwork.version.submitted", instance=version, metadata={"artwork_id": version.artwork_id}, request=request)

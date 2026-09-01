@@ -117,6 +117,7 @@ def mark_invitation_viewed(*, invitation, actor):
 
 @transaction.atomic
 def submit_quote(*, invitation, actor, unit_price, production_lead_days, setup_fee=0, sample_fee=0, shipping_estimate=0, currency="EGP", minimum_order_quantity=1, sample_lead_days=None, valid_until=None, notes="", request=None):
+    """Canonical Manufacturing Offer submission, including V2-3 quota consumption."""
     require_org_access(actor, invitation.manufacturer, roles=MANUFACTURER_QUOTE_ROLES)
     if invitation.rfq.status not in {RFQ.Status.OPEN, RFQ.Status.QUOTED}:
         raise ValidationError("This RFQ is not accepting quotes.")
@@ -127,7 +128,18 @@ def submit_quote(*, invitation, actor, unit_price, production_lead_days, setup_f
         raise ValidationError("Only draft or withdrawn quotes can be submitted.")
     for field, value in {"unit_price":unit_price,"production_lead_days":production_lead_days,"setup_fee":setup_fee,"sample_fee":sample_fee,"shipping_estimate":shipping_estimate,"currency":currency.upper(),"minimum_order_quantity":minimum_order_quantity,"sample_lead_days":sample_lead_days,"valid_until":valid_until,"notes":notes}.items():
         setattr(quote, field, value)
-    quote.status = ManufacturerQuote.Status.SUBMITTED; quote.submitted_at = timezone.now(); quote.full_clean(); quote.save()
+    quote.status = ManufacturerQuote.Status.SUBMITTED
+    quote.submitted_at = timezone.now()
+    quote.full_clean()
+    quote.save()
+
+    # Import locally to keep the marketplace domain authoritative and avoid an
+    # app-import cycle. The quota service locks the Organization subscription,
+    # so concurrent quote submissions serialize before usage is counted.
+    from apps.subscriptions.services import consume_manufacturer_offer
+
+    consume_manufacturer_offer(quote=quote)
+
     invitation.status = RFQInvitation.Status.QUOTED; invitation.responded_at = timezone.now(); invitation.save(update_fields=["status","responded_at"])
     if invitation.rfq.status == RFQ.Status.OPEN:
         invitation.rfq.status = RFQ.Status.QUOTED; invitation.rfq.save(update_fields=["status","updated_at"])

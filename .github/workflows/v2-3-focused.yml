@@ -86,7 +86,12 @@ jobs:
         run: python manage.py migrate --noinput
       - name: Django check
         run: python manage.py check
-      - name: Run focused V2-3 tests
-        run: pytest -q tests/test_v2_subscriptions_entitlements_team.py
+      - name: Run focused V2-3 and integration regressions
+        run: |
+          pytest -q \
+            tests/test_v2_subscriptions_entitlements_team.py \
+            tests/test_v2_3_full_suite_integration.py \
+            tests/test_demo_seed.py \
+            tests/test_manufacturer_portal_acceptance.py
       - name: Recompute canonical brand SHA-256
         run: sha256sum static/brand/fabinzi-logo.svg static/brand/fabinzi-icon.svg
