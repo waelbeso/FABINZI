@@ -174,6 +174,10 @@ urlpatterns = [
     path("manufacturers/", manufacturer_marketplace, name="manufacturer-marketplace"),
     path("manufacturers/<int:pk>/", manufacturer_public_detail, name="manufacturer-public-detail"),
 
+    # V2-3 productized subscription/team routes precede the accepted legacy
+    # team routes. They reuse the same Organization + Membership architecture.
+    path("", include("apps.subscriptions.urls")),
+
     path("designer/", designer_portal, name="designer"),
     path("designer/profile/", designer_profile, name="designer-profile"),
     path("designer/team/", designer_team, name="designer-team"),
