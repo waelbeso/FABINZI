@@ -250,10 +250,16 @@ def review_application(*, application, reviewer, decision, notes="", request=Non
         # not a hidden Organization.save() command. Re-entry is idempotent and
         # therefore cannot restart an already-consumed Manufacturer trial.
         from apps.subscriptions.services import ensure_subscription_for_organization
+        from apps.subscriptions.team_services import reconcile_team_capacity_for_subscription
 
         subscription = ensure_subscription_for_organization(
             application.organization,
             activation_at=application.reviewed_at,
+            actor=reviewer,
+            request=request,
+        )
+        reconcile_team_capacity_for_subscription(
+            organization=application.organization,
             actor=reviewer,
             request=request,
         )
@@ -299,6 +305,11 @@ def update_onboarding(*, application, actor, organization_data, profile_data, re
 def _assert_non_owner_team_capacity(*, organization, user):
     target = Membership.objects.filter(organization=organization, user=user).first()
     if target and target.is_active and target.role != Membership.Role.OWNER:
+        return
+    if organization.verification_status != Organization.VerificationStatus.ACTIVE:
+        # Accepted onboarding behavior: Team setup may precede professional
+        # approval. Subscription creation/entitlement enforcement starts only
+        # at the explicit ACTIVE boundary and is reconciled there.
         return
     from apps.subscriptions.services import entitlement_summary
 
