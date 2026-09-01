@@ -28,7 +28,8 @@ from apps.organizations.manufacturer_services import (
     secure_manufacturer_member_upsert,
     update_active_manufacturer_profile,
 )
-from apps.organizations.models import ManufacturerProfile, Membership, OnboardingApplication, Organization
+from apps.organizations.models import ManufacturerProfile, Membership, OnboardingApplication, Organization, PublicProfileRevision
+from apps.organizations.public_profile_services import review_public_profile_revision, start_public_profile_review
 from apps.storefront.models import CustomerCustomization, CustomizationElement, ProductVariant, StoreProduct, Storefront, StudioProject
 
 User = get_user_model()
@@ -276,6 +277,7 @@ def test_tenant_selection_foreign_org_falls_back_without_leakage(client):
 @pytest.mark.django_db
 def test_profile_safe_allowlist_locks_verification_fields_and_audits(client):
     user, org, profile, _ = manufacturer("profile")
+    reviewer = User.objects.create_user(username="profile-reviewer", password="password123", is_staff=True)
     client.force_login(user)
     response = client.post(reverse("manufacturer-profile"), {
         "display_name": "Factory Updated",
@@ -297,11 +299,50 @@ def test_profile_safe_allowlist_locks_verification_fields_and_audits(client):
     })
     assert response.status_code == 302
     org.refresh_from_db(); profile.refresh_from_db()
-    assert org.display_name == "Factory Updated"
-    assert org.legal_name != "MUTATED LEGAL NAME"
+    assert org.display_name == "Factory profile"
+    assert org.city == "Cairo"
+    assert org.website == ""
+    assert org.email == "updated@example.test"
+    assert org.phone == "0200000000"
+    assert org.address_line1 == "New address"
+    assert org.legal_name == "Factory profile LLC"
+    assert profile.primary_contact_person == "New Contact"
+    assert profile.contact_job_title == "Plant Manager"
+    assert profile.whatsapp == "01022223333"
+    assert profile.google_maps_url == "https://maps.example.test/factory"
     assert profile.commercial_registration == "CR-LOCKED"
     assert profile.tax_number == "TAX-LOCKED"
+
+    revision = PublicProfileRevision.objects.get(organization=org)
+    assert revision.status == PublicProfileRevision.Status.SUBMITTED
+    assert revision.proposed_data["organization"]["display_name"] == "Factory Updated"
+    assert revision.proposed_data["organization"]["city"] == "Giza"
+    assert revision.proposed_data["organization"]["website"] == "https://example.test"
+    serialized = repr(revision.proposed_data)
+    for private_value in (
+        "updated@example.test", "0200000000", "New address", "New Contact",
+        "Plant Manager", "01022223333", "maps.example.test", "MUTATED-CR",
+        "MUTATED-TAX", "MUTATED LEGAL NAME",
+    ):
+        assert private_value not in serialized
     assert AuditEvent.objects.filter(action="manufacturer.profile.updated", object_id=str(org.pk)).exists()
+
+    start_public_profile_review(revision=revision, reviewer=reviewer)
+    revision.refresh_from_db()
+    assert revision.status == PublicProfileRevision.Status.UNDER_REVIEW
+    org.refresh_from_db()
+    assert org.display_name == "Factory profile"
+
+    review_public_profile_revision(
+        revision=revision,
+        reviewer=reviewer,
+        decision=PublicProfileRevision.Status.APPROVED,
+        notes="Approved manufacturer public identity",
+    )
+    org.refresh_from_db()
+    assert org.display_name == "Factory Updated"
+    assert org.city == "Giza"
+    assert org.website == "https://example.test"
 
 
 @pytest.mark.django_db

@@ -3,10 +3,24 @@
   {{ block.super }}
   {% if original and original.status == "submitted" %}
     <li>
+      <form method="post" action="{% url 'fabinzi_admin:organizations_publicprofilerevision_start_review' original.pk %}">
+        {% csrf_token %}
+        <button type="submit">Start public profile review</button>
+      </form>
+    </li>
+  {% elif original and original.status == "under_review" %}
+    <li>
       <form method="post" action="{% url 'fabinzi_admin:organizations_publicprofilerevision_approve' original.pk %}">
         {% csrf_token %}
         <input type="text" name="review_notes" placeholder="Approval notes">
         <button type="submit">Approve public revision</button>
+      </form>
+    </li>
+    <li>
+      <form method="post" action="{% url 'fabinzi_admin:organizations_publicprofilerevision_changes_required' original.pk %}">
+        {% csrf_token %}
+        <input type="text" name="review_notes" placeholder="Required changes">
+        <button type="submit">Request changes</button>
       </form>
     </li>
     <li>

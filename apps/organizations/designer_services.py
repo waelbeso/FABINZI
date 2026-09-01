@@ -42,7 +42,7 @@ def update_active_designer_profile(*, organization, actor, organization_data, pr
     )
     record_audit_event(
         actor=actor,
-        action="designer.profile.working_data_updated",
+        action="designer.profile.updated",
         instance=organization,
         metadata={
             "organization_id": organization.pk,

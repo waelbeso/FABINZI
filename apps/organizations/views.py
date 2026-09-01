@@ -6,7 +6,14 @@ from django.utils import timezone
 
 from .forms import DesignerOnboardingForm, ManufacturerOnboardingForm, OrganizationForm
 from .models import Membership, OnboardingApplication, Organization
-from .services import create_designer_onboarding, create_manufacturer_onboarding, require_org_access, submit_application, update_onboarding
+from .services import (
+    create_designer_onboarding,
+    create_manufacturer_onboarding,
+    create_reapplication_from_rejected,
+    require_org_access,
+    submit_application,
+    update_onboarding,
+)
 
 
 def _owned_application(user, kind):
@@ -89,10 +96,33 @@ def edit_onboarding(request, pk):
 
 @login_required
 def submit_onboarding(request, pk):
-    application = get_object_or_404(OnboardingApplication, pk=pk)
+    application = get_object_or_404(OnboardingApplication.objects.select_related("organization"), pk=pk)
     destination = "designer" if application.organization.kind == Organization.Kind.DESIGNER else "manufacturer"
     if request.method != "POST":
         return redirect(destination)
+
+    if request.POST.get("action") == "reapply":
+        try:
+            new_application = create_reapplication_from_rejected(
+                application=application,
+                actor=request.user,
+                request=request,
+            )
+        except (ValidationError, PermissionDenied) as exc:
+            messages.error(request, str(exc))
+        else:
+            session_key = (
+                "designer_organization_id"
+                if new_application.organization.kind == Organization.Kind.DESIGNER
+                else "manufacturer_organization_id"
+            )
+            request.session[session_key] = new_application.organization_id
+            messages.success(
+                request,
+                "A new application draft was created. The rejected application remains preserved in history.",
+            )
+        return redirect(destination)
+
     try:
         submit_application(application=application, actor=request.user, request=request)
     except (ValidationError, PermissionDenied) as exc:

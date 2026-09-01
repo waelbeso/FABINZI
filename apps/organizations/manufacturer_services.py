@@ -70,7 +70,7 @@ def update_active_manufacturer_profile(
     )
     record_audit_event(
         actor=actor,
-        action="manufacturer.profile.working_data_updated",
+        action="manufacturer.profile.updated",
         instance=organization,
         metadata={
             "organization_id": organization.pk,

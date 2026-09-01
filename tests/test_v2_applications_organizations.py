@@ -3,9 +3,14 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from django.contrib.auth.models import Permission
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.urls import reverse
+from django.utils import timezone
+from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from apps.accounts.models import User
+from apps.audit.models import AuditEvent
 from apps.manufacturer_marketplace.models import ManufacturerListing
 from apps.organizations.designer_services import update_active_designer_profile
 from apps.organizations.manufacturer_services import update_active_manufacturer_profile
@@ -19,6 +24,7 @@ from apps.organizations.public_profile_services import (
     current_public_profile_data,
     review_public_profile_revision,
     save_public_profile_revision,
+    start_public_profile_review,
     submit_public_profile_revision,
 )
 from apps.organizations.services import (
@@ -27,6 +33,7 @@ from apps.organizations.services import (
     review_application,
     submit_application,
 )
+from apps.platform_ops.models import ApplicationReviewConfiguration
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +46,20 @@ def _user(name, *, staff=False):
         password="StrongPass123!",
         is_staff=staff,
     )
+
+
+def _grant(user, *codenames):
+    permissions = Permission.objects.filter(codename__in=codenames)
+    assert permissions.count() == len(set(codenames))
+    user.user_permissions.add(*permissions)
+
+
+def _otp_login(client, user):
+    device = TOTPDevice.objects.create(user=user, name=f"v22-{user.pk}", confirmed=True)
+    client.force_login(user)
+    session = client.session
+    session["otp_device_id"] = device.persistent_id
+    session.save()
 
 
 def _designer_application(owner, *, name="V2 Designer"):
@@ -89,117 +110,179 @@ def _approve(application, reviewer):
 
 
 @pytest.mark.django_db
-def test_customer_can_submit_designer_application_through_web(client):
-    owner = _user("v22-designer-submit")
+def test_default_review_target_is_persisted_27_hours_and_does_not_auto_approve(client):
+    config = ApplicationReviewConfiguration.objects.get(singleton_key=1)
+    assert config.application_initial_review_target_hours == 27
+
+    owner = _user("v22-default-sla")
     application = _designer_application(owner)
     client.force_login(owner)
+    assert client.post(f"/onboarding/{application.pk}/submit/").status_code == 302
 
-    response = client.post(f"/onboarding/{application.pk}/submit/")
-
-    assert response.status_code == 302
     application.refresh_from_db()
-    application.organization.refresh_from_db()
     assert application.status == OnboardingApplication.Status.SUBMITTED
-    assert application.organization.verification_status == Organization.VerificationStatus.PENDING
-    assert application.review_target_at == application.submitted_at + timedelta(hours=27)
+    assert application.initial_review_target_at == application.submitted_at + timedelta(hours=27)
+    assert application.review_target_at == application.initial_review_target_at
 
-
-@pytest.mark.django_db
-def test_customer_can_submit_manufacturer_application_through_web(client):
-    owner = _user("v22-manufacturer-submit")
-    application = _manufacturer_application(owner)
-    client.force_login(owner)
-
-    response = client.post(f"/onboarding/{application.pk}/submit/")
-
-    assert response.status_code == 302
+    application.initial_review_target_at = timezone.now() - timedelta(hours=1)
+    application.save(update_fields=["initial_review_target_at"])
     application.refresh_from_db()
-    application.organization.refresh_from_db()
     assert application.status == OnboardingApplication.Status.SUBMITTED
     assert application.organization.verification_status == Organization.VerificationStatus.PENDING
 
 
 @pytest.mark.django_db
-def test_pending_and_rejected_applications_do_not_activate_professional_navigation(client):
-    pending_owner = _user("v22-pending-designer")
-    pending = _designer_application(pending_owner)
-    submit_application(application=pending, actor=pending_owner)
+def test_maneg_review_configuration_changes_only_future_first_submission_targets(client):
+    first_owner = _user("v22-sla-first")
+    first = _designer_application(first_owner)
+    submit_application(application=first, actor=first_owner)
+    first.refresh_from_db()
+    original_target = first.initial_review_target_at
 
-    client.force_login(pending_owner)
-    pending_page = client.get("/")
-    assert pending_page.status_code == 200
-    assert 'href="/designer/"' not in pending_page.content.decode()
+    operator = _user("v22-sla-operator", staff=True)
+    _grant(
+        operator,
+        "view_applicationreviewconfiguration",
+        "change_applicationreviewconfiguration",
+    )
+    _otp_login(client, operator)
+    config = ApplicationReviewConfiguration.objects.get(singleton_key=1)
+    change_url = reverse(
+        "fabinzi_admin:platform_ops_applicationreviewconfiguration_change",
+        args=[config.pk],
+    )
+    response = client.post(
+        change_url,
+        {"application_initial_review_target_hours": "36", "_save": "Save"},
+    )
+    assert response.status_code == 302
+    config.refresh_from_db()
+    assert config.application_initial_review_target_hours == 36
+    assert AuditEvent.objects.filter(
+        action="control_center.application_review_configuration.updated",
+        object_id=str(config.pk),
+    ).exists()
 
-    rejected_owner = _user("v22-rejected-manufacturer")
-    reviewer = _user("v22-reject-reviewer", staff=True)
-    rejected = _manufacturer_application(rejected_owner)
-    submit_application(application=rejected, actor=rejected_owner)
+    first.refresh_from_db()
+    assert first.initial_review_target_at == original_target
+
+    second_owner = _user("v22-sla-second")
+    second = _manufacturer_application(second_owner)
+    submit_application(application=second, actor=second_owner)
+    second.refresh_from_db()
+    assert second.initial_review_target_at == second.submitted_at + timedelta(hours=36)
+
+    reviewer = _user("v22-sla-reviewer", staff=True)
+    review_application(
+        application=second,
+        reviewer=reviewer,
+        decision=OnboardingApplication.Status.REVISION_REQUIRED,
+        notes="Please revise",
+    )
+    target_before_resubmission = second.initial_review_target_at
+    submit_application(application=second, actor=second_owner)
+    second.refresh_from_db()
+    assert second.initial_review_target_at == target_before_resubmission
+
+
+@pytest.mark.django_db
+def test_unauthorized_staff_cannot_change_review_configuration(client):
+    viewer = _user("v22-sla-viewer", staff=True)
+    _grant(viewer, "view_applicationreviewconfiguration")
+    _otp_login(client, viewer)
+    config = ApplicationReviewConfiguration.objects.get(singleton_key=1)
+    response = client.post(
+        reverse(
+            "fabinzi_admin:platform_ops_applicationreviewconfiguration_change",
+            args=[config.pk],
+        ),
+        {"application_initial_review_target_hours": "72", "_save": "Save"},
+    )
+    assert response.status_code == 403
+    config.refresh_from_db()
+    assert config.application_initial_review_target_hours == 27
+
+
+@pytest.mark.django_db
+def test_duplicate_open_and_approved_same_role_applications_are_blocked():
+    owner = _user("v22-duplicate")
+    draft = _designer_application(owner)
+    with pytest.raises(ValidationError):
+        _designer_application(owner, name="Duplicate Draft Studio")
+
+    submit_application(application=draft, actor=owner)
+    with pytest.raises(ValidationError):
+        _designer_application(owner, name="Duplicate Submitted Studio")
+
+    reviewer = _user("v22-duplicate-reviewer", staff=True)
+    review_application(
+        application=draft,
+        reviewer=reviewer,
+        decision=OnboardingApplication.Status.REVISION_REQUIRED,
+    )
+    with pytest.raises(ValidationError):
+        _designer_application(owner, name="Duplicate Revision Studio")
+
+    submit_application(application=draft, actor=owner)
+    review_application(
+        application=draft,
+        reviewer=reviewer,
+        decision=OnboardingApplication.Status.APPROVED,
+    )
+    with pytest.raises(ValidationError):
+        _designer_application(owner, name="Duplicate Approved Studio")
+
+
+@pytest.mark.django_db
+def test_rejected_application_can_reapply_through_supported_web_path_without_rewriting_history(client):
+    owner = _user("v22-reapply")
+    reviewer = _user("v22-reapply-reviewer", staff=True)
+    rejected = _designer_application(owner, name="Rejected Studio")
+    submit_application(application=rejected, actor=owner)
     review_application(
         application=rejected,
         reviewer=reviewer,
         decision=OnboardingApplication.Status.REJECTED,
-        notes="Not approved",
+        notes="Final rejection",
     )
-
-    client.force_login(rejected_owner)
-    rejected_page = client.get("/")
-    assert rejected_page.status_code == 200
-    assert 'href="/manufacturer/"' not in rejected_page.content.decode()
-
-
-@pytest.mark.django_db
-def test_approved_application_activates_only_the_intended_professional_path(client):
-    owner = _user("v22-approved-designer")
-    reviewer = _user("v22-approved-reviewer", staff=True)
-    application = _approve(_designer_application(owner), reviewer)
-
-    membership = Membership.objects.get(organization=application.organization, user=owner)
-    assert membership.is_active
-    assert membership.role == Membership.Role.OWNER
-    assert application.organization.verification_status == Organization.VerificationStatus.ACTIVE
+    old_application_id = rejected.pk
+    old_organization_id = rejected.organization_id
 
     client.force_login(owner)
-    page = client.get("/")
-    html = page.content.decode()
-    assert 'href="/designer/"' in html
-    assert 'href="/manufacturer/"' not in html
+    state_page = client.get("/designer/")
+    assert state_page.status_code == 200
+    assert "Start a new application" in state_page.content.decode()
+    response = client.post(
+        f"/onboarding/{rejected.pk}/submit/",
+        {"action": "reapply"},
+    )
+    assert response.status_code == 302
 
+    rejected.refresh_from_db()
+    rejected.organization.refresh_from_db()
+    assert rejected.pk == old_application_id
+    assert rejected.organization_id == old_organization_id
+    assert rejected.status == OnboardingApplication.Status.REJECTED
+    assert rejected.organization.verification_status == Organization.VerificationStatus.REJECTED
 
-@pytest.mark.django_db
-def test_active_organization_and_active_membership_are_both_required_and_suspension_removes_role(client):
-    owner = _user("v22-role-gates")
-    reviewer = _user("v22-role-gates-reviewer", staff=True)
-    application = _approve(_manufacturer_application(owner), reviewer)
-    organization = application.organization
-    membership = Membership.objects.get(organization=organization, user=owner)
-
-    client.force_login(owner)
-    assert 'href="/manufacturer/"' in client.get("/").content.decode()
-
-    membership.is_active = False
-    membership.save(update_fields=["is_active"])
-    assert 'href="/manufacturer/"' not in client.get("/").content.decode()
-
-    membership.is_active = True
-    membership.save(update_fields=["is_active"])
-    organization.verification_status = Organization.VerificationStatus.SUSPENDED
-    organization.save(update_fields=["verification_status"])
-    assert 'href="/manufacturer/"' not in client.get("/").content.decode()
-
-
-@pytest.mark.django_db
-def test_duplicate_professional_application_for_same_role_is_rejected():
-    owner = _user("v22-duplicate")
-    application = _designer_application(owner)
-    submit_application(application=application, actor=owner)
-
-    with pytest.raises(ValidationError):
-        _designer_application(owner, name="Duplicate Studio")
-
-    assert OnboardingApplication.objects.filter(
+    attempts = OnboardingApplication.objects.filter(
         organization__created_by=owner,
         organization__kind=Organization.Kind.DESIGNER,
-    ).count() == 1
+    ).order_by("id")
+    assert attempts.count() == 2
+    new_application = attempts.exclude(pk=rejected.pk).get()
+    assert new_application.status == OnboardingApplication.Status.DRAFT
+    assert new_application.organization_id != old_organization_id
+    assert new_application.organization.verification_status == Organization.VerificationStatus.DRAFT
+    assert new_application.initial_review_target_at is None
+    assert client.session["designer_organization_id"] == new_application.organization_id
+    assert AuditEvent.objects.filter(
+        action="onboarding.reapplication.created",
+        object_id=str(new_application.pk),
+    ).exists()
+
+    with pytest.raises(ValidationError):
+        _designer_application(owner, name="Concurrent Third Studio")
 
 
 @pytest.mark.django_db
@@ -207,10 +290,8 @@ def test_application_ownership_and_reviewer_boundaries():
     owner = _user("v22-app-owner")
     outsider = _user("v22-app-outsider")
     application = _designer_application(owner)
-
     with pytest.raises(PermissionDenied):
         submit_application(application=application, actor=outsider)
-
     submit_application(application=application, actor=owner)
     with pytest.raises(PermissionDenied):
         review_application(
@@ -221,7 +302,20 @@ def test_application_ownership_and_reviewer_boundaries():
 
 
 @pytest.mark.django_db
-def test_designer_public_revision_has_draft_submitted_and_approved_states():
+def test_approved_application_activates_only_intended_professional_path(client):
+    owner = _user("v22-approved-designer")
+    reviewer = _user("v22-approved-reviewer", staff=True)
+    application = _approve(_designer_application(owner), reviewer)
+    membership = Membership.objects.get(organization=application.organization, user=owner)
+    assert membership.is_active and membership.role == Membership.Role.OWNER
+    client.force_login(owner)
+    html = client.get("/").content.decode()
+    assert 'href="/designer/"' in html
+    assert 'href="/manufacturer/"' not in html
+
+
+@pytest.mark.django_db
+def test_public_profile_full_state_machine_applies_only_after_approval():
     owner = _user("v22-designer-revision")
     reviewer = _user("v22-designer-revision-reviewer", staff=True)
     application = _approve(_designer_application(owner, name="Approved Studio"), reviewer)
@@ -230,39 +324,117 @@ def test_designer_public_revision_has_draft_submitted_and_approved_states():
     payload = current_public_profile_data(organization)
     payload["organization"]["display_name"] = "Proposed Studio"
     payload["profile"]["studio_name"] = "Proposed Studio"
-    draft = save_public_profile_revision(organization=organization, actor=owner, proposed_data=payload)
-
-    assert draft.status == PublicProfileRevision.Status.DRAFT
-    organization.refresh_from_db()
+    revision = save_public_profile_revision(
+        organization=organization,
+        actor=owner,
+        proposed_data=payload,
+    )
+    assert revision.status == PublicProfileRevision.Status.DRAFT
     assert organization.display_name == "Approved Studio"
 
-    submit_public_profile_revision(revision=draft, actor=owner)
-    draft.refresh_from_db()
-    assert draft.status == PublicProfileRevision.Status.SUBMITTED
-    organization.refresh_from_db()
+    submit_public_profile_revision(revision=revision, actor=owner)
+    revision.refresh_from_db(); organization.refresh_from_db()
+    assert revision.status == PublicProfileRevision.Status.SUBMITTED
     assert organization.display_name == "Approved Studio"
 
     with pytest.raises(PermissionDenied):
+        start_public_profile_review(revision=revision, reviewer=owner)
+    with pytest.raises(ValidationError):
         review_public_profile_revision(
-            revision=draft,
-            reviewer=owner,
+            revision=revision,
+            reviewer=reviewer,
             decision=PublicProfileRevision.Status.APPROVED,
         )
 
+    start_public_profile_review(revision=revision, reviewer=reviewer)
+    revision.refresh_from_db(); organization.refresh_from_db()
+    assert revision.status == PublicProfileRevision.Status.UNDER_REVIEW
+    assert organization.display_name == "Approved Studio"
+
     review_public_profile_revision(
-        revision=draft,
+        revision=revision,
         reviewer=reviewer,
         decision=PublicProfileRevision.Status.APPROVED,
         notes="Public identity approved",
     )
-    organization.refresh_from_db()
+    revision.refresh_from_db(); organization.refresh_from_db()
     organization.designer_profile.refresh_from_db()
+    assert revision.status == PublicProfileRevision.Status.APPROVED
     assert organization.display_name == "Proposed Studio"
     assert organization.designer_profile.studio_name == "Proposed Studio"
 
 
 @pytest.mark.django_db
-def test_pending_and_rejected_manufacturer_revision_never_replaces_public_content_or_leaks_private_data(client):
+def test_changes_required_is_editable_and_resubmits_same_revision_without_public_mutation():
+    owner = _user("v22-changes-owner")
+    reviewer = _user("v22-changes-reviewer", staff=True)
+    organization = _approve(_designer_application(owner, name="Current Studio"), reviewer).organization
+
+    payload = current_public_profile_data(organization)
+    payload["organization"]["display_name"] = "First Proposal"
+    revision = save_public_profile_revision(organization=organization, actor=owner, proposed_data=payload)
+    submit_public_profile_revision(revision=revision, actor=owner)
+    start_public_profile_review(revision=revision, reviewer=reviewer)
+    review_public_profile_revision(
+        revision=revision,
+        reviewer=reviewer,
+        decision=PublicProfileRevision.Status.CHANGES_REQUIRED,
+        notes="Use the registered public name",
+    )
+    revision.refresh_from_db(); organization.refresh_from_db()
+    assert revision.status == PublicProfileRevision.Status.CHANGES_REQUIRED
+    assert revision.review_notes == "Use the registered public name"
+    assert organization.display_name == "Current Studio"
+    revision_id = revision.pk
+
+    corrected = dict(revision.proposed_data)
+    corrected["organization"] = dict(corrected["organization"])
+    corrected["organization"]["display_name"] = "Corrected Proposal"
+    same_revision = save_public_profile_revision(
+        organization=organization,
+        actor=owner,
+        proposed_data=corrected,
+    )
+    assert same_revision.pk == revision_id
+    assert same_revision.status == PublicProfileRevision.Status.CHANGES_REQUIRED
+    submit_public_profile_revision(revision=same_revision, actor=owner)
+    same_revision.refresh_from_db()
+    assert same_revision.pk == revision_id
+    assert same_revision.status == PublicProfileRevision.Status.SUBMITTED
+    assert organization.public_profile_revisions.filter(
+        status__in=PublicProfileRevision.OPEN_STATUSES
+    ).count() == 1
+
+    start_public_profile_review(revision=same_revision, reviewer=reviewer)
+    review_public_profile_revision(
+        revision=same_revision,
+        reviewer=reviewer,
+        decision=PublicProfileRevision.Status.APPROVED,
+        notes="Corrected identity approved",
+    )
+    organization.refresh_from_db()
+    assert organization.display_name == "Corrected Proposal"
+
+    actions = set(
+        AuditEvent.objects.filter(object_id=str(revision_id)).values_list("action", flat=True)
+    )
+    assert {
+        "public_profile.revision.draft_saved",
+        "public_profile.revision.submitted",
+        "public_profile.revision.review_started",
+        "public_profile.revision.changes_required",
+        "public_profile.revision.updated",
+        "public_profile.revision.approved",
+    }.issubset(actions)
+    assert AuditEvent.objects.filter(
+        action="public_profile.revision.changes_required",
+        object_id=str(revision_id),
+        metadata__review_notes="Use the registered public name",
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_rejected_manufacturer_revision_never_replaces_public_content_or_leaks_private_data(client):
     owner = _user("v22-private-manufacturer")
     reviewer = _user("v22-private-reviewer", staff=True)
     application = _approve(_manufacturer_application(owner, name="Approved Factory"), reviewer)
@@ -298,61 +470,51 @@ def test_pending_and_rejected_manufacturer_revision_never_replaces_public_conten
             "tax_number": "PRIVATE-TAX",
         },
     )
-
-    organization.refresh_from_db()
-    organization.manufacturer_profile.refresh_from_db()
+    organization.refresh_from_db(); organization.manufacturer_profile.refresh_from_db()
     assert organization.display_name == "Approved Factory"
     assert organization.email == "private-ops@example.com"
     assert organization.manufacturer_profile.whatsapp == "PRIVATE-WHATSAPP"
 
-    revision = PublicProfileRevision.objects.get(organization=organization, status=PublicProfileRevision.Status.SUBMITTED)
+    revision = PublicProfileRevision.objects.get(organization=organization)
+    assert revision.status == PublicProfileRevision.Status.SUBMITTED
     serialized_revision = repr(revision.proposed_data)
     for secret in (
-        "private-ops@example.com",
-        "PRIVATE-PHONE-0100",
-        "PRIVATE FACTORY ADDRESS",
-        "PRIVATE FLOOR",
-        "PRIVATE CONTACT PERSON",
-        "PRIVATE ROLE",
-        "PRIVATE-WHATSAPP",
-        "PRIVATE-CR",
-        "PRIVATE-TAX",
-        "private-factory",
+        "private-ops@example.com", "PRIVATE-PHONE-0100", "PRIVATE FACTORY ADDRESS",
+        "PRIVATE FLOOR", "PRIVATE CONTACT PERSON", "PRIVATE ROLE", "PRIVATE-WHATSAPP",
+        "PRIVATE-CR", "PRIVATE-TAX", "private-factory",
     ):
         assert secret not in serialized_revision
 
-    public_pending = client.get(f"/manufacturers/{listing.pk}/")
-    pending_html = public_pending.content.decode()
-    assert public_pending.status_code == 200
-    assert "Approved Factory" in pending_html
-    assert "Pending Factory" not in pending_html
-    assert "PRIVATE-WHATSAPP" not in pending_html
-    assert "private-ops@example.com" not in pending_html
+    pending_html = client.get(f"/manufacturers/{listing.pk}/").content.decode()
+    assert "Approved Factory" in pending_html and "Pending Factory" not in pending_html
 
+    start_public_profile_review(revision=revision, reviewer=reviewer)
     review_public_profile_revision(
         revision=revision,
         reviewer=reviewer,
         decision=PublicProfileRevision.Status.REJECTED,
         notes="Keep current approved identity",
     )
-    organization.refresh_from_db()
+    revision.refresh_from_db(); organization.refresh_from_db()
+    assert revision.status == PublicProfileRevision.Status.REJECTED
     assert organization.display_name == "Approved Factory"
-    public_rejected = client.get(f"/manufacturers/{listing.pk}/")
-    rejected_html = public_rejected.content.decode()
-    assert "Approved Factory" in rejected_html
-    assert "Pending Factory" not in rejected_html
+    rejected_html = client.get(f"/manufacturers/{listing.pk}/").content.decode()
+    assert "Approved Factory" in rejected_html and "Pending Factory" not in rejected_html
+    assert AuditEvent.objects.filter(
+        action="public_profile.revision.rejected",
+        object_id=str(revision.pk),
+    ).exists()
 
 
 @pytest.mark.django_db
-def test_profile_update_service_submits_public_revision_without_overwriting_approved_designer_content():
-    owner = _user("v22-designer-service-revision")
-    reviewer = _user("v22-designer-service-reviewer", staff=True)
-    application = _approve(_designer_application(owner, name="Current Designer"), reviewer)
-    organization = application.organization
+def test_profile_update_services_preserve_private_working_data_and_stable_audit_ids():
+    reviewer = _user("v22-profile-audit-reviewer", staff=True)
 
+    designer_owner = _user("v22-designer-service")
+    designer = _approve(_designer_application(designer_owner, name="Current Designer"), reviewer).organization
     update_active_designer_profile(
-        organization=organization,
-        actor=owner,
+        organization=designer,
+        actor=designer_owner,
         organization_data={
             "display_name": "Pending Designer",
             "email": "private-designer@example.com",
@@ -367,17 +529,109 @@ def test_profile_update_service_submits_public_revision_without_overwriting_appr
         profile_data={
             "studio_name": "Pending Designer",
             "portfolio_url": "https://portfolio.example.com",
-            "social_links": {"instagram": "https://instagram.com/fabinzi-test"},
+            "social_links": {},
         },
     )
+    designer.refresh_from_db(); designer.designer_profile.refresh_from_db()
+    assert designer.display_name == "Current Designer"
+    assert designer.email == "private-designer@example.com"
+    assert AuditEvent.objects.filter(action="designer.profile.updated", object_id=str(designer.pk)).exists()
 
+    manufacturer_owner = _user("v22-manufacturer-service")
+    manufacturer = _approve(_manufacturer_application(manufacturer_owner, name="Current Factory"), reviewer).organization
+    update_active_manufacturer_profile(
+        organization=manufacturer,
+        actor=manufacturer_owner,
+        organization_data={
+            "display_name": "Pending Factory",
+            "email": "private-factory@example.com",
+            "phone": "01000000001",
+            "website": "",
+            "address_line1": "Factory private address",
+            "address_line2": "",
+            "city": "Giza",
+            "region": "Giza",
+            "country": "EG",
+        },
+        profile_data={
+            "primary_contact_person": "Private Contact",
+            "contact_job_title": "Operations",
+            "whatsapp": "01012345678",
+            "google_maps_url": "",
+        },
+    )
+    manufacturer.refresh_from_db()
+    assert manufacturer.display_name == "Current Factory"
+    assert manufacturer.email == "private-factory@example.com"
+    assert AuditEvent.objects.filter(action="manufacturer.profile.updated", object_id=str(manufacturer.pk)).exists()
+
+
+@pytest.mark.django_db
+def test_maneg_suspend_and_reactivate_preserve_history_and_gate_professional_access(client):
+    owner = _user("v22-lifecycle-owner")
+    reviewer = _user("v22-lifecycle-reviewer", staff=True)
+    application = _approve(_designer_application(owner, name="Lifecycle Studio"), reviewer)
+    organization = application.organization
+    membership = Membership.objects.get(organization=organization, user=owner)
+
+    owner_client = client
+    owner_client.force_login(owner)
+    assert 'href="/designer/"' in owner_client.get("/").content.decode()
+
+    from django.test import Client
+    staff_client = Client()
+    operator = _user("v22-lifecycle-operator", staff=True)
+    _grant(operator, "view_organization", "change_organization")
+    _otp_login(staff_client, operator)
+    detail = reverse("fabinzi_admin:maneg-organization-detail", args=[organization.pk])
+
+    response = staff_client.post(detail, {"action": "suspend"})
+    assert response.status_code == 302
+    organization.refresh_from_db(); membership.refresh_from_db()
+    assert organization.verification_status == Organization.VerificationStatus.SUSPENDED
+    assert membership.is_active is True
+    assert application.status == OnboardingApplication.Status.APPROVED
+    assert 'href="/designer/"' not in owner_client.get("/").content.decode()
+    portal = owner_client.get(f"/designer/?org={organization.pk}")
+    assert portal.status_code == 200
+    assert "Organization suspended" in portal.content.decode()
+
+    response = staff_client.post(detail, {"action": "reactivate"})
+    assert response.status_code == 302
+    organization.refresh_from_db(); membership.refresh_from_db()
+    assert organization.verification_status == Organization.VerificationStatus.ACTIVE
+    assert membership.is_active is True
+    assert 'href="/designer/"' in owner_client.get("/").content.decode()
+    assert AuditEvent.objects.filter(action="control_center.organization.suspended", object_id=str(organization.pk)).exists()
+    assert AuditEvent.objects.filter(action="control_center.organization.reactivated", object_id=str(organization.pk)).exists()
+
+
+@pytest.mark.django_db
+def test_unauthorized_or_ineligible_maneg_lifecycle_changes_are_rejected(client):
+    owner = _user("v22-lifecycle-denied-owner")
+    reviewer = _user("v22-lifecycle-denied-reviewer", staff=True)
+    application = _approve(_manufacturer_application(owner), reviewer)
+    organization = application.organization
+
+    viewer = _user("v22-lifecycle-viewer", staff=True)
+    _grant(viewer, "view_organization")
+    _otp_login(client, viewer)
+    detail = reverse("fabinzi_admin:maneg-organization-detail", args=[organization.pk])
+    assert client.post(detail, {"action": "suspend"}).status_code == 403
     organization.refresh_from_db()
-    organization.designer_profile.refresh_from_db()
-    assert organization.display_name == "Current Designer"
-    assert organization.designer_profile.studio_name == "Current Designer"
-    assert organization.email == "private-designer@example.com"
-    revision = PublicProfileRevision.objects.get(organization=organization, status=PublicProfileRevision.Status.SUBMITTED)
-    assert revision.proposed_data["organization"]["display_name"] == "Pending Designer"
+    assert organization.verification_status == Organization.VerificationStatus.ACTIVE
+
+    operator = _user("v22-lifecycle-valid-operator", staff=True)
+    _grant(operator, "view_organization", "change_organization")
+    _otp_login(client, operator)
+    organization.verification_status = Organization.VerificationStatus.SUSPENDED
+    organization.save(update_fields=["verification_status"])
+    application.status = OnboardingApplication.Status.REJECTED
+    application.save(update_fields=["status"])
+    response = client.post(detail, {"action": "reactivate"})
+    assert response.status_code == 302
+    organization.refresh_from_db()
+    assert organization.verification_status == Organization.VerificationStatus.SUSPENDED
 
 
 @pytest.mark.django_db

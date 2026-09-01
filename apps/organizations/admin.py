@@ -13,7 +13,7 @@ from .models import (
     PublicProfileRevision,
     VerificationDocument,
 )
-from .public_profile_services import review_public_profile_revision
+from .public_profile_services import review_public_profile_revision, start_public_profile_review
 from .services import review_application
 
 
@@ -59,6 +59,7 @@ class OnboardingApplicationAdmin(admin.ModelAdmin):
         "review_notes",
         "revision_count",
         "submitted_at",
+        "initial_review_target_at",
         "reviewed_at",
         "reviewed_by",
         "created_at",
@@ -129,10 +130,21 @@ class PublicProfileRevisionAdmin(admin.ModelAdmin):
     def get_urls(self):
         custom = [
             path(
+                "<int:object_id>/start-review/",
+                self.admin_site.admin_view(self.start_review_view),
+                name="organizations_publicprofilerevision_start_review",
+            ),
+            path(
                 "<int:object_id>/approve/",
                 self.admin_site.admin_view(self.review_view),
                 {"decision": PublicProfileRevision.Status.APPROVED},
                 name="organizations_publicprofilerevision_approve",
+            ),
+            path(
+                "<int:object_id>/changes-required/",
+                self.admin_site.admin_view(self.review_view),
+                {"decision": PublicProfileRevision.Status.CHANGES_REQUIRED},
+                name="organizations_publicprofilerevision_changes_required",
             ),
             path(
                 "<int:object_id>/reject/",
@@ -143,15 +155,45 @@ class PublicProfileRevisionAdmin(admin.ModelAdmin):
         ]
         return custom + super().get_urls()
 
-    def review_view(self, request, object_id, decision):
+    def _revision_or_redirect(self, request, object_id):
         revision = self.get_object(request, object_id)
         if revision is None:
             self.message_user(request, "Public profile revision not found.", messages.ERROR)
-            return HttpResponseRedirect(
+            return None, HttpResponseRedirect(
                 reverse("fabinzi_admin:organizations_publicprofilerevision_changelist")
             )
         if not self.has_change_permission(request, revision):
             raise PermissionDenied("Public profile review permission required.")
+        return revision, None
+
+    def start_review_view(self, request, object_id):
+        revision, response = self._revision_or_redirect(request, object_id)
+        if response:
+            return response
+        if request.method != "POST":
+            self.message_user(request, "Review actions require POST.", messages.ERROR)
+        else:
+            try:
+                start_public_profile_review(
+                    revision=revision,
+                    reviewer=request.user,
+                    request=request,
+                )
+            except ValidationError as exc:
+                self.message_user(request, "; ".join(exc.messages), messages.ERROR)
+            else:
+                self.message_user(request, "Public profile review started.", messages.SUCCESS)
+        return HttpResponseRedirect(
+            reverse(
+                "fabinzi_admin:organizations_publicprofilerevision_change",
+                args=[revision.pk],
+            )
+        )
+
+    def review_view(self, request, object_id, decision):
+        revision, response = self._revision_or_redirect(request, object_id)
+        if response:
+            return response
         if request.method != "POST":
             self.message_user(request, "Review actions require POST.", messages.ERROR)
             return HttpResponseRedirect(

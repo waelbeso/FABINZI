@@ -1,5 +1,3 @@
-from datetime import timedelta
-
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -121,8 +119,6 @@ class ManufacturerProfile(models.Model):
 
 
 class OnboardingApplication(models.Model):
-    REVIEW_TARGET_HOURS = 27
-
     class Status(models.TextChoices):
         DRAFT = "draft", "Draft"
         SUBMITTED = "submitted", "Submitted"
@@ -135,6 +131,7 @@ class OnboardingApplication(models.Model):
     review_notes = models.TextField(blank=True)
     revision_count = models.PositiveIntegerField(default=0)
     submitted_at = models.DateTimeField(null=True, blank=True)
+    initial_review_target_at = models.DateTimeField(null=True, blank=True)
     reviewed_at = models.DateTimeField(null=True, blank=True)
     reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="reviewed_onboarding_applications")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -146,9 +143,7 @@ class OnboardingApplication(models.Model):
 
     @property
     def review_target_at(self):
-        if not self.submitted_at:
-            return None
-        return self.submitted_at + timedelta(hours=self.REVIEW_TARGET_HOURS)
+        return self.initial_review_target_at
 
     def __str__(self):
         return f"{self.organization} · {self.get_status_display()}"
@@ -158,8 +153,13 @@ class PublicProfileRevision(models.Model):
     class Status(models.TextChoices):
         DRAFT = "draft", "Draft"
         SUBMITTED = "submitted", "Submitted"
+        UNDER_REVIEW = "under_review", "Under review"
+        CHANGES_REQUIRED = "changes_required", "Changes required"
         APPROVED = "approved", "Approved"
         REJECTED = "rejected", "Rejected"
+
+    OPEN_STATUSES = (Status.DRAFT, Status.SUBMITTED, Status.UNDER_REVIEW, Status.CHANGES_REQUIRED)
+    EDITABLE_STATUSES = (Status.DRAFT, Status.CHANGES_REQUIRED)
 
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="public_profile_revisions")
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT, db_index=True)
@@ -180,7 +180,7 @@ class PublicProfileRevision(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["organization"],
-                condition=models.Q(status__in=["draft", "submitted"]),
+                condition=models.Q(status__in=["draft", "submitted", "under_review", "changes_required"]),
                 name="unique_open_public_profile_revision",
             )
         ]

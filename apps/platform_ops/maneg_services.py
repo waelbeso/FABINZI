@@ -52,6 +52,27 @@ def suspend_organization(*, organization, actor, request=None):
 
 
 @transaction.atomic
+def reactivate_organization(*, organization, actor, request=None):
+    _require_staff(actor)
+    if organization.verification_status != Organization.VerificationStatus.SUSPENDED:
+        raise ValidationError("Only a suspended organization can be reactivated.")
+    application = getattr(organization, "onboarding_application", None)
+    if application is None or application.status != application.Status.APPROVED:
+        raise ValidationError("Only a previously approved professional organization can be reactivated.")
+    previous = organization.verification_status
+    organization.verification_status = Organization.VerificationStatus.ACTIVE
+    organization.save(update_fields=["verification_status", "updated_at"])
+    record_audit_event(
+        actor=actor,
+        action="control_center.organization.reactivated",
+        instance=organization,
+        metadata={"organization_id": organization.pk, "previous_status": previous},
+        request=request,
+    )
+    return organization
+
+
+@transaction.atomic
 def save_announcement(*, form, actor, request=None):
     _require_staff(actor)
     announcement = form.save(commit=False)

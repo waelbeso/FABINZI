@@ -142,35 +142,46 @@ def save_public_profile_revision(
         organization=organization,
         proposed_data=proposed_data,
     )
-    submitted = organization.public_profile_revisions.filter(
-        status=PublicProfileRevision.Status.SUBMITTED
+    locked = organization.public_profile_revisions.filter(
+        status__in=[
+            PublicProfileRevision.Status.SUBMITTED,
+            PublicProfileRevision.Status.UNDER_REVIEW,
+        ]
     ).first()
-    if submitted:
-        if submitted.proposed_data == cleaned:
-            return submitted
+    if locked:
+        if locked.proposed_data == cleaned:
+            return locked
         raise ValidationError(
-            "A public profile revision is already submitted and awaiting FABINZI review."
+            "A public profile revision is already submitted or under FABINZI review."
         )
 
-    draft = organization.public_profile_revisions.filter(
-        status=PublicProfileRevision.Status.DRAFT
+    revision = organization.public_profile_revisions.filter(
+        status__in=PublicProfileRevision.EDITABLE_STATUSES
     ).first()
-    if draft is None:
-        draft = PublicProfileRevision(
+    created = revision is None
+    if created:
+        revision = PublicProfileRevision(
             organization=organization,
             created_by=actor,
         )
-    draft.proposed_data = cleaned
-    draft.full_clean()
-    draft.save()
+    revision.proposed_data = cleaned
+    revision.full_clean()
+    revision.save()
     record_audit_event(
         actor=actor,
-        action="public_profile.revision.draft_saved",
-        instance=draft,
-        metadata={"organization_id": organization.pk},
+        action=(
+            "public_profile.revision.draft_saved"
+            if created
+            else "public_profile.revision.updated"
+        ),
+        instance=revision,
+        metadata={
+            "organization_id": organization.pk,
+            "status": revision.status,
+        },
         request=request,
     )
-    return draft
+    return revision
 
 
 @transaction.atomic
@@ -178,14 +189,17 @@ def submit_public_profile_revision(*, revision, actor, request=None):
     _require_professional_profile_manager(actor, revision.organization)
     if revision.status == PublicProfileRevision.Status.SUBMITTED:
         return revision
-    if revision.status != PublicProfileRevision.Status.DRAFT:
-        raise ValidationError("Only a draft public profile revision can be submitted.")
+    if revision.status not in PublicProfileRevision.EDITABLE_STATUSES:
+        raise ValidationError(
+            "Only a draft or changes-required public profile revision can be submitted."
+        )
     normalized = normalize_public_profile_data(
         organization=revision.organization,
         proposed_data=revision.proposed_data,
     )
     if normalized == current_public_profile_data(revision.organization):
         raise ValidationError("There are no public profile changes to submit.")
+    previous_status = revision.status
     revision.proposed_data = normalized
     revision.status = PublicProfileRevision.Status.SUBMITTED
     revision.submitted_at = timezone.now()
@@ -207,7 +221,10 @@ def submit_public_profile_revision(*, revision, actor, request=None):
         actor=actor,
         action="public_profile.revision.submitted",
         instance=revision,
-        metadata={"organization_id": revision.organization_id},
+        metadata={
+            "organization_id": revision.organization_id,
+            "previous_status": previous_status,
+        },
         request=request,
     )
     return revision
@@ -224,7 +241,7 @@ def propose_and_submit_public_profile_update(
     current = current_public_profile_data(organization)
     if cleaned == current:
         return organization.public_profile_revisions.filter(
-            status=PublicProfileRevision.Status.SUBMITTED
+            status__in=PublicProfileRevision.OPEN_STATUSES
         ).first()
     revision = save_public_profile_revision(
         organization=organization,
@@ -232,7 +249,7 @@ def propose_and_submit_public_profile_update(
         proposed_data=cleaned,
         request=request,
     )
-    if revision.status == PublicProfileRevision.Status.DRAFT:
+    if revision.status in PublicProfileRevision.EDITABLE_STATUSES:
         revision = submit_public_profile_revision(
             revision=revision,
             actor=actor,
@@ -267,6 +284,37 @@ def _apply_approved_public_data(revision):
 
 
 @transaction.atomic
+def start_public_profile_review(*, revision, reviewer, request=None):
+    if not reviewer.is_staff:
+        raise PermissionDenied("Staff access required.")
+    if revision.status == PublicProfileRevision.Status.UNDER_REVIEW:
+        return revision
+    if revision.status != PublicProfileRevision.Status.SUBMITTED:
+        raise ValidationError("Only a submitted public profile revision can enter review.")
+    revision.status = PublicProfileRevision.Status.UNDER_REVIEW
+    revision.reviewed_by = reviewer
+    revision.reviewed_at = None
+    revision.review_notes = ""
+    revision.save(
+        update_fields=[
+            "status",
+            "reviewed_by",
+            "reviewed_at",
+            "review_notes",
+            "updated_at",
+        ]
+    )
+    record_audit_event(
+        actor=reviewer,
+        action="public_profile.revision.review_started",
+        instance=revision,
+        metadata={"organization_id": revision.organization_id},
+        request=request,
+    )
+    return revision
+
+
+@transaction.atomic
 def review_public_profile_revision(
     *, revision, reviewer, decision, notes="", request=None
 ):
@@ -274,11 +322,12 @@ def review_public_profile_revision(
         raise PermissionDenied("Staff access required.")
     if decision not in {
         PublicProfileRevision.Status.APPROVED,
+        PublicProfileRevision.Status.CHANGES_REQUIRED,
         PublicProfileRevision.Status.REJECTED,
     }:
         raise ValidationError("Unsupported public profile review decision.")
-    if revision.status != PublicProfileRevision.Status.SUBMITTED:
-        raise ValidationError("Only submitted public profile revisions can be reviewed.")
+    if revision.status != PublicProfileRevision.Status.UNDER_REVIEW:
+        raise ValidationError("Only public profile revisions under review can receive a decision.")
     if (
         decision == PublicProfileRevision.Status.APPROVED
         and revision.organization.verification_status
@@ -291,8 +340,9 @@ def review_public_profile_revision(
     if decision == PublicProfileRevision.Status.APPROVED:
         _apply_approved_public_data(revision)
 
+    review_notes = str(notes or "").strip()
     revision.status = decision
-    revision.review_notes = str(notes or "").strip()
+    revision.review_notes = review_notes
     revision.reviewed_by = reviewer
     revision.reviewed_at = timezone.now()
     revision.save(
@@ -310,7 +360,8 @@ def review_public_profile_revision(
         instance=revision,
         metadata={
             "organization_id": revision.organization_id,
-            "notes_present": bool(revision.review_notes),
+            "notes_present": bool(review_notes),
+            "review_notes": review_notes,
         },
         request=request,
     )

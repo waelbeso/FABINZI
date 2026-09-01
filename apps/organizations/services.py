@@ -1,9 +1,13 @@
+from copy import deepcopy
+from datetime import timedelta
+
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
 from apps.audit.services import record_audit_event
 from apps.notifications.models import Notification
+from apps.platform_ops.models import ApplicationReviewConfiguration
 from .models import DesignerProfile, ManufacturerProfile, Membership, OnboardingApplication, Organization
 
 
@@ -28,11 +32,16 @@ def _lock_and_reject_duplicate_application(*, user, kind):
     # Serialize professional-application creation for one account without
     # introducing a second identity/application-owner model.
     user.__class__._default_manager.select_for_update().get(pk=user.pk)
-    existing_statuses = set(OnboardingApplication.Status.values)
+    blocking_statuses = {
+        OnboardingApplication.Status.DRAFT,
+        OnboardingApplication.Status.SUBMITTED,
+        OnboardingApplication.Status.REVISION_REQUIRED,
+        OnboardingApplication.Status.APPROVED,
+    }
     if OnboardingApplication.objects.filter(
         organization__created_by=user,
         organization__kind=kind,
-        status__in=existing_statuses,
+        status__in=blocking_statuses,
     ).exists():
         role_label = "Designer" if kind == Organization.Kind.DESIGNER else "Manufacturer"
         raise ValidationError(
@@ -62,6 +71,89 @@ def create_manufacturer_onboarding(*, user, organization_data, profile_data, req
     return application
 
 
+@transaction.atomic
+def create_reapplication_from_rejected(*, application, actor, request=None):
+    organization = application.organization
+    if application.status != OnboardingApplication.Status.REJECTED:
+        raise ValidationError("Only a final rejected application can start a new application attempt.")
+    if organization.verification_status != Organization.VerificationStatus.REJECTED:
+        raise ValidationError("The rejected application history is not in a valid final state.")
+    require_org_access(actor, organization, roles=[Membership.Role.OWNER])
+    if actor.pk != organization.created_by_id:
+        raise PermissionDenied("Only the original application owner can start a new application attempt.")
+
+    organization_data = {
+        "display_name": organization.display_name,
+        "legal_name": organization.legal_name,
+        "email": organization.email,
+        "phone": organization.phone,
+        "website": organization.website,
+        "address_line1": organization.address_line1,
+        "address_line2": organization.address_line2,
+        "city": organization.city,
+        "region": organization.region,
+        "country": organization.country,
+    }
+    if organization.kind == Organization.Kind.DESIGNER:
+        profile = organization.designer_profile
+        profile_data = {
+            "studio_name": profile.studio_name,
+            "portfolio_url": profile.portfolio_url,
+            "social_links": deepcopy(profile.social_links or {}),
+            "legal_registration_number": profile.legal_registration_number,
+            "tax_number": profile.tax_number,
+            "payout_information": profile.payout_information,
+            "terms_accepted": profile.terms_accepted,
+            "terms_accepted_at": profile.terms_accepted_at,
+        }
+        new_application = create_designer_onboarding(
+            user=actor,
+            organization_data=organization_data,
+            profile_data=profile_data,
+            request=request,
+        )
+    elif organization.kind == Organization.Kind.MANUFACTURER:
+        profile = organization.manufacturer_profile
+        profile_data = {
+            "commercial_registration": profile.commercial_registration,
+            "tax_number": profile.tax_number,
+            "google_maps_url": profile.google_maps_url,
+            "primary_contact_person": profile.primary_contact_person,
+            "contact_job_title": profile.contact_job_title,
+            "whatsapp": profile.whatsapp,
+            "manufacturing_categories": deepcopy(profile.manufacturing_categories or []),
+            "equipment": deepcopy(profile.equipment or []),
+            "capability_summary": deepcopy(profile.capability_summary or {}),
+            "daily_capacity": profile.daily_capacity,
+            "monthly_capacity": profile.monthly_capacity,
+            "certifications": deepcopy(profile.certifications or []),
+            "payout_information": profile.payout_information,
+            "terms_accepted": profile.terms_accepted,
+            "terms_accepted_at": profile.terms_accepted_at,
+        }
+        new_application = create_manufacturer_onboarding(
+            user=actor,
+            organization_data=organization_data,
+            profile_data=profile_data,
+            request=request,
+        )
+    else:
+        raise ValidationError("Professional reapplication requires a Designer or Manufacturer organization.")
+
+    record_audit_event(
+        actor=actor,
+        action="onboarding.reapplication.created",
+        instance=new_application,
+        metadata={
+            "previous_application_id": application.pk,
+            "previous_organization_id": organization.pk,
+            "new_organization_id": new_application.organization_id,
+        },
+        request=request,
+    )
+    return new_application
+
+
 def _validate_submission(application):
     org = application.organization
     if not org.display_name or not org.email:
@@ -84,11 +176,22 @@ def submit_application(*, application, actor, request=None):
     if application.status not in {OnboardingApplication.Status.DRAFT, OnboardingApplication.Status.REVISION_REQUIRED}:
         raise ValidationError("This application cannot be submitted from its current state.")
     _validate_submission(application)
+    submitted_at = timezone.now()
     application.status = OnboardingApplication.Status.SUBMITTED
-    application.submitted_at = timezone.now()
+    application.submitted_at = submitted_at
+    if application.initial_review_target_at is None:
+        target_hours = ApplicationReviewConfiguration.current_initial_review_target_hours()
+        application.initial_review_target_at = submitted_at + timedelta(hours=target_hours)
     application.reviewed_at = None
     application.reviewed_by = None
-    application.save(update_fields=["status", "submitted_at", "reviewed_at", "reviewed_by", "updated_at"])
+    application.save(update_fields=[
+        "status",
+        "submitted_at",
+        "initial_review_target_at",
+        "reviewed_at",
+        "reviewed_by",
+        "updated_at",
+    ])
     application.organization.verification_status = Organization.VerificationStatus.PENDING
     application.organization.save(update_fields=["verification_status", "updated_at"])
     record_audit_event(actor=actor, action="onboarding.submitted", instance=application, metadata={"organization_id": application.organization_id}, request=request)
