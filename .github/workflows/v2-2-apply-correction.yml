@@ -35,7 +35,20 @@ jobs:
       - name: Apply prepared V2-2 correction
         shell: bash
         run: |
-          cat .github/v2-2-patch.part* | base64 -d | gzip -d > /tmp/v2-2-final-corrections.patch
+          cat \
+            .github/v2-2-patch.part00 \
+            .github/v2-2-patch.part01a \
+            .github/v2-2-patch.part01b \
+            .github/v2-2-patch.part01c \
+            .github/v2-2-patch.part01d \
+            .github/v2-2-patch.part01e \
+            .github/v2-2-patch.part01f \
+            .github/v2-2-patch.part01g \
+            .github/v2-2-patch.part02 \
+            .github/v2-2-patch.part03 \
+            .github/v2-2-patch.part04 \
+            .github/v2-2-patch.part05 \
+            | base64 -d | gzip -d > /tmp/v2-2-final-corrections.patch
           git apply --check /tmp/v2-2-final-corrections.patch
           git apply /tmp/v2-2-final-corrections.patch
           rm -f .github/v2-2-final-corrections.patch.gz.b64
