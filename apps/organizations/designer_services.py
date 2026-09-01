@@ -44,21 +44,24 @@ def update_active_designer_profile(*, organization, actor, organization_data, pr
         actor=actor,
         action="designer.profile.updated",
         instance=organization,
-        metadata={
-            "organization_id": organization.pk,
-            "public_revision_id": revision.pk if revision else None,
-        },
+        metadata={"organization_id": organization.pk, "public_revision_id": revision.pk if revision else None},
         request=request,
     )
     return organization
 
 
 def _actor_membership(actor, organization):
-    return Membership.objects.filter(
-        organization=organization,
-        user=actor,
-        is_active=True,
-    ).first()
+    return Membership.objects.filter(organization=organization, user=actor, is_active=True).first()
+
+
+def _assert_non_owner_team_capacity(*, organization, target):
+    if target and target.is_active and target.role != Membership.Role.OWNER:
+        return
+    from apps.subscriptions.services import entitlement_summary
+
+    summary = entitlement_summary(organization)
+    if summary["team_used"] >= summary["team_limit"]:
+        raise ValidationError(f"The current plan allows {summary['team_limit']} active/pending subaccount seat(s).")
 
 
 @transaction.atomic
@@ -79,6 +82,8 @@ def secure_add_or_update_member(*, organization, actor, user, role, request=None
         ).count()
         if target.is_active and active_owner_count <= 1:
             raise ValidationError("The last active Owner cannot be changed to another role.")
+    if role != Membership.Role.OWNER:
+        _assert_non_owner_team_capacity(organization=organization, target=target)
 
     membership, _ = Membership.objects.get_or_create(
         organization=organization,
@@ -93,11 +98,7 @@ def secure_add_or_update_member(*, organization, actor, user, role, request=None
         actor=actor,
         action="business.member.upserted",
         instance=membership,
-        metadata={
-            "organization_id": organization.pk,
-            "user_id": user.pk,
-            "role": role,
-        },
+        metadata={"organization_id": organization.pk, "user_id": user.pk, "role": role},
         request=request,
     )
     return membership
@@ -123,10 +124,7 @@ def secure_deactivate_member(*, membership, actor, request=None):
         actor=actor,
         action="business.member.deactivated",
         instance=membership,
-        metadata={
-            "organization_id": membership.organization_id,
-            "user_id": membership.user_id,
-        },
+        metadata={"organization_id": membership.organization_id, "user_id": membership.user_id},
         request=request,
     )
     return membership

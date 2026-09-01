@@ -62,11 +62,32 @@ def reactivate_organization(*, organization, actor, request=None):
     previous = organization.verification_status
     organization.verification_status = Organization.VerificationStatus.ACTIVE
     organization.save(update_fields=["verification_status", "updated_at"])
+
+    # Reactivation is an explicit professional activation boundary. The
+    # subscription service is idempotent, so an existing Manufacturer trial is
+    # reused and an already-consumed trial is never restarted.
+    from apps.subscriptions.services import ensure_subscription_for_organization
+    from apps.subscriptions.team_services import reconcile_team_capacity_for_subscription
+
+    subscription = ensure_subscription_for_organization(
+        organization,
+        actor=actor,
+        request=request,
+    )
+    reconcile_team_capacity_for_subscription(
+        organization=organization,
+        actor=actor,
+        request=request,
+    )
     record_audit_event(
         actor=actor,
         action="control_center.organization.reactivated",
         instance=organization,
-        metadata={"organization_id": organization.pk, "previous_status": previous},
+        metadata={
+            "organization_id": organization.pk,
+            "previous_status": previous,
+            "subscription_id": subscription.pk,
+        },
         request=request,
     )
     return organization

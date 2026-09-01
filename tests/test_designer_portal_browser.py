@@ -37,6 +37,7 @@ from apps.organizations.public_profile_services import review_public_profile_rev
 from apps.storefront.models import StoreProduct, Storefront
 
 from .conftest import VALID_PNG
+from .v2_3_support import v2_3_reference_rows
 
 User = get_user_model()
 ARTIFACT_DIR = Path("artifacts/designer-browser-qa")
@@ -355,7 +356,7 @@ def _create_order_visibility(customer, org, product, variant):
 
 
 @pytest.mark.django_db(transaction=True)
-def test_designer_portal_real_chrome_a_to_g(client, live_server):
+def test_designer_portal_real_chrome_a_to_g(client, live_server, v2_3_reference_rows):
     if os.getenv("CI") != "true":
         pytest.skip("Real Chrome Designer QA is CI-only.")
 

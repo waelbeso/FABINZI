@@ -23,6 +23,7 @@ from apps.organizations.public_profile_services import review_public_profile_rev
 from apps.storefront.models import CustomizationElement
 
 from .test_manufacturer_portal_acceptance import assigned_job, invited_rfq, manufacturer, private_asset
+from .v2_3_support import v2_3_reference_rows
 
 User = get_user_model()
 ARTIFACT_DIR = Path("artifacts/manufacturer-browser-qa")
@@ -104,7 +105,7 @@ def _clear_artifacts():
 
 
 @pytest.mark.django_db(transaction=True)
-def test_manufacturer_portal_real_chrome_a_to_h(client, live_server):
+def test_manufacturer_portal_real_chrome_a_to_h(client, live_server, v2_3_reference_rows):
     if os.getenv("CI") != "true":
         pytest.skip("Real Chrome Manufacturer QA is CI-only.")
 

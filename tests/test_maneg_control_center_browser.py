@@ -26,6 +26,7 @@ from apps.organizations.models import Membership, OnboardingApplication, Organiz
 from apps.platform_ops.models import MaintenanceWindow, PlatformAnnouncement
 
 from .test_manufacturer_portal_acceptance import assigned_job, manufacturer
+from .v2_3_support import v2_3_reference_rows
 
 User = get_user_model()
 ARTIFACT_DIR = Path("artifacts/maneg-browser-qa")
@@ -144,7 +145,7 @@ def _decimal_values(text):
 
 
 @pytest.mark.django_db(transaction=True)
-def test_maneg_control_center_real_chrome_a_to_l(client, live_server):
+def test_maneg_control_center_real_chrome_a_to_l(client, live_server, v2_3_reference_rows):
     if os.getenv("CI") != "true":
         pytest.skip("Real Chrome /Maneg/ QA is CI-only.")
 
