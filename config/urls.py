@@ -27,7 +27,7 @@ from apps.media.views import private_studio_media
 from apps.notifications.views import notification_center
 from apps.operations.views import order_operations
 from apps.platform_ops.launch_views import bad_request as public_handler400
-from apps.platform_ops.public_shell_views import discover, how_it_works
+from apps.platform_ops.public_shell_views import discover, how_it_works, robots_txt, sitemap_xml
 from apps.platform_ops.views import (
     apple_touch_icon,
     favicon,
@@ -36,11 +36,9 @@ from apps.platform_ops.views import (
     handler500 as public_handler500,
     healthz,
     readyz,
-    robots_txt,
     site_icon_192,
     site_icon_512,
     site_manifest,
-    sitemap_xml,
     social_share_image,
 )
 from apps.integrations.admin_site import fabinzi_admin_site
@@ -83,9 +81,12 @@ from apps.storefront.studio_views import studio, studio_project
 from apps.storefront.views import public_product, public_storefront, store_marketplace
 
 urlpatterns = [
-    # V2 public shell: Store is the primary public surface.
+    # V2 public shell: Store is the primary public surface. The legacy /store/
+    # path redirects to the same canonical catalog while existing reverse-name
+    # callers continue to resolve directly to the root Store.
     path("", store_marketplace, name="home"),
-    path("store/", RedirectView.as_view(pattern_name="home", permanent=True, query_string=True), name="store-marketplace"),
+    path("", store_marketplace, name="store-marketplace"),
+    path("store/", RedirectView.as_view(pattern_name="home", permanent=True, query_string=True), name="store-legacy"),
     path("discover/", discover, name="discover"),
     path("how-it-works/", how_it_works, name="how-it-works"),
     path("designers/", designer_directory, name="designer-directory"),
@@ -105,7 +106,10 @@ urlpatterns = [
     path("account/logout/", sign_out, name="logout"),
     path(
         "account/password/change/",
-        auth_views.PasswordChangeView.as_view(template_name="registration/password_change_form.html"),
+        auth_views.PasswordChangeView.as_view(
+            template_name="registration/password_change_form.html",
+            success_url="/account/password/change/done/",
+        ),
         name="password-change",
     ),
     path(
