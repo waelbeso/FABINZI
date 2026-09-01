@@ -135,19 +135,37 @@ class SubscriptionBillingConfirmation(models.Model):
         REVOKED = "revoked", "Revoked"
 
     organization = models.ForeignKey("organizations.Organization", on_delete=models.PROTECT, related_name="subscription_billing_confirmations")
+    plan_policy = models.ForeignKey(
+        SubscriptionPlanPolicy,
+        on_delete=models.PROTECT,
+        related_name="billing_confirmations",
+        editable=False,
+    )
     plan_code = models.CharField(max_length=64)
+    plan_version = models.PositiveIntegerField(editable=False)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     currency = models.CharField(max_length=3, default="EGP")
+    tax_inclusive = models.BooleanField(default=True, editable=False)
+    policy_snapshot = models.JSONField(default=dict, editable=False)
+    price_snapshot = models.JSONField(default=dict, editable=False)
     provider = models.CharField(max_length=40)
-    provider_reference = models.CharField(max_length=180)
+    provider_reference = models.CharField(max_length=180, unique=True)
     idempotency_key = models.CharField(max_length=120, unique=True)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.CONFIRMED)
     confirmed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="confirmed_professional_subscription_billing")
     confirmed_at = models.DateTimeField(auto_now_add=True)
+    consumed_period = models.OneToOneField(
+        SubscriptionPeriod,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="billing_confirmation",
+        editable=False,
+    )
+    consumed_at = models.DateTimeField(null=True, blank=True, editable=False)
 
     class Meta:
         ordering = ("-confirmed_at",)
-        constraints = [models.UniqueConstraint(fields=["provider", "provider_reference"], name="unique_subscription_provider_reference")]
 
 
 class ManufacturerOfferUsage(models.Model):
