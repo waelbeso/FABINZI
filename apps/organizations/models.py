@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -119,6 +121,8 @@ class ManufacturerProfile(models.Model):
 
 
 class OnboardingApplication(models.Model):
+    REVIEW_TARGET_HOURS = 27
+
     class Status(models.TextChoices):
         DRAFT = "draft", "Draft"
         SUBMITTED = "submitted", "Submitted"
@@ -140,8 +144,49 @@ class OnboardingApplication(models.Model):
         ordering = ("-updated_at",)
         indexes = [models.Index(fields=["status", "updated_at"])]
 
+    @property
+    def review_target_at(self):
+        if not self.submitted_at:
+            return None
+        return self.submitted_at + timedelta(hours=self.REVIEW_TARGET_HOURS)
+
     def __str__(self):
         return f"{self.organization} · {self.get_status_display()}"
+
+
+class PublicProfileRevision(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        SUBMITTED = "submitted", "Submitted"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="public_profile_revisions")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT, db_index=True)
+    proposed_data = models.JSONField(default=dict)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_public_profile_revisions")
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="reviewed_public_profile_revisions")
+    review_notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at", "-id")
+        indexes = [
+            models.Index(fields=["status", "updated_at"], name="org_pubrev_status_updated_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization"],
+                condition=models.Q(status__in=["draft", "submitted"]),
+                name="unique_open_public_profile_revision",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.organization} · public profile · {self.get_status_display()}"
 
 
 class VerificationDocument(models.Model):
