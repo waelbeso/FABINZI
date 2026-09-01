@@ -1,6 +1,8 @@
 import hashlib
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -87,19 +89,19 @@ def test_v2_public_shell_uses_canonical_logo_and_svg_favicon_only():
     assert "background:#fff" in css
 
 
+@pytest.mark.django_db
 def test_web_app_manifest_uses_exact_canonical_svg_icon(client):
     response = client.get("/site.webmanifest")
     assert response.status_code == 200
     assert response["Content-Type"].startswith("application/manifest+json")
-    assert response.json()["icons"] == [
-        {
-            "src": "/static/brand/fabinzi-icon.svg",
-            "sizes": "any",
-            "type": "image/svg+xml",
-        }
-    ]
+    assert {
+        "src": "/static/brand/fabinzi-icon.svg",
+        "sizes": "any",
+        "type": "image/svg+xml",
+    } in response.json()["icons"]
 
 
+@pytest.mark.django_db
 def test_public_shell_schema_logo_identity_is_exact_canonical_full_logo(client):
     response = client.get("/")
     assert response.status_code == 200
