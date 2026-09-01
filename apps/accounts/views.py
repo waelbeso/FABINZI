@@ -1,4 +1,5 @@
 from django.contrib import messages
+from django.contrib.auth import logout
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponseBadRequest
 from django.shortcuts import redirect, render
@@ -8,7 +9,41 @@ from apps.artwork.models import Artwork
 from apps.checkout.models import Cart, CustomerPurchase
 from apps.notifications.models import Notification
 from apps.storefront.models import StoreProduct, Storefront, StudioProject
+from .forms import PublicSignupForm
 from .models import User
+
+
+def signup(request):
+    if request.user.is_authenticated:
+        return redirect("app-home")
+
+    if request.method == "POST":
+        form = PublicSignupForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(
+                request,
+                "تم إنشاء حسابك. يمكنك تسجيل الدخول الآن."
+                if getattr(request, "LANGUAGE_CODE", "en") == "ar"
+                else "Your FABINZI account is ready. You can sign in now.",
+            )
+            return redirect("two_factor:login")
+    else:
+        form = PublicSignupForm()
+    return render(request, "accounts/signup.html", {"form": form})
+
+
+def sign_out(request):
+    if request.method == "POST":
+        logout(request)
+        messages.success(
+            request,
+            "تم تسجيل الخروج بأمان."
+            if getattr(request, "LANGUAGE_CODE", "en") == "ar"
+            else "You have been signed out securely.",
+        )
+        return redirect("home")
+    return render(request, "accounts/logout_confirm.html")
 
 
 @login_required
