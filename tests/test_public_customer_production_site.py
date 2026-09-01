@@ -158,7 +158,14 @@ def test_brand_identity_endpoints_are_real_binary_assets(client):
     assert manifest.status_code == 200
     assert manifest.headers["Content-Type"].startswith("application/manifest+json")
     payload = json.loads(manifest.content)
-    assert {icon["sizes"] for icon in payload["icons"]} == {"192x192", "512x512"}
+    icons = payload["icons"]
+    assert {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"} in icons
+    assert {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"} in icons
+    assert {
+        "src": "/static/brand/fabinzi-icon.svg",
+        "sizes": "any",
+        "type": "image/svg+xml",
+    } in icons
 
 
 @pytest.mark.django_db
