@@ -67,9 +67,15 @@ def reactivate_organization(*, organization, actor, request=None):
     # subscription service is idempotent, so an existing Manufacturer trial is
     # reused and an already-consumed trial is never restarted.
     from apps.subscriptions.services import ensure_subscription_for_organization
+    from apps.subscriptions.team_services import reconcile_team_capacity_for_subscription
 
     subscription = ensure_subscription_for_organization(
         organization,
+        actor=actor,
+        request=request,
+    )
+    reconcile_team_capacity_for_subscription(
+        organization=organization,
         actor=actor,
         request=request,
     )
