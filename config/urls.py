@@ -4,6 +4,7 @@ from django.views.generic import RedirectView
 from two_factor.urls import urlpatterns as tf_urls
 from apps.accounts.views import app_home, profile_preferences, sign_out, signup
 from apps.artwork.media_views import public_artwork_preview_media
+from apps.artwork.v2_4_portal import designer_artwork_technical_workspace
 from apps.artwork.views import artwork_detail, artwork_marketplace
 from apps.checkout.views import (
     add_product_to_cart,
@@ -19,6 +20,7 @@ from apps.checkout.views import (
     purchase_detail,
     purchases,
 )
+from apps.design.v2_4_portal import designer_design_technical_workspace
 from apps.finance.views import finance_dashboard
 from apps.manufacturer_marketplace.views import manufacturer_marketplace, manufacturer_public_detail
 from apps.media.designer_views import private_designer_media
@@ -183,8 +185,10 @@ urlpatterns = [
     path("designer/team/", designer_team, name="designer-team"),
     path("designer/designs/", designer_design_list, name="designer-design-list"),
     path("designer/designs/<int:pk>/", designer_design_detail, name="designer-design-detail"),
+    path("designer/designs/<int:pk>/technical/", designer_design_technical_workspace, name="designer-design-technical-v2-4"),
     path("designer/artworks/", designer_artworks, name="designer-artworks"),
     path("designer/artworks/<int:pk>/", designer_artwork_detail, name="designer-artwork-detail"),
+    path("designer/artworks/<int:pk>/technical/", designer_artwork_technical_workspace, name="designer-artwork-technical-v2-4"),
     path("designer/products/", designer_products, name="designer-products"),
     path("designer/products/<int:pk>/", designer_product_detail, name="designer-product-detail"),
     path("designer/rfqs/", designer_rfqs, name="designer-rfqs"),
