@@ -14,7 +14,9 @@ def test_v2_7_urls_keep_existing_manufacturer_media_route_and_add_minimum_maneg_
 
 
 def test_customer_api_v1_route_namespace_is_not_replaced_by_v2_7():
-    assert resolve("/api/v1/").app_name == "v1"
+    match = resolve("/api/v1/payment-options/")
+    assert match.app_name == "v1"
+    assert match.namespace == "v1"
 
 
 def test_operational_production_template_uses_frozen_spec_manifest_not_live_artwork_traversal():

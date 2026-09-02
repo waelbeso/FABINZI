@@ -56,7 +56,7 @@ def assign_manufacturer(*,job,selection,actor,request=None):
     job.selection=selection; job.manufacturer=selection.manufacturer; job.status=ProductionJob.Status.QUEUED; job.assigned_at=timezone.now(); job.full_clean(); job.save(); record_audit_event(actor=actor,action="production_job.manufacturer_assigned",instance=job,metadata={"manufacturer_id":job.manufacturer_id,"selection_id":selection.pk},request=request); return job
 @transaction.atomic
 def start_production(*,job,actor,request=None):
-    job=ProductionJob.objects.select_for_update().select_related("order__item").get(pk=job.pk); require_manufacturer_job_access(actor,job)
+    job=ProductionJob.objects.select_for_update().get(pk=job.pk); require_manufacturer_job_access(actor,job)
     from apps.manufacturer_marketplace.models import RFQ
     if RFQ.objects.filter(order_item=job.order.item, source=RFQ.Source.CUSTOMER_ORDER).exists():
         try:

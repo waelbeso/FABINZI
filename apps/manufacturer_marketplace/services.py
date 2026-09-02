@@ -159,18 +159,24 @@ def save_quote_draft(*, invitation, actor, unit_price, production_lead_days, set
 def submit_quote(*, invitation, actor, unit_price, production_lead_days, setup_fee=0, sample_fee=0, shipping_estimate=0, currency="EGP", minimum_order_quantity=1, sample_lead_days=None, valid_until=None, notes="", request=None):
     """Canonical first Submitted transition; V2-3 quota is consumed exactly once."""
     require_org_access(actor, invitation.manufacturer, roles=MANUFACTURER_QUOTE_ROLES)
-    invitation = RFQInvitation.objects.select_for_update().select_related("rfq", "manufacturer").get(pk=invitation.pk)
-    if invitation.rfq.status not in {RFQ.Status.OPEN, RFQ.Status.QUOTED}:
+    original_invitation = invitation
+    original_rfq = invitation.rfq
+    locked_invitation = RFQInvitation.objects.select_for_update().select_related("rfq", "manufacturer").get(pk=invitation.pk)
+    if locked_invitation.rfq.status not in {RFQ.Status.OPEN, RFQ.Status.QUOTED}:
         raise ValidationError("This RFQ is not accepting quotes.")
-    if invitation.status == RFQInvitation.Status.DECLINED:
+    if locked_invitation.status == RFQInvitation.Status.DECLINED:
         raise ValidationError("A declined invitation cannot be quoted.")
-    quote = ManufacturerQuote.objects.select_for_update().filter(invitation=invitation).first()
+    quote = ManufacturerQuote.objects.select_for_update().filter(invitation=locked_invitation).first()
     if quote and quote.status == ManufacturerQuote.Status.SUBMITTED:
+        original_invitation.status = locked_invitation.status
+        original_invitation.responded_at = locked_invitation.responded_at
+        original_rfq.status = locked_invitation.rfq.status
+        quote.invitation = original_invitation
         return quote
     if quote and quote.status not in {ManufacturerQuote.Status.DRAFT, ManufacturerQuote.Status.WITHDRAWN}:
         raise ValidationError("Only draft or withdrawn quotes can be submitted.")
     if quote is None:
-        quote = ManufacturerQuote(invitation=invitation, unit_price=unit_price, production_lead_days=production_lead_days, created_by=actor)
+        quote = ManufacturerQuote(invitation=locked_invitation, unit_price=unit_price, production_lead_days=production_lead_days, created_by=actor)
     _apply_quote_values(quote, unit_price=unit_price, production_lead_days=production_lead_days, setup_fee=setup_fee, sample_fee=sample_fee, shipping_estimate=shipping_estimate, currency=currency, minimum_order_quantity=minimum_order_quantity, sample_lead_days=sample_lead_days, valid_until=valid_until, notes=notes)
     quote.status = ManufacturerQuote.Status.SUBMITTED
     quote.submitted_at = timezone.now()
@@ -179,12 +185,16 @@ def submit_quote(*, invitation, actor, unit_price, production_lead_days, setup_f
     from apps.subscriptions.services import consume_manufacturer_offer
     consume_manufacturer_offer(quote=quote)
 
-    invitation.status = RFQInvitation.Status.QUOTED; invitation.responded_at = timezone.now(); invitation.save(update_fields=["status","responded_at"])
-    if invitation.rfq.status == RFQ.Status.OPEN:
-        invitation.rfq.status = RFQ.Status.QUOTED; invitation.rfq.save(update_fields=["status","updated_at"])
-    for membership in invitation.rfq.designer_organization.memberships.filter(is_active=True, role__in=DESIGNER_RFQ_ROLES).select_related("user"):
-        Notification.objects.create(recipient=membership.user, type="manufacturer_quote", title_en="Manufacturing quote received", title_ar="تم استلام عرض تصنيع", body_en=invitation.manufacturer.display_name, body_ar=invitation.manufacturer.display_name, destination="/designer/rfqs/")
-    record_audit_event(actor=actor, action="manufacturer_marketplace.quote.submitted", instance=quote, metadata={"rfq_id": invitation.rfq_id}, request=request)
+    locked_invitation.status = RFQInvitation.Status.QUOTED; locked_invitation.responded_at = timezone.now(); locked_invitation.save(update_fields=["status","responded_at"])
+    if locked_invitation.rfq.status == RFQ.Status.OPEN:
+        locked_invitation.rfq.status = RFQ.Status.QUOTED; locked_invitation.rfq.save(update_fields=["status","updated_at"])
+    original_invitation.status = locked_invitation.status
+    original_invitation.responded_at = locked_invitation.responded_at
+    original_rfq.status = locked_invitation.rfq.status
+    quote.invitation = original_invitation
+    for membership in locked_invitation.rfq.designer_organization.memberships.filter(is_active=True, role__in=DESIGNER_RFQ_ROLES).select_related("user"):
+        Notification.objects.create(recipient=membership.user, type="manufacturer_quote", title_en="Manufacturing quote received", title_ar="تم استلام عرض تصنيع", body_en=locked_invitation.manufacturer.display_name, body_ar=locked_invitation.manufacturer.display_name, destination="/designer/rfqs/")
+    record_audit_event(actor=actor, action="manufacturer_marketplace.quote.submitted", instance=quote, metadata={"rfq_id": locked_invitation.rfq_id}, request=request)
     return quote
 
 

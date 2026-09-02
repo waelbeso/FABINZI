@@ -91,9 +91,10 @@ def eligible_manufacturers(order_item):
 @transaction.atomic
 def create_customer_order_routing(*, order_item, actor, request=None):
     _require_staff(actor)
-    order_item = OrderItem.objects.select_for_update().select_related(
+    locked_order_item = OrderItem.objects.select_for_update().get(pk=order_item.pk)
+    order_item = OrderItem.objects.select_related(
         "order__purchase", "order__designer_organization", "store_product__designed_product__garment_version", "variant"
-    ).get(pk=order_item.pk)
+    ).get(pk=locked_order_item.pk)
     if order_item.order.status != CustomerOrder.Status.CONFIRMED:
         raise ValidationError("Only a confirmed CustomerOrder can enter production routing.")
     existing = RFQ.objects.filter(order_item=order_item, source=RFQ.Source.CUSTOMER_ORDER).first()
