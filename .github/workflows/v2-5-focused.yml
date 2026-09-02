@@ -89,6 +89,7 @@ jobs:
       - name: Run focused V2-5 public-profile and inquiry regressions
         run: |
           pytest -q \
+            tests/test_v2_identity_public_shell.py \
             tests/test_v2_applications_organizations.py \
             tests/test_public_customer_production_site.py \
             tests/test_stage4_manufacturer_marketplace.py \
