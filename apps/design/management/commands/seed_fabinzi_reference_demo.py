@@ -2,6 +2,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.core.exceptions import ValidationError
 
 from apps.design.golden_reference import seed_fabinzi_reference_demo
+from apps.design.reference_v2_4 import enrich_source_supported_reference_mapping
 
 
 class Command(BaseCommand):
@@ -21,6 +22,7 @@ class Command(BaseCommand):
                 source_path=options.get("package_source"),
                 contract_fixture=options.get("contract_fixture", False),
             )
+            mapping = enrich_source_supported_reference_mapping()
         except ValidationError as exc:
             raise CommandError(str(exc)) from exc
 
@@ -28,4 +30,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"FABINZI Golden reference demo seeded idempotently: {evidence}"))
         self.stdout.write(f"Dataset ID: {result['dataset_id']}")
         self.stdout.write(f"Products: {', '.join(sorted(result['products']))}")
+        self.stdout.write(f"Creator schema mappings: {', '.join(mapping['version_refs'])}")
         self.stdout.write("Reference records remain DEMO / TRAINING REFERENCE / NOT FOR PRODUCTION.")
+        if not result["direct_binary_evidence"]:
+            self.stdout.write(self.style.WARNING("GOLDEN PACKAGE BYTES = NOT VERIFIED by contract-fixture mode."))
