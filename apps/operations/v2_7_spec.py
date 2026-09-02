@@ -218,27 +218,31 @@ def verify_specification_integrity(specification):
     return snapshot_sha256(specification.snapshot) == specification.snapshot_sha256
 
 
-@transaction.atomic
 def release_customer_order_production(*, job, actor, request=None):
     _require_staff(actor)
-    job = ProductionJob.objects.select_for_update().get(pk=job.pk)
-    try:
-        specification = ProductionSpecification.objects.select_for_update().get(job=job)
-    except ProductionSpecification.DoesNotExist as exc:
-        raise ValidationError("CustomerOrder production cannot be released without an immutable ProductionSpecification.") from exc
-    if not verify_specification_integrity(specification):
-        raise ValidationError("ProductionSpecification integrity verification failed.")
-    version_id = specification.snapshot.get("garment_design", {}).get("garment_design_version_id")
-    version = GarmentDesignVersion.objects.get(pk=version_id)
-    eligibility = evaluate_version_eligibility(version)
-    if not eligibility.get("production_engineering_validated") or not eligibility.get("production_eligible"):
-        specification.release_block_reason = "Canonical GarmentDesignVersion is not production eligible."
-        specification.save(update_fields=["release_block_reason"])
-        record_audit_event(actor=actor, action="v2_7.production_release.blocked", instance=specification, metadata={"eligibility": eligibility}, request=request)
-        raise ValidationError(specification.release_block_reason)
-    specification.released_at = specification.released_at or timezone.now()
-    specification.released_by = actor
-    specification.release_block_reason = ""
-    specification.save(update_fields=["released_at", "released_by", "release_block_reason"])
-    record_audit_event(actor=actor, action="v2_7.production_release.approved", instance=specification, metadata={"eligibility": eligibility, "snapshot_sha256": specification.snapshot_sha256}, request=request)
+    blocked_reason = None
+    with transaction.atomic():
+        job = ProductionJob.objects.select_for_update().get(pk=job.pk)
+        try:
+            specification = ProductionSpecification.objects.select_for_update().get(job=job)
+        except ProductionSpecification.DoesNotExist as exc:
+            raise ValidationError("CustomerOrder production cannot be released without an immutable ProductionSpecification.") from exc
+        if not verify_specification_integrity(specification):
+            raise ValidationError("ProductionSpecification integrity verification failed.")
+        version_id = specification.snapshot.get("garment_design", {}).get("garment_design_version_id")
+        version = GarmentDesignVersion.objects.get(pk=version_id)
+        eligibility = evaluate_version_eligibility(version)
+        if not eligibility.get("production_engineering_validated") or not eligibility.get("production_eligible"):
+            blocked_reason = "Canonical GarmentDesignVersion is not production eligible."
+            specification.release_block_reason = blocked_reason
+            specification.save(update_fields=["release_block_reason"])
+            record_audit_event(actor=actor, action="v2_7.production_release.blocked", instance=specification, metadata={"eligibility": eligibility}, request=request)
+        else:
+            specification.released_at = specification.released_at or timezone.now()
+            specification.released_by = actor
+            specification.release_block_reason = ""
+            specification.save(update_fields=["released_at", "released_by", "release_block_reason"])
+            record_audit_event(actor=actor, action="v2_7.production_release.approved", instance=specification, metadata={"eligibility": eligibility, "snapshot_sha256": specification.snapshot_sha256}, request=request)
+    if blocked_reason:
+        raise ValidationError(blocked_reason)
     return specification
