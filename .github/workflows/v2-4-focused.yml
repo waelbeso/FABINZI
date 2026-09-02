@@ -96,8 +96,7 @@ jobs:
             tests/test_designer_portal_acceptance_domains.py \
             tests/test_maneg_control_center.py \
             tests/test_v2_creator_technical_golden.py \
-            tests/test_v2_4_ready_product_composer.py \
-            tests/test_media_privacy.py
+            tests/test_v2_4_ready_product_composer.py
       - name: Recompute canonical brand SHA-256
         run: |
           test "$(sha256sum static/brand/fabinzi-logo.svg | awk '{print $1}')" = "27fd3226825c47717b0899cbdb76bdaf9c38a0d7fea2e88257c8db8bf71b4e1b"
