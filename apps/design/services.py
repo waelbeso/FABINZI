@@ -207,7 +207,30 @@ def technical_completeness(version):
     return {"complete": not errors, "errors": errors}
 
 
+def design_submission_readiness(version):
+    """Historical Design review readiness, deliberately separate from production completeness."""
+    errors = []
+    if not version.base_material:
+        errors.append("Base material is required.")
+    if not version.technical_specs:
+        errors.append("Technical specifications are required.")
+    if not version.size_rows.exists():
+        errors.append("At least one size-chart row is required.")
+    if not version.assets.filter(kind=DesignAsset.Kind.TECH_PACK, media_asset__access="private").exists():
+        errors.append("A private tech pack is required.")
+    if not version.assets.filter(kind=DesignAsset.Kind.PRODUCT_IMAGE).exists():
+        errors.append("At least one product image is required.")
+    return {"ready": not errors, "errors": errors}
+
+
 def validate_version_ready(version):
+    result = design_submission_readiness(version)
+    if not result["ready"]:
+        raise ValidationError(result["errors"])
+    return result
+
+
+def _validate_production_completeness(version):
     result = technical_completeness(version)
     if not result["complete"]:
         raise ValidationError(result["errors"])
@@ -269,8 +292,6 @@ def review_version(*, version, reviewer, decision, notes="", request=None):
         raise ValidationError("Only submitted versions can be reviewed.")
     if decision not in dict(TechnicalReview.Decision.choices):
         raise ValidationError("Unsupported technical review decision.")
-    if decision == TechnicalReview.Decision.APPROVED:
-        validate_version_ready(version)
     TechnicalReview.objects.create(version=version, reviewer=reviewer, decision=decision, notes=notes)
     version.status = decision
     version.reviewed_at = timezone.now()
@@ -299,7 +320,7 @@ def set_production_engineering_validation(*, version, reviewer, validated, notes
     if validated and version.status != GarmentDesignVersion.Status.APPROVED:
         raise ValidationError("Technical approval is required before production engineering validation.")
     if validated:
-        validate_version_ready(version)
+        _validate_production_completeness(version)
         if getattr(version, "reference_provenance", None) and not version.reference_provenance.package.production_engineering_validated:
             raise ValidationError("Frozen Golden reference packages cannot be production-validated through ordinary workflow.")
     version.production_engineering_validated = bool(validated)
