@@ -89,10 +89,14 @@ jobs:
       - name: Run focused V2-4 Creator / Golden regressions
         run: |
           pytest -q \
+            tests/test_demo_seed.py \
+            tests/test_stage2_design.py \
+            tests/test_stage3_artwork.py \
+            tests/test_designer_portal_acceptance_core.py \
+            tests/test_designer_portal_acceptance_domains.py \
+            tests/test_maneg_control_center.py \
             tests/test_v2_creator_technical_golden.py \
             tests/test_v2_4_ready_product_composer.py \
-            tests/test_designer_portal_acceptance_core.py \
-            tests/test_artwork_marketplace_stage7.py \
             tests/test_media_privacy.py
       - name: Recompute canonical brand SHA-256
         run: |
