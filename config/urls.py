@@ -7,7 +7,7 @@ from apps.artwork.media_views import public_artwork_preview_media
 from apps.artwork.ready_product_v2_4_portal import designer_ready_product_composer, designer_ready_product_composer_detail
 from apps.artwork.v2_4_portal import designer_artwork_technical_workspace
 from apps.artwork.views import artwork_detail, artwork_marketplace
-from apps.checkout.views import add_product_to_cart, cart, cart_checkout_start, cart_item_remove, cart_item_update, checkout_detail, checkout_start, order_detail, orders, purchase_confirmation, purchase_detail, purchases
+from apps.checkout.views import add_product_to_cart, cart, cart_checkout_start, cart_item_remove, cart_item_update, checkout_detail, checkout_start, guest_purchase_confirmation, guest_purchase_detail, order_detail, orders, purchase_confirmation, purchase_detail, purchases, retry_guest_cart_merge
 from apps.design.v2_4_portal import designer_design_technical_workspace
 from apps.finance.views import finance_dashboard
 from apps.media.designer_views import private_designer_media
@@ -74,6 +74,7 @@ urlpatterns = [
     path("cart/add/<int:product_id>/", add_product_to_cart, name="cart-add-product"),
     path("cart/items/<int:pk>/update/", cart_item_update, name="cart-item-update"),
     path("cart/items/<int:pk>/remove/", cart_item_remove, name="cart-item-remove"),
+    path("cart/merge/retry/", retry_guest_cart_merge, name="cart-guest-merge-retry"),
     path("cart/checkout/", cart_checkout_start, name="cart-checkout-start"),
     path("studio/", studio, name="studio"),
     path("studio/<int:pk>/", studio_project, name="studio-project"),
@@ -82,6 +83,8 @@ urlpatterns = [
     path("media/designer-private/<int:pk>/", private_designer_media, name="private-designer-media"),
     path("artwork/media/<int:pk>/", public_artwork_preview_media, name="artwork-public-preview-media"),
     path("checkout/<int:pk>/", checkout_detail, name="checkout-detail"),
+    path("guest/purchase/<str:token>/confirmation/", guest_purchase_confirmation, name="guest-purchase-confirmation"),
+    path("guest/purchase/<str:token>/", guest_purchase_detail, name="guest-purchase-detail"),
     path("purchases/", purchases, name="purchases"),
     path("purchases/<int:pk>/confirmation/", purchase_confirmation, name="purchase-confirmation"),
     path("purchases/<int:pk>/", purchase_detail, name="purchase-detail"),

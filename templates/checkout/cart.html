@@ -4,8 +4,29 @@
 <section class="section--tight">
   <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}سلة FABINZI{% else %}FABINZI Cart{% endif %}</div>
   <h1 class="page-title">{% if request.LANGUAGE_CODE == 'ar' %}سلة الشراء{% else %}Your Cart{% endif %}</h1>
-  <p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}المنتجات العادية والمخصصة والتصميمات الجاهزة تدخل نفس السلة ونفس عملية الدفع.{% else %}Plain, customized and ready-designed products share one Cart and one checkout.{% endif %}</p>
+  <p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}المنتجات العادية والتصميمات الجاهزة متاحة للضيف. التخصيص عبر Studio يتطلب تسجيل الدخول.{% else %}Plain and ready-designed products are available to Guests. Studio customization requires sign-in.{% endif %}</p>
 </section>
+
+{% if pending_guest_cart %}
+<section class="surface stack" aria-labelledby="guest-merge-heading">
+  <div>
+    <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}سلة ضيف محفوظة{% else %}Retained Guest Cart{% endif %}</div>
+    <h2 id="guest-merge-heading" class="section-title">{% if request.LANGUAGE_CODE == 'ar' %}يلزم حل تعارض قبل الدفع{% else %}Resolve this Cart before checkout{% endif %}</h2>
+    <p>{% if request.LANGUAGE_CODE == 'ar' %}تعذر دمج سلة الضيف تلقائيًا دون المخاطرة بفقد أي عنصر. لم يتم حذف أي من السلّتين.{% else %}FABINZI could not merge the Guest Cart atomically without risking an invalid Cart. Neither Cart was discarded.{% endif %}</p>
+    {% if pending_guest_merge.message %}<p class="help-text">{{ pending_guest_merge.message }}</p>{% endif %}
+  </div>
+  {% for line in pending_guest_lines %}
+  <article class="card cart-line">
+    <div class="cart-line__body stack">
+      <strong>{% if request.LANGUAGE_CODE == 'ar' and line.item.store_product.title_ar %}{{ line.item.store_product.title_ar }}{% else %}{{ line.item.store_product.title_en }}{% endif %}</strong>
+      <span class="muted">{{ line.item.variant.size }}{% if line.item.variant.color_name %} · {{ line.item.variant.color_name }}{% endif %} · {{ line.item.quantity }} × {{ line.unit_price }} {{ line.item.store_product.currency }}</span>
+      <form method="post" action="{% url 'cart-item-remove' line.item.id %}">{% csrf_token %}<button class="button button--ghost button--sm" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}إزالة من سلة الضيف{% else %}Remove from Guest Cart{% endif %}</button></form>
+    </div>
+  </article>
+  {% endfor %}
+  <form method="post" action="{% url 'cart-guest-merge-retry' %}">{% csrf_token %}<button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}إعادة محاولة الدمج الآمن{% else %}Retry safe merge{% endif %}</button></form>
+</section>
+{% endif %}
 
 {% if lines %}
 <div class="cart-layout">
@@ -40,12 +61,12 @@
   <aside class="surface stack cart-summary">
     <div><div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}الملخص{% else %}Summary{% endif %}</div><h2 class="section-title">{% if request.LANGUAGE_CODE == 'ar' %}إجمالي السلة{% else %}Cart total{% endif %}</h2></div>
     <div class="summary-list"><div class="summary-row"><span>{% if request.LANGUAGE_CODE == 'ar' %}الإجمالي الفرعي{% else %}Subtotal{% endif %}</span><strong>{{ subtotal }} {{ currency }}</strong></div><div class="summary-row summary-row--total"><span>{% if request.LANGUAGE_CODE == 'ar' %}الإجمالي الحالي{% else %}Current total{% endif %}</span><strong>{{ total }} {{ currency }}</strong></div></div>
-    <p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}تتم إعادة حساب السعر والتوافر على الخادم عند بدء الدفع وعند تأكيد الطلب.{% else %}Price and availability are recalculated server-side at checkout start and order placement.{% endif %}</p>
-    <a class="button" href="{% url 'cart-checkout-start' %}">{% if request.LANGUAGE_CODE == 'ar' %}متابعة إلى الدفع{% else %}Continue to checkout{% endif %}</a>
+    <p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}السعر الحالي معلوماتي. يعيد الخادم التحقق من الأهلية والسعر والعملة عند بدء الدفع ومرة أخرى عند تثبيت الشراء.{% else %}Cart pricing is informative. The server revalidates eligibility, price and currency at checkout start and again when the purchase is placed.{% endif %}</p>
+    {% if pending_guest_cart %}<button class="button" type="button" disabled>{% if request.LANGUAGE_CODE == 'ar' %}حل سلة الضيف أولاً{% else %}Resolve Guest Cart first{% endif %}</button>{% else %}<a class="button" href="{% url 'cart-checkout-start' %}">{% if request.LANGUAGE_CODE == 'ar' %}متابعة إلى الدفع{% else %}Continue to checkout{% endif %}</a>{% endif %}
     <a class="button button--ghost" href="{% url 'store-marketplace' %}">{% if request.LANGUAGE_CODE == 'ar' %}متابعة التسوق{% else %}Continue shopping{% endif %}</a>
   </aside>
 </div>
 {% else %}
-<section class="empty-state"><h2>{% if request.LANGUAGE_CODE == 'ar' %}سلتك فارغة{% else %}Your Cart is empty{% endif %}</h2><p>{% if request.LANGUAGE_CODE == 'ar' %}اختر منتجًا من أحد المتاجر. يمكنك إضافة منتج عادي مباشرة أو تخصيص منتج مؤهل في Studio.{% else %}Choose a product from a store. Add a plain item directly, or customize an eligible product in Studio.{% endif %}</p><a class="button" href="{% url 'store-marketplace' %}">{% if request.LANGUAGE_CODE == 'ar' %}تصفّح المتاجر{% else %}Browse stores{% endif %}</a></section>
+<section class="empty-state"><h2>{% if request.LANGUAGE_CODE == 'ar' %}سلتك فارغة{% else %}Your Cart is empty{% endif %}</h2><p>{% if request.LANGUAGE_CODE == 'ar' %}يمكن للضيف شراء المنتجات العادية والتصميمات الجاهزة. يتطلب Studio حسابًا مسجلًا.{% else %}Guests can buy plain and ready-designed products. Studio requires an authenticated account.{% endif %}</p><a class="button" href="{% url 'store-marketplace' %}">{% if request.LANGUAGE_CODE == 'ar' %}تصفّح المتاجر{% else %}Browse stores{% endif %}</a></section>
 {% endif %}
 {% endblock %}
