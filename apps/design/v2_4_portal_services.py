@@ -14,7 +14,6 @@ from .models import (
     DesignPatternRequirement,
     DesignPointOfMeasure,
     GarmentDesignVersion,
-    SizeChartRow,
 )
 from .services import evaluate_version_eligibility, require_draft, technical_completeness
 
@@ -39,16 +38,8 @@ def _int_or_none(value, field):
 
 @transaction.atomic
 def save_version_policy(
-    *,
-    version,
-    actor,
-    product_class,
-    size_system,
-    decoration_applicability,
-    requires_3d_source,
-    qc_requirements,
-    technical_policy=None,
-    request=None,
+    *, version, actor, product_class, size_system, decoration_applicability,
+    requires_3d_source, qc_requirements, technical_policy=None, request=None,
 ):
     require_draft(version, actor)
     if product_class not in dict(GarmentDesignVersion.ProductClass.choices):
@@ -67,40 +58,15 @@ def save_version_policy(
     if technical_policy is not None:
         version.technical_policy = technical_policy or {}
     version.full_clean()
-    version.save(
-        update_fields=[
-            "product_class",
-            "size_system",
-            "decoration_applicability",
-            "requires_3d_source",
-            "qc_requirements",
-            "technical_policy",
-        ]
-    )
-    record_audit_event(
-        actor=actor,
-        action="design.version.technical_policy.updated",
-        instance=version,
-        metadata={"design_id": version.design_id},
-        request=request,
-    )
+    version.save(update_fields=["product_class", "size_system", "decoration_applicability", "requires_3d_source", "qc_requirements", "technical_policy"])
+    record_audit_event(actor=actor, action="design.version.technical_policy.updated", instance=version, metadata={"design_id": version.design_id}, request=request)
     return version
 
 
 @transaction.atomic
 def save_point_of_measure(
-    *,
-    version,
-    actor,
-    point=None,
-    symbolic_ref,
-    name,
-    unit,
-    tolerance_plus=None,
-    tolerance_minus=None,
-    required=True,
-    sort_order=0,
-    request=None,
+    *, version, actor, point=None, symbolic_ref, name, unit, tolerance_plus=None,
+    tolerance_minus=None, required=True, sort_order=0, request=None,
 ):
     require_draft(version, actor)
     if point and point.version_id != version.pk:
@@ -115,8 +81,7 @@ def save_point_of_measure(
     point.tolerance_minus = _decimal_or_none(tolerance_minus, "tolerance_minus")
     point.required = bool(required)
     point.sort_order = int(sort_order or 0)
-    point.full_clean()
-    point.save()
+    point.full_clean(); point.save()
     record_audit_event(actor=actor, action="design.pom.saved", instance=point, metadata={"gdv_id": version.pk}, request=request)
     return point
 
@@ -127,31 +92,19 @@ def save_pom_value(*, point, size, actor, value, request=None):
     require_draft(version, actor)
     if size.version_id != version.pk:
         raise ValidationError("POM value size must belong to the same Garment Design Version.")
-    obj, _ = DesignPOMValue.objects.update_or_create(
-        point=point,
-        size=size,
-        defaults={"value": _decimal_or_none(value, "value")},
-    )
-    obj.full_clean()
-    obj.save()
+    decimal_value = _decimal_or_none(value, "value")
+    if decimal_value is None:
+        raise ValidationError({"value": "POM value is required."})
+    obj, _ = DesignPOMValue.objects.update_or_create(point=point, size=size, defaults={"value": decimal_value})
+    obj.full_clean(); obj.save()
     record_audit_event(actor=actor, action="design.pom_value.saved", instance=obj, metadata={"gdv_id": version.pk}, request=request)
     return obj
 
 
 @transaction.atomic
 def save_material(
-    *,
-    version,
-    actor,
-    material=None,
-    symbolic_ref,
-    role,
-    name,
-    composition="",
-    gsm=None,
-    specifications=None,
-    sort_order=0,
-    request=None,
+    *, version, actor, material=None, symbolic_ref, role, name, composition="",
+    gsm=None, specifications=None, sort_order=0, request=None,
 ):
     require_draft(version, actor)
     if material and material.version_id != version.pk:
@@ -164,23 +117,15 @@ def save_material(
     material.gsm = _decimal_or_none(gsm, "gsm")
     material.specifications = specifications or {}
     material.sort_order = int(sort_order or 0)
-    material.full_clean()
-    material.save()
+    material.full_clean(); material.save()
     record_audit_event(actor=actor, action="design.material.saved", instance=material, metadata={"gdv_id": version.pk}, request=request)
     return material
 
 
 @transaction.atomic
 def save_pattern_requirement(
-    *,
-    version,
-    actor,
-    size,
-    required=True,
-    declared_scale_1_to_1=False,
-    pattern_asset=None,
-    notes="",
-    request=None,
+    *, version, actor, size, required=True, declared_scale_1_to_1=False,
+    pattern_asset=None, notes="", request=None,
 ):
     require_draft(version, actor)
     if size.version_id != version.pk:
@@ -191,17 +136,10 @@ def save_pattern_requirement(
         if pattern_asset.media_asset.access != pattern_asset.media_asset.Access.PRIVATE:
             raise ValidationError("Production Pattern assets must remain private.")
     requirement, _ = DesignPatternRequirement.objects.update_or_create(
-        version=version,
-        size=size,
-        defaults={
-            "required": bool(required),
-            "declared_scale_1_to_1": bool(declared_scale_1_to_1),
-            "pattern_asset": pattern_asset,
-            "notes": str(notes or "").strip(),
-        },
+        version=version, size=size,
+        defaults={"required": bool(required), "declared_scale_1_to_1": bool(declared_scale_1_to_1), "pattern_asset": pattern_asset, "notes": str(notes or "").strip()},
     )
-    requirement.full_clean()
-    requirement.save()
+    requirement.full_clean(); requirement.save()
     record_audit_event(actor=actor, action="design.pattern_requirement.saved", instance=requirement, metadata={"gdv_id": version.pk}, request=request)
     return requirement
 
@@ -216,8 +154,7 @@ def save_colorway(*, version, actor, colorway=None, symbolic_ref, name, hex_colo
     colorway.name = str(name or "").strip()
     colorway.hex_color = str(hex_color or "").strip()
     colorway.sort_order = int(sort_order or 0)
-    colorway.full_clean()
-    colorway.save()
+    colorway.full_clean(); colorway.save()
     record_audit_event(actor=actor, action="design.colorway.saved", instance=colorway, metadata={"gdv_id": version.pk}, request=request)
     return colorway
 
@@ -230,35 +167,17 @@ def attach_colorway_image(*, colorway, actor, asset, role, sort_order=0, request
         raise ValidationError({"role": "Unsupported image role."})
     if asset.version_id != version.pk or asset.kind != DesignAsset.Kind.PRODUCT_IMAGE:
         raise ValidationError("Colorway images must use a Product Image asset on the same Garment Design Version.")
-    row, _ = DesignColorwayImage.objects.update_or_create(
-        colorway=colorway,
-        role=role,
-        asset=asset,
-        defaults={"sort_order": int(sort_order or 0)},
-    )
-    row.full_clean()
-    row.save()
+    row, _ = DesignColorwayImage.objects.update_or_create(colorway=colorway, role=role, asset=asset, defaults={"sort_order": int(sort_order or 0)})
+    row.full_clean(); row.save()
     record_audit_event(actor=actor, action="design.colorway_image.attached", instance=row, metadata={"gdv_id": version.pk}, request=request)
     return row
 
 
 @transaction.atomic
 def save_decoration_zone_contract(
-    *,
-    version,
-    actor,
-    zone=None,
-    symbolic_ref,
-    name,
-    surface,
-    allowed_methods,
-    placement,
-    max_width_mm=None,
-    max_height_mm=None,
-    minimum_dpi=None,
-    embroidery_constraints=None,
-    notes="",
-    request=None,
+    *, version, actor, zone=None, symbolic_ref, name, surface, allowed_methods,
+    placement, max_width_mm=None, max_height_mm=None, minimum_dpi=None,
+    embroidery_constraints=None, notes="", request=None,
 ):
     require_draft(version, actor)
     if version.decoration_applicability == GarmentDesignVersion.DecorationApplicability.NOT_APPLICABLE:
@@ -282,8 +201,7 @@ def save_decoration_zone_contract(
     zone.embroidery_constraints = embroidery_constraints or {}
     zone.reference_only = False
     zone.notes = str(notes or "").strip()
-    zone.full_clean()
-    zone.save()
+    zone.full_clean(); zone.save()
     if version.decoration_applicability != GarmentDesignVersion.DecorationApplicability.CONFIGURED:
         version.decoration_applicability = GarmentDesignVersion.DecorationApplicability.CONFIGURED
         version.save(update_fields=["decoration_applicability"])
@@ -292,9 +210,9 @@ def save_decoration_zone_contract(
 
 
 def technical_workspace_state(version):
-    complete, errors = technical_completeness(version)
+    completeness = technical_completeness(version)
     return {
-        "technical_complete": complete,
-        "completeness_errors": errors,
+        "technical_complete": completeness["complete"],
+        "completeness_errors": completeness["errors"],
         "eligibility": evaluate_version_eligibility(version),
     }
