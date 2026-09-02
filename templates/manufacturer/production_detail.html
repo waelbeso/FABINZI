@@ -19,168 +19,109 @@
   {% endif %}
 </div>
 
-<div class="mfr-two-col">
-  <section class="mfr-panel">
-    <h2>{% if request.LANGUAGE_CODE == 'ar' %}تعريف المنتج{% else %}Product definition{% endif %}</h2>
-    <dl class="fact-grid">
-      <div><dt>{% if request.LANGUAGE_CODE == 'ar' %}التصميم{% else %}Garment design{% endif %}</dt><dd>{{ garment_version.design.title }}</dd></div>
-      <div><dt>{% if request.LANGUAGE_CODE == 'ar' %}نسخة التصميم{% else %}Garment version{% endif %}</dt><dd>v{{ garment_version.version_number }}</dd></div>
-      <div><dt>{% if request.LANGUAGE_CODE == 'ar' %}الخامة الأساسية{% else %}Base material{% endif %}</dt><dd>{{ garment_version.base_material|default:'—' }}</dd></div>
-      <div><dt>{% if request.LANGUAGE_CODE == 'ar' %}المقاس{% else %}Size{% endif %}</dt><dd>{{ item.size|default:'—' }}</dd></div>
-      <div><dt>{% if request.LANGUAGE_CODE == 'ar' %}اللون{% else %}Color{% endif %}</dt><dd>{{ item.color_name|default:'—' }}</dd></div>
-    </dl>
-
-    {% if garment_version.construction_notes %}
-      <div class="notice">
-        <strong>{% if request.LANGUAGE_CODE == 'ar' %}ملاحظات البناء{% else %}Construction notes{% endif %}</strong>
-        <p>{{ garment_version.construction_notes }}</p>
-      </div>
-    {% endif %}
-
-    {% for row in selected_size_rows %}
-      <div class="notice technical-spec-block">
-        <strong>{% if request.LANGUAGE_CODE == 'ar' %}قياسات{% else %}Measurements{% endif %} {{ row.size_label }}</strong>
-        {% mfr_measurement_rows row.measurements request.LANGUAGE_CODE as measurement_specs %}
-        <dl class="technical-spec-grid technical-spec-grid--measurements">
-          {% for spec in measurement_specs %}
-            <div data-measurement-key="{{ spec.key }}">
-              <dt>{{ spec.label }}</dt>
-              <dd><bdi>{{ spec.value }}</bdi>{% if spec.unit %}<span class="technical-unit">{{ spec.unit }}</span>{% endif %}</dd>
-            </div>
-          {% empty %}
-            <div><dt>{% if request.LANGUAGE_CODE == 'ar' %}القياسات{% else %}Measurements{% endif %}</dt><dd>—</dd></div>
-          {% endfor %}
-        </dl>
-      </div>
-    {% endfor %}
-  </section>
-
-  <section class="mfr-panel">
-    <h2>{% if request.LANGUAGE_CODE == 'ar' %}مراحل الإنتاج{% else %}Production milestones{% endif %}</h2>
-    {% if manufacturer_can_production and job.status == 'queued' or manufacturer_can_production and job.status == 'qc_failed' %}
-      <form method="post" class="action-row">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="start">
-        <button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}بدء الإنتاج{% else %}Start production{% endif %}</button>
-      </form>
-    {% endif %}
-
-    {% for milestone in job.milestones.all %}
-      <article class="milestone">
-        <div>
-          <strong>{% if request.LANGUAGE_CODE == 'ar' %}{{ milestone.kind|mfr_ar:milestone.get_kind_display }}{% else %}{{ milestone.get_kind_display }}{% endif %}</strong>
-          <span class="badge">{% if request.LANGUAGE_CODE == 'ar' %}{{ milestone.status|mfr_ar:milestone.get_status_display }}{% else %}{{ milestone.get_status_display }}{% endif %}</span>
-        </div>
-        {% if milestone.notes %}<p>{{ milestone.notes }}</p>{% endif %}
-        {% if manufacturer_can_production and job.status == 'in_production' %}
-          <form method="post" class="inline-form">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="milestone">
-            <input type="hidden" name="milestone_id" value="{{ milestone.id }}">
-            <select name="status">
-              {% for value,label in milestone.Status.choices %}
-                <option value="{{ value }}" {% if milestone.status == value %}selected{% endif %}>{% if request.LANGUAGE_CODE == 'ar' %}{{ value|mfr_ar:label }}{% else %}{{ label }}{% endif %}</option>
-              {% endfor %}
-            </select>
-            <input name="notes" value="{{ milestone.notes }}" placeholder="{% if request.LANGUAGE_CODE == 'ar' %}ملاحظات فعلية{% else %}Real production note{% endif %}">
-            <button class="button button--sm" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}تحديث{% else %}Update{% endif %}</button>
-          </form>
-        {% endif %}
-      </article>
-    {% endfor %}
-
-    {% if manufacturer_can_production and job.status == 'in_production' %}
-      <form method="post">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="request_qc">
-        <button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}إرسال للجودة{% else %}Request QC{% endif %}</button>
-      </form>
-    {% endif %}
-  </section>
-</div>
-
+{% with spec=job.production_specification %}
+{% if spec %}
 <section class="mfr-panel">
-  <h2>{% if request.LANGUAGE_CODE == 'ar' %}الزخرفة والتخصيص{% else %}Decoration & customization{% endif %}</h2>
-
-  {% for placement in placements %}
-    <article class="spec-row">
-      <strong>{{ placement.decoration_zone.name }}</strong>
-      <span>{% if request.LANGUAGE_CODE == 'ar' %}{{ placement.production_method|mfr_ar:placement.get_production_method_display }}{% else %}{{ placement.get_production_method_display }}{% endif %}</span>
-      {% mfr_transform_rows placement.transform request.LANGUAGE_CODE as placement_transform_specs %}
-      {% if placement_transform_specs %}
-        <dl class="technical-spec-grid technical-spec-grid--transform" data-transform-source="designed-product" data-transform-id="{{ placement.id }}">
-          {% for spec in placement_transform_specs %}
-            <div data-tech-key="{{ spec.key }}">
-              <dt>{{ spec.label }}</dt>
-              <dd><bdi>{{ spec.value }}</bdi></dd>
-            </div>
-          {% endfor %}
-        </dl>
-      {% else %}
-        <span class="muted">{% if request.LANGUAGE_CODE == 'ar' %}لا توجد بيانات موضع محفوظة.{% else %}No persisted placement metadata.{% endif %}</span>
-      {% endif %}
-    </article>
-  {% endfor %}
-
-  {% for element in studio_elements %}
-    <article class="spec-row">
-      <strong>{{ element.decoration_zone.name }} · {% if request.LANGUAGE_CODE == 'ar' %}{{ element.kind|mfr_ar:element.get_kind_display }}{% else %}{{ element.get_kind_display }}{% endif %}</strong>
-      <span>{% if request.LANGUAGE_CODE == 'ar' %}{{ element.production_method|mfr_ar:element.get_production_method_display }}{% else %}{{ element.get_production_method_display|default:'—' }}{% endif %}</span>
-      {% mfr_transform_rows element.transform request.LANGUAGE_CODE as studio_transform_specs %}
-      {% if studio_transform_specs %}
-        <dl class="technical-spec-grid technical-spec-grid--transform" data-transform-source="studio" data-transform-id="{{ element.id }}">
-          {% for spec in studio_transform_specs %}
-            <div data-tech-key="{{ spec.key }}">
-              <dt>{{ spec.label }}</dt>
-              <dd><bdi>{{ spec.value }}</bdi></dd>
-            </div>
-          {% endfor %}
-        </dl>
-      {% else %}
-        <span class="muted">{% if request.LANGUAGE_CODE == 'ar' %}لا توجد بيانات موضع محفوظة.{% else %}No persisted placement metadata.{% endif %}</span>
-      {% endif %}
-
-      {% if element.kind == 'image' and element.media_asset_id %}
-        <a href="{% url 'manufacturer-production-media' job.id 'studio' element.id %}">{% if request.LANGUAGE_CODE == 'ar' %}فتح ملف العميل المطلوب للإنتاج{% else %}Open required customer production image{% endif %}</a>
-      {% elif element.kind == 'artwork' %}
-        {% for asset in element.artwork_version.assets.all %}
-          {% if asset.kind == 'source' %}
-            <a href="{% url 'manufacturer-production-media' job.id 'studio-artwork' asset.id %}">{% if request.LANGUAGE_CODE == 'ar' %}فتح مصدر العمل الفني المطلوب{% else %}Open required Artwork source{% endif %}</a>
-          {% endif %}
-        {% endfor %}
-      {% endif %}
-    </article>
-  {% empty %}
-    {% if not placements %}
-      <div class="empty-state"><p>{% if request.LANGUAGE_CODE == 'ar' %}لا يوجد تخصيص مسجل لهذه المهمة.{% else %}No persisted customization is attached to this job.{% endif %}</p></div>
-    {% endif %}
-  {% endfor %}
+  <h2>{% if request.LANGUAGE_CODE == 'ar' %}مواصفة الإنتاج المجمدة{% else %}Frozen production specification{% endif %}</h2>
+  <p><strong>{% if request.LANGUAGE_CODE == 'ar' %}بصمة المواصفة SHA-256{% else %}Specification SHA-256{% endif %}:</strong> <code>{{ spec.snapshot_sha256 }}</code></p>
+  <dl class="fact-grid">
+    <div><dt>{% if request.LANGUAGE_CODE == 'ar' %}نسخة تصميم القطعة{% else %}Garment Design Version{% endif %}</dt><dd>{{ spec.snapshot.garment_design.symbolic_ref|default:spec.snapshot.garment_design.garment_design_version_id }}</dd></div>
+    <div><dt>{% if request.LANGUAGE_CODE == 'ar' %}المخطط التقني{% else %}Technical schema{% endif %}</dt><dd>{{ spec.snapshot.garment_design.technical_schema_version }}</dd></div>
+    <div><dt>{% if request.LANGUAGE_CODE == 'ar' %}المقاس{% else %}Size{% endif %}</dt><dd>{{ spec.snapshot.commerce.size|default:'—' }}</dd></div>
+    <div><dt>{% if request.LANGUAGE_CODE == 'ar' %}اللون{% else %}Color{% endif %}</dt><dd>{{ spec.snapshot.commerce.color_name|default:'—' }}</dd></div>
+    <div><dt>{% if request.LANGUAGE_CODE == 'ar' %}الكمية{% else %}Quantity{% endif %}</dt><dd>{{ spec.snapshot.commerce.quantity }}</dd></div>
+    <div><dt>{% if request.LANGUAGE_CODE == 'ar' %}نوع الشراء{% else %}Purchase kind{% endif %}</dt><dd>{{ spec.snapshot.commerce.purchase_kind }}</dd></div>
+  </dl>
+  {% if not spec.released_at %}<div class="notice">{% if request.LANGUAGE_CODE == 'ar' %}تم إسناد الإنتاج ولم يتم إطلاقه بعد بواسطة FABINZI.{% else %}Production is assigned but not yet released by FABINZI.{% endif %}</div>{% endif %}
 </section>
 
 <section class="mfr-panel">
-  <h2>{% if request.LANGUAGE_CODE == 'ar' %}ملفات الإنتاج المصرح بها{% else %}Authorized production files{% endif %}</h2>
+  <h2>{% if request.LANGUAGE_CODE == 'ar' %}قياسات المقاس المطلوب / POM{% else %}Ordered-size measurements / POM{% endif %}</h2>
+  <pre>{{ spec.snapshot.garment_design.ordered_size_measurements }}</pre>
+  {% for row in spec.snapshot.garment_design.ordered_size_pom %}
+    <div class="spec-row"><strong>{{ row.symbolic_ref }} · {{ row.name }}</strong><span>{{ row.value }} {{ row.unit }}</span></div>
+  {% empty %}<p>—</p>{% endfor %}
+</section>
+
+<section class="mfr-panel">
+  <h2>{% if request.LANGUAGE_CODE == 'ar' %}الخامات / BOM{% else %}Materials / BOM{% endif %}</h2>
+  {% for row in spec.snapshot.garment_design.materials_bom %}
+    <div class="spec-row"><strong>{{ row.symbolic_ref }} · {{ row.name }}</strong><span>{{ row.composition }}{% if row.gsm %} · {{ row.gsm }} GSM{% endif %}</span></div>
+  {% empty %}<p>—</p>{% endfor %}
+</section>
+
+<section class="mfr-panel">
+  <h2>{% if request.LANGUAGE_CODE == 'ar' %}دليل الزخرفة والتخصيص{% else %}Decoration / customization evidence{% endif %}</h2>
+  {% if spec.snapshot.ready_designed %}<pre>{{ spec.snapshot.ready_designed.placements }}</pre>{% endif %}
+  {% if spec.snapshot.studio %}<pre>{{ spec.snapshot.studio }}</pre>{% endif %}
+  {% if not spec.snapshot.ready_designed and not spec.snapshot.studio %}<p>{% if request.LANGUAGE_CODE == 'ar' %}خط إنتاج بدون زخرفة أو تخصيص.{% else %}Plain production line; no decoration/customization evidence.{% endif %}</p>{% endif %}
+</section>
+
+<section class="mfr-panel">
+  <h2>{% if request.LANGUAGE_CODE == 'ar' %}ملفات الإنتاج الخاصة المصرح بها{% else %}Authorized private production files{% endif %}</h2>
   <div class="asset-list">
-    {% for asset in design_assets %}
-      <a href="{% url 'manufacturer-production-media' job.id 'design' asset.id %}">
-        <strong>{{ asset.label|default:asset.get_kind_display }}</strong>
-        <span>{{ asset.media_asset.original_filename }}</span>
-      </a>
-    {% endfor %}
-    {% for asset in artwork_sources %}
-      <a href="{% url 'manufacturer-production-media' job.id 'artwork' asset.id %}">
-        <strong>{% if request.LANGUAGE_CODE == 'ar' %}مصدر العمل الفني{% else %}Artwork production source{% endif %}</strong>
-        <span>{{ asset.media_asset.original_filename }}</span>
-      </a>
-    {% endfor %}
+    {% for asset in spec.snapshot.authorized_private_media %}
+      <a href="{% url 'manufacturer-production-media' job.id 'spec' asset.media_asset_id %}"><strong>{{ asset.role|default:asset.source }}</strong><span>{{ asset.filename }}</span></a>
+    {% empty %}<p>{% if request.LANGUAGE_CODE == 'ar' %}لا توجد ملفات مصدر خاصة مصرح بها في هذه المواصفة.{% else %}No private source files are authorized by this specification.{% endif %}</p>{% endfor %}
     {% for asset in production_assets %}
-      <a href="{% url 'manufacturer-production-media' job.id 'job' asset.id %}">
-        <strong>{{ asset.label|default:asset.get_kind_display }}</strong>
-        <span>{{ asset.media_asset.original_filename }}</span>
-      </a>
-    {% empty %}{% endfor %}
-    {% if not design_assets and not artwork_sources and not production_assets %}
-      <div class="empty-state"><p>{% if request.LANGUAGE_CODE == 'ar' %}لا توجد ملفات إنتاج خاصة مصرح بها لهذه المهمة.{% else %}No private production files are authorized for this job.{% endif %}</p></div>
-    {% endif %}
+      <a href="{% url 'manufacturer-production-media' job.id 'job' asset.id %}"><strong>{{ asset.label|default:asset.get_kind_display }}</strong><span>{{ asset.media_asset.original_filename }}</span></a>
+    {% endfor %}
   </div>
+</section>
+
+{% elif item.manufacturing_rfq.source == 'customer_order' %}
+<section class="mfr-panel">
+  <h2>{% if request.LANGUAGE_CODE == 'ar' %}مواصفة الإنتاج غير متاحة{% else %}Production specification unavailable{% endif %}</h2>
+  <div class="notice">
+    {% if request.LANGUAGE_CODE == 'ar' %}لا يمكن عرض بيانات إنتاج CustomerOrder بدون ProductionSpecification صالحة وغير قابلة للتغيير.{% else %}CustomerOrder production data cannot be presented without a valid immutable ProductionSpecification.{% endif %}
+  </div>
+</section>
+
+{% else %}
+  {% include "manufacturer/_production_detail_legacy.html" %}
+{% endif %}
+{% endwith %}
+
+<section class="mfr-panel">
+  <h2>{% if request.LANGUAGE_CODE == 'ar' %}مراحل الإنتاج{% else %}Production milestones{% endif %}</h2>
+  {% if manufacturer_can_production and job.status == 'queued' or manufacturer_can_production and job.status == 'qc_failed' %}
+    <form method="post" class="action-row">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="start">
+      <button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}بدء الإنتاج{% else %}Start production{% endif %}</button>
+    </form>
+  {% endif %}
+
+  {% for milestone in job.milestones.all %}
+    <article class="milestone">
+      <div>
+        <strong>{% if request.LANGUAGE_CODE == 'ar' %}{{ milestone.kind|mfr_ar:milestone.get_kind_display }}{% else %}{{ milestone.get_kind_display }}{% endif %}</strong>
+        <span class="badge">{% if request.LANGUAGE_CODE == 'ar' %}{{ milestone.status|mfr_ar:milestone.get_status_display }}{% else %}{{ milestone.get_status_display }}{% endif %}</span>
+      </div>
+      {% if milestone.notes %}<p>{{ milestone.notes }}</p>{% endif %}
+      {% if manufacturer_can_production and job.status == 'in_production' %}
+        <form method="post" class="inline-form">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="milestone">
+          <input type="hidden" name="milestone_id" value="{{ milestone.id }}">
+          <select name="status">
+            {% for value,label in milestone.Status.choices %}
+              <option value="{{ value }}" {% if milestone.status == value %}selected{% endif %}>{% if request.LANGUAGE_CODE == 'ar' %}{{ value|mfr_ar:label }}{% else %}{{ label }}{% endif %}</option>
+            {% endfor %}
+          </select>
+          <input name="notes" value="{{ milestone.notes }}" placeholder="{% if request.LANGUAGE_CODE == 'ar' %}ملاحظات فعلية{% else %}Real production note{% endif %}">
+          <button class="button button--sm" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}تحديث{% else %}Update{% endif %}</button>
+        </form>
+      {% endif %}
+    </article>
+  {% endfor %}
+
+  {% if manufacturer_can_production and job.status == 'in_production' %}
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="request_qc">
+      <button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}إرسال للجودة{% else %}Request QC{% endif %}</button>
+    </form>
+  {% endif %}
 </section>
 {% endblock %}

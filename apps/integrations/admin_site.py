@@ -15,6 +15,7 @@ class FabinziAdminSite(AdminSiteOTPRequired):
         from apps.platform_ops import maneg_views
         from apps.public_profiles import maneg_views as public_profile_maneg
         from apps.public_inquiries import maneg_views as public_inquiry_maneg
+        from apps.operations import maneg_v2_7 as operations_v2_7_maneg
 
         custom = [
             path("users/", self.admin_view(maneg_views.users), name="maneg-users"),
@@ -36,6 +37,7 @@ class FabinziAdminSite(AdminSiteOTPRequired):
             path("catalog/", self.admin_view(maneg_views.catalog), name="maneg-catalog"),
             path("orders/", self.admin_view(maneg_views.orders), name="maneg-orders"),
             path("production/", self.admin_view(maneg_views.production), name="maneg-production"),
+            path("production-routing/", self.admin_view(operations_v2_7_maneg.routing_console), name="maneg-v2-7-routing"),
             path("finance/", self.admin_view(maneg_views.finance), name="maneg-finance"),
             path("integrations/", self.admin_view(maneg_views.integrations), name="maneg-integrations"),
             path("integrations/<int:pk>/", self.admin_view(maneg_views.integration_detail), name="maneg-integration-detail"),
