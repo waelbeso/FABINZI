@@ -87,14 +87,27 @@ jobs:
       - name: Django check
         run: python manage.py check
       - name: Run focused V2-6 guest commerce regressions
+        shell: bash
         run: |
+          set -o pipefail
+          mkdir -p artifacts/v2-6-focused
           pytest -q \
             tests/test_v2_6_guest_commerce.py \
             tests/test_v2_6_pricing_parent_purchase.py \
             tests/test_v2_6_guest_security.py \
             tests/test_commerce_extension.py \
             tests/test_customer_api_v1_security.py \
-            tests/test_artwork_studio_productization.py
+            tests/test_artwork_studio_productization.py \
+            --junitxml=artifacts/v2-6-focused/junit.xml \
+            2>&1 | tee artifacts/v2-6-focused/pytest.txt
+      - name: Upload V2-6 focused test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: v2-6-focused-test-evidence
+          path: artifacts/v2-6-focused
+          if-no-files-found: error
+          retention-days: 30
       - name: Recompute canonical brand SHA-256
         run: |
           test "$(sha256sum static/brand/fabinzi-logo.svg | awk '{print $1}')" = "27fd3226825c47717b0899cbdb76bdaf9c38a0d7fea2e88257c8db8bf71b4e1b"
