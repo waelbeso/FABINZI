@@ -156,7 +156,7 @@ def test_plain_product_browser_journey_never_requires_studio(client):
     product_response = client.get(reverse("public-store-product", args=[product.storefront.slug, product.slug]))
     assert store_response.status_code == 200
     assert product_response.status_code == 200
-    assert b"Sign in to buy" in product_response.content
+    assert b"Add to Cart" in product_response.content
 
     client.force_login(customer)
     authenticated_product = client.get(reverse("public-store-product", args=[product.storefront.slug, product.slug]))
