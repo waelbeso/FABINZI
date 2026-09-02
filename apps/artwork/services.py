@@ -177,6 +177,7 @@ def set_ip_declaration(*, version, actor, rights_basis, rights_holder_name, thir
 
 
 def validate_artwork_ready(version):
+    """Accepted Artwork moderation/publication readiness; production-method evidence is separate."""
     try:
         declaration = IPDeclaration.objects.get(version=version)
     except IPDeclaration.DoesNotExist:
@@ -191,9 +192,30 @@ def validate_artwork_ready(version):
         raise ValidationError("Artwork preview is required.")
     if not version.assets.filter(kind=ArtworkAsset.Kind.SOURCE, media_asset__access=MediaAsset.Access.PRIVATE).exists():
         raise ValidationError("Private production source is required.")
-    if not version.intended_methods:
-        raise ValidationError("At least one intended production method is required.")
     version.full_clean()
+
+
+def evaluate_artwork_production_readiness(version, production_methods=None):
+    intended = set(version.intended_methods or [])
+    requested = list(production_methods or [])
+    method_coverage = True
+    for method in requested:
+        if method == ArtworkPlacement.ProductionMethod.PRINT_LEGACY:
+            covered = bool(intended & {ArtworkPlacement.ProductionMethod.DTF, ArtworkPlacement.ProductionMethod.DTG})
+        else:
+            covered = method in intended
+        if not covered:
+            method_coverage = False
+            break
+    technical_check_pass = version.technical_check_status == ArtworkVersion.TechnicalCheckStatus.PASS
+    ready = bool(intended and technical_check_pass and method_coverage)
+    return {
+        "moderation_approved": version.status == ArtworkVersion.Status.APPROVED,
+        "intended_methods": sorted(intended),
+        "technical_check_pass": technical_check_pass,
+        "method_coverage": method_coverage,
+        "production_method_ready": ready,
+    }
 
 
 @transaction.atomic
@@ -233,8 +255,6 @@ def review_artwork_version(*, version, reviewer, decision, notes="", request=Non
         raise ValidationError("Unsupported Artwork review decision.")
     if decision == ArtworkReview.Decision.APPROVED:
         validate_artwork_ready(version)
-        if version.technical_check_status != ArtworkVersion.TechnicalCheckStatus.PASS:
-            raise ValidationError("Artwork technical check must PASS before publication approval.")
     ArtworkReview.objects.create(version=version, reviewer=reviewer, decision=decision, notes=notes)
     version.status = decision; version.reviewed_at = timezone.now(); version.reviewed_by = reviewer; version.review_notes = notes
     version.save(update_fields=["status", "reviewed_at", "reviewed_by", "review_notes"])
@@ -248,7 +268,7 @@ def review_artwork_version(*, version, reviewer, decision, notes="", request=Non
     title_ar = {"approved":"تم اعتماد العمل الفني","revision_required":"العمل الفني يحتاج إلى تعديلات","rejected":"تم رفض العمل الفني"}[decision]
     for membership in version.artwork.organization.memberships.filter(is_active=True).select_related("user"):
         Notification.objects.create(recipient=membership.user, type="artwork_review", title_en=title_en, title_ar=title_ar, body_en=notes, body_ar=notes, destination=f"/designer/artworks/{version.artwork_id}/")
-    record_audit_event(actor=reviewer, action=f"artwork.version.{decision}", instance=version, metadata={"artwork_id": version.artwork_id, "notes_present": bool(notes), "registration_complete": version.registration_cases.filter(status=ArtworkRegistrationCase.Status.COMPLETED).exists()}, request=request)
+    record_audit_event(actor=reviewer, action=f"artwork.version.{decision}", instance=version, metadata={"artwork_id": version.artwork_id, "notes_present": bool(notes), "production_method_readiness": evaluate_artwork_production_readiness(version), "registration_complete": version.registration_cases.filter(status=ArtworkRegistrationCase.Status.COMPLETED).exists()}, request=request)
     return version
 
 
@@ -256,7 +276,6 @@ def review_artwork_version(*, version, reviewer, decision, notes="", request=Non
 def create_registration_case(*, version, applicant, source_snapshot=None, procedure_template_key="", request=None):
     require_artwork_access(applicant, version.artwork, edit=False)
     if source_snapshot and source_snapshot.visual_graphic_applicability_confirmed is False:
-        # Neutral foundation is allowed, but the case must not be marked applicable or ready merely from selection.
         applicability = False
     else:
         applicability = False
@@ -327,20 +346,26 @@ def transition_registration_case(*, case, reviewer, status, notes="", captured_d
 
 def evaluate_designed_product_eligibility(product):
     garment = evaluate_version_eligibility(product.garment_version)
-    artwork_approved = product.artwork_version.status == ArtworkVersion.Status.APPROVED and product.artwork_version.technical_check_status == ArtworkVersion.TechnicalCheckStatus.PASS
+    artwork_moderation_approved = product.artwork_version.status == ArtworkVersion.Status.APPROVED
     placements_valid = product.placements.exists()
+    placement_methods = []
     for placement in product.placements.all():
+        placement_methods.append(placement.production_method)
         try:
             placement.full_clean()
         except ValidationError:
             placements_valid = False
             break
-    commercial = bool(garment["commercial_eligible"] and artwork_approved and placements_valid and not product.reference_only)
-    production = bool(garment["production_eligible"] and commercial)
+    artwork_production = evaluate_artwork_production_readiness(product.artwork_version, placement_methods)
+    commercial = bool(garment["commercial_eligible"] and artwork_moderation_approved and placements_valid and not product.reference_only)
+    production = bool(garment["production_eligible"] and commercial and artwork_production["production_method_ready"])
     return {
         "reference_only": product.reference_only,
         "garment": garment,
-        "artwork_approved": artwork_approved,
+        "artwork_approved": artwork_moderation_approved,
+        "artwork_moderation_approved": artwork_moderation_approved,
+        "artwork_production_method_ready": artwork_production["production_method_ready"],
+        "artwork_production_readiness": artwork_production,
         "placements_valid": placements_valid,
         "commercial_eligible": commercial,
         "production_eligible": production,
@@ -351,11 +376,12 @@ def evaluate_designed_product_eligibility(product):
 def create_designed_product(*, organization, actor, garment_version, artwork_version, title, description="", request=None, symbolic_ref=None, economic_attribution=None):
     require_active_designer_org(organization)
     require_org_access(actor, organization, roles=ARTWORK_EDIT_ROLES)
-    garment_eligibility = evaluate_version_eligibility(garment_version)
-    if garment_version.status != GarmentDesignVersion.Status.APPROVED or not garment_eligibility["commercial_eligible"]:
-        raise ValidationError("Real Designed Products require a technically approved and commercially eligible Garment Design Version.")
-    if artwork_version.status != ArtworkVersion.Status.APPROVED or artwork_version.technical_check_status != ArtworkVersion.TechnicalCheckStatus.PASS:
-        raise ValidationError("Designed Products require an approved, technically checked Artwork Version.")
+    if organization.pk != garment_version.design.organization_id:
+        raise ValidationError("Ready Designed Product composition must be created by the canonical Garment Design organization.")
+    if garment_version.status != GarmentDesignVersion.Status.APPROVED:
+        raise ValidationError("Designed Products require an approved Garment Design Version.")
+    if artwork_version.status != ArtworkVersion.Status.APPROVED:
+        raise ValidationError("Designed Products require an approved Artwork Version.")
     product = DesignedProduct(
         organization=organization,
         symbolic_ref=symbolic_ref,
@@ -403,12 +429,37 @@ def create_reference_designed_product(*, organization, actor, garment_version, a
     return product
 
 
+def _normalize_legacy_placement_transform(transform):
+    normalized = dict(transform or {})
+    canonical = {"x", "y", "width", "height"}
+    if canonical.issubset(normalized):
+        return normalized
+    legacy_keys = {"x", "y", "scale", "rotation"}
+    if {"x", "y", "scale"}.issubset(normalized) and set(normalized).issubset(legacy_keys):
+        try:
+            scale = float(normalized["scale"])
+        except (TypeError, ValueError):
+            raise ValidationError("Legacy Artwork placement scale must be numeric.")
+        if scale <= 0:
+            raise ValidationError("Legacy Artwork placement scale must be positive.")
+        extent = 0.1 * scale
+        return {
+            "x": normalized["x"],
+            "y": normalized["y"],
+            "width": extent,
+            "height": extent,
+            "rotation": normalized.get("rotation", 0),
+        }
+    return normalized
+
+
 @transaction.atomic
 def add_product_placement(*, product, actor, decoration_zone, transform, production_method, request=None):
     require_org_access(actor, product.organization, roles=ARTWORK_EDIT_ROLES)
     if product.status != DesignedProduct.Status.DRAFT:
         raise ValidationError("Only draft Designed Products can be edited.")
-    placement = ArtworkPlacement(product=product, decoration_zone=decoration_zone, transform=transform or {}, production_method=production_method)
+    normalized_transform = _normalize_legacy_placement_transform(transform)
+    placement = ArtworkPlacement(product=product, decoration_zone=decoration_zone, transform=normalized_transform, production_method=production_method)
     placement.full_clean(); placement.save()
     record_audit_event(actor=actor, action="designed_product.placement.added", instance=placement, metadata={"product_id": product.pk, "zone_id": decoration_zone.pk, "production_method": production_method}, request=request)
     return placement
@@ -419,16 +470,15 @@ def publish_designed_product(*, product, actor, request=None):
     require_org_access(actor, product.organization, roles=ARTWORK_MANAGE_ROLES)
     if product.status != DesignedProduct.Status.DRAFT:
         raise ValidationError("Only draft Designed Products can be published.")
-    eligibility = evaluate_designed_product_eligibility(product)
-    if product.reference_only:
-        if not getattr(product.garment_version, "reference_provenance", None):
-            raise ValidationError("Reference-only Designed Product must resolve to immutable reference provenance.")
-    elif not eligibility["commercial_eligible"]:
-        raise ValidationError("Designed Product is not commercially eligible.")
+    if product.garment_version.status != GarmentDesignVersion.Status.APPROVED or product.artwork_version.status != ArtworkVersion.Status.APPROVED:
+        raise ValidationError("Garment Design and Artwork approvals are required.")
     if not product.placements.exists():
         raise ValidationError("At least one Artwork placement is required.")
+    if product.reference_only and not getattr(product.garment_version, "reference_provenance", None):
+        raise ValidationError("Reference-only Designed Product must resolve to immutable reference provenance.")
+    eligibility = evaluate_designed_product_eligibility(product)
     product.status = DesignedProduct.Status.PUBLISHED; product.save(update_fields=["status", "updated_at"])
-    record_audit_event(actor=actor, action="designed_product.published", instance=product, metadata={"eligibility": evaluate_designed_product_eligibility(product)}, request=request)
+    record_audit_event(actor=actor, action="designed_product.published", instance=product, metadata={"eligibility": eligibility}, request=request)
     return product
 
 
