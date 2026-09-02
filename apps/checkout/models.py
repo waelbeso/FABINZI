@@ -1,4 +1,5 @@
 import uuid
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -10,7 +11,21 @@ class Cart(models.Model):
         CONVERTED = "converted", "Converted"
         ABANDONED = "abandoned", "Abandoned"
 
-    customer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="carts")
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="carts",
+    )
+    guest_key_hash = models.CharField(max_length=64, blank=True, db_index=True)
+    merged_into = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="merged_guest_carts",
+    )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -20,10 +35,23 @@ class Cart(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["customer"],
-                condition=models.Q(status="active"),
+                condition=models.Q(status="active", customer__isnull=False),
                 name="unique_active_cart_per_customer",
-            )
+            ),
+            models.UniqueConstraint(
+                fields=["guest_key_hash"],
+                condition=models.Q(status="active", customer__isnull=True) & ~models.Q(guest_key_hash=""),
+                name="unique_active_guest_cart_per_key",
+            ),
+            models.CheckConstraint(
+                condition=(models.Q(customer__isnull=False, guest_key_hash="") | (models.Q(customer__isnull=True) & ~models.Q(guest_key_hash=""))),
+                name="cart_exactly_one_owner_identity",
+            ),
         ]
+
+    @property
+    def is_guest(self):
+        return self.customer_id is None
 
 
 class CartItem(models.Model):
@@ -58,6 +86,8 @@ class CartItem(models.Model):
         if self.kind == self.Kind.STUDIO:
             if not self.studio_project_id:
                 raise ValidationError({"studio_project": "Studio cart items require a Studio project."})
+            if self.cart_id and self.cart.customer_id is None:
+                raise ValidationError({"studio_project": "Guest carts cannot contain Studio customization."})
             if self.studio_project_id and self.studio_project.customer_id != self.cart.customer_id:
                 raise ValidationError({"studio_project": "Studio project must belong to the cart customer."})
             if self.studio_project_id and self.studio_project.product_id != self.store_product_id:
@@ -73,7 +103,13 @@ class CheckoutSession(models.Model):
         EXPIRED = "expired", "Expired"
         CANCELLED = "cancelled", "Cancelled"
 
-    customer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="checkout_sessions")
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="checkout_sessions",
+    )
     studio_project = models.OneToOneField(
         "storefront.StudioProject",
         null=True,
@@ -83,6 +119,7 @@ class CheckoutSession(models.Model):
     )
     cart = models.OneToOneField(Cart, null=True, blank=True, on_delete=models.PROTECT, related_name="checkout_session")
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT, db_index=True)
+    placement_key = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     shipping_name = models.CharField(max_length=180, blank=True)
     shipping_phone = models.CharField(max_length=50, blank=True)
     shipping_email = models.EmailField(blank=True)
@@ -97,6 +134,7 @@ class CheckoutSession(models.Model):
     discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     currency = models.CharField(max_length=3, default="EGP")
+    pricing_snapshot = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     placed_at = models.DateTimeField(null=True, blank=True)
@@ -108,10 +146,14 @@ class CheckoutSession(models.Model):
         source_count = int(bool(self.studio_project_id)) + int(bool(self.cart_id))
         if source_count != 1:
             raise ValidationError("Checkout must reference exactly one Cart or Studio project.")
-        if self.studio_project_id and self.customer_id != self.studio_project.customer_id:
-            raise ValidationError({"customer": "Checkout customer must own the Studio project."})
-        if self.cart_id and self.customer_id != self.cart.customer_id:
-            raise ValidationError({"customer": "Checkout customer must own the Cart."})
+        if self.studio_project_id:
+            if not self.customer_id:
+                raise ValidationError({"customer": "Studio checkout requires an authenticated customer."})
+            if self.customer_id != self.studio_project.customer_id:
+                raise ValidationError({"customer": "Checkout customer must own the Studio project."})
+        if self.cart_id:
+            if self.cart.customer_id != self.customer_id:
+                raise ValidationError({"customer": "Checkout ownership must match Cart ownership."})
         if self.currency and len(self.currency) != 3:
             raise ValidationError({"currency": "Currency must be a 3-letter code."})
 
@@ -129,9 +171,22 @@ class CustomerPurchase(models.Model):
         PAYMOB = "paymob", "Paymob"
         STRIPE = "stripe", "Stripe"
 
+    class GuestEmailStatus(models.TextChoices):
+        NOT_REQUIRED = "not_required", "Not required"
+        QUEUED = "queued", "Queued"
+        SENT = "sent", "Sent"
+        SKIPPED = "skipped", "Skipped"
+        FAILED = "failed", "Failed"
+
     number = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     checkout = models.OneToOneField(CheckoutSession, on_delete=models.PROTECT, related_name="purchase")
-    customer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="customer_purchases")
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="customer_purchases",
+    )
     status = models.CharField(max_length=24, choices=Status.choices, default=Status.PENDING_PAYMENT, db_index=True)
     payment_method = models.CharField(max_length=20, choices=PaymentMethod.choices)
     subtotal = models.DecimalField(max_digits=12, decimal_places=2)
@@ -140,6 +195,14 @@ class CustomerPurchase(models.Model):
     total = models.DecimalField(max_digits=12, decimal_places=2)
     currency = models.CharField(max_length=3)
     shipping_snapshot = models.JSONField(default=dict)
+    pricing_snapshot = models.JSONField(default=dict, blank=True)
+    guest_confirmation_email_status = models.CharField(
+        max_length=16,
+        choices=GuestEmailStatus.choices,
+        default=GuestEmailStatus.NOT_REQUIRED,
+        db_index=True,
+    )
+    guest_confirmation_email_updated_at = models.DateTimeField(null=True, blank=True)
     confirmed_at = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -148,6 +211,10 @@ class CustomerPurchase(models.Model):
     class Meta:
         ordering = ("-created_at",)
         indexes = [models.Index(fields=["customer", "status"], name="purchase_customer_status_idx")]
+
+    @property
+    def is_guest(self):
+        return self.customer_id is None
 
     @property
     def fulfillment_status(self):
@@ -208,7 +275,13 @@ class CustomerOrder(models.Model):
         on_delete=models.PROTECT,
         related_name="child_orders",
     )
-    customer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="customer_orders")
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="customer_orders",
+    )
     designer_organization = models.ForeignKey("organizations.Organization", on_delete=models.PROTECT, related_name="store_orders")
     status = models.CharField(max_length=24, choices=Status.choices, default=Status.PENDING_PAYMENT, db_index=True)
     payment_method = models.CharField(max_length=20, choices=PaymentMethod.choices)
@@ -239,6 +312,7 @@ class OrderItem(models.Model):
         on_delete=models.PROTECT,
         related_name="order_items",
     )
+    purchase_kind = models.CharField(max_length=24, choices=CartItem.Kind.choices, default=CartItem.Kind.PLAIN)
     sku = models.CharField(max_length=120)
     title = models.CharField(max_length=220)
     size = models.CharField(max_length=40, blank=True)
@@ -246,11 +320,17 @@ class OrderItem(models.Model):
     unit_price = models.DecimalField(max_digits=12, decimal_places=2)
     quantity = models.PositiveIntegerField()
     line_total = models.DecimalField(max_digits=12, decimal_places=2)
+    pricing_snapshot = models.JSONField(default=dict, blank=True)
+    production_snapshot = models.JSONField(default=dict, blank=True)
     customization_snapshot = models.JSONField(default=dict, blank=True)
 
     def clean(self):
         if self.variant_id and self.variant.product_id != self.store_product_id:
             raise ValidationError({"variant": "Order variant must belong to Store Product."})
+        if self.purchase_kind == CartItem.Kind.STUDIO and not self.studio_project_id:
+            raise ValidationError({"studio_project": "Studio purchase lines require a Studio project."})
+        if self.purchase_kind != CartItem.Kind.STUDIO and self.studio_project_id:
+            raise ValidationError({"studio_project": "Only Studio purchase lines may reference Studio."})
 
 
 class PaymentAttempt(models.Model):
@@ -281,6 +361,7 @@ class PaymentAttempt(models.Model):
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     currency = models.CharField(max_length=3)
     idempotency_key = models.CharField(max_length=80, unique=True)
+    request_fingerprint = models.CharField(max_length=64, blank=True)
     provider_reference = models.CharField(max_length=180, blank=True, db_index=True)
     redirect_url = models.URLField(blank=True)
     provider_payload = models.JSONField(default=dict, blank=True)
