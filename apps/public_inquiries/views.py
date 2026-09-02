@@ -30,6 +30,11 @@ def _submission_data(post):
 
 def _inquiry_form(request, *, kind, slug):
     target = _target(kind, slug)
+    # Persist the browser session before entering atomic OTP/submission services.
+    # If a validation error rolls back those transactions, SessionMiddleware
+    # must still have a real session row to update at response time.
+    if not request.session.session_key:
+        request.session.save()
     if request.method == "POST":
         action = request.POST.get("action")
         try:

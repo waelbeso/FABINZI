@@ -4,7 +4,7 @@ from django.urls import reverse
 
 from apps.artwork.models import DesignedProduct
 from apps.artwork.public import decorate_public_artworks, public_artwork_queryset, public_media_path
-from apps.organizations.models import Organization
+from apps.organizations.models import OnboardingApplication, Organization
 from apps.platform_ops.seo import absolute_url, page_seo
 from apps.storefront.models import StoreProduct, Storefront
 from .services import approved_manufacturer_products, public_professional_queryset, verified_canonical_capabilities
@@ -154,12 +154,27 @@ def manufacturer_public_detail(request, slug):
 
 
 def manufacturer_legacy_redirect(request, pk):
+    """Compatibility for historical numeric Manufacturer URLs.
+
+    Once a V2-5 public state is approved and visible, permanently redirect to
+    the stable slug. Legacy published listings created before that state exists
+    receive a deliberately noindex, minimum-public-data compatibility page so
+    accepted pre-V2 URLs do not leak pending/private profile fields or break.
+    """
     from apps.manufacturer_marketplace.models import ManufacturerListing
-    listing = get_object_or_404(ManufacturerListing.objects.select_related("organization"), pk=pk)
-    try:
-        state = listing.organization.public_state
-    except Exception as exc:
-        raise Http404 from exc
-    if not public_professional_queryset(kind=Organization.Kind.MANUFACTURER).filter(pk=listing.organization_id).exists():
-        raise Http404
-    return HttpResponsePermanentRedirect(reverse("manufacturer-public-detail", args=[state.slug]))
+
+    listing = get_object_or_404(
+        ManufacturerListing.objects.select_related("organization", "organization__onboarding_application"),
+        pk=pk,
+        status=ManufacturerListing.Status.PUBLISHED,
+        organization__verification_status=Organization.VerificationStatus.ACTIVE,
+        organization__onboarding_application__status=OnboardingApplication.Status.APPROVED,
+    )
+    organization = listing.organization
+    if public_professional_queryset(kind=Organization.Kind.MANUFACTURER).filter(pk=organization.pk).exists():
+        return HttpResponsePermanentRedirect(reverse("manufacturer-public-detail", args=[organization.public_state.slug]))
+    return render(
+        request,
+        "public_profiles/manufacturer_legacy_compat.html",
+        {"manufacturer": organization, "listing": listing},
+    )
