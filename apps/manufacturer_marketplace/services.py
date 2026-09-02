@@ -84,7 +84,7 @@ def create_rfq(*, designer_organization, actor, designed_product, title, quantit
     require_org_access(actor, designer_organization, roles=DESIGNER_RFQ_ROLES)
     if designed_product.organization_id != designer_organization.pk or designed_product.status != DesignedProduct.Status.PUBLISHED:
         raise ValidationError("RFQs require a published Designed Product owned by the Designer business.")
-    rfq = RFQ(designer_organization=designer_organization, designed_product=designed_product, title=title, quantity=quantity, size_breakdown=size_breakdown or {}, color_requirements=color_requirements or [], requested_methods=requested_methods or [], target_unit_price=target_unit_price, currency=currency.upper(), desired_delivery_date=desired_delivery_date, delivery_country=delivery_country.upper(), delivery_city=delivery_city, notes=notes, created_by=actor)
+    rfq = RFQ(designer_organization=designer_organization, designed_product=designed_product, source=RFQ.Source.DESIGNER_SOURCING, title=title, quantity=quantity, size_breakdown=size_breakdown or {}, color_requirements=color_requirements or [], requested_methods=requested_methods or [], target_unit_price=target_unit_price, currency=currency.upper(), desired_delivery_date=desired_delivery_date, delivery_country=delivery_country.upper(), delivery_city=delivery_city, notes=notes, created_by=actor)
     rfq.full_clean(); rfq.save()
     record_audit_event(actor=actor, action="manufacturer_marketplace.rfq.created", instance=rfq, request=request)
     return rfq
@@ -92,6 +92,8 @@ def create_rfq(*, designer_organization, actor, designed_product, title, quantit
 
 @transaction.atomic
 def open_rfq(*, rfq, actor, manufacturer_ids, request=None):
+    if rfq.source != RFQ.Source.DESIGNER_SOURCING:
+        raise PermissionDenied("Customer Order manufacturing routing is FABINZI-controlled.")
     require_org_access(actor, rfq.designer_organization, roles=DESIGNER_RFQ_ROLES)
     if rfq.status != RFQ.Status.DRAFT:
         raise ValidationError("Only draft RFQs can be opened.")
@@ -115,29 +117,66 @@ def mark_invitation_viewed(*, invitation, actor):
     return invitation
 
 
+def _apply_quote_values(quote, *, unit_price, production_lead_days, setup_fee, sample_fee, shipping_estimate, currency, minimum_order_quantity, sample_lead_days, valid_until, notes):
+    values = {
+        "unit_price": unit_price,
+        "production_lead_days": production_lead_days,
+        "setup_fee": setup_fee,
+        "sample_fee": sample_fee,
+        "shipping_estimate": shipping_estimate,
+        "currency": currency.upper(),
+        "minimum_order_quantity": minimum_order_quantity,
+        "sample_lead_days": sample_lead_days,
+        "valid_until": valid_until,
+        "notes": notes,
+    }
+    for field, value in values.items():
+        setattr(quote, field, value)
+    return quote
+
+
+@transaction.atomic
+def save_quote_draft(*, invitation, actor, unit_price, production_lead_days, setup_fee=0, sample_fee=0, shipping_estimate=0, currency="EGP", minimum_order_quantity=1, sample_lead_days=None, valid_until=None, notes="", request=None):
+    require_org_access(actor, invitation.manufacturer, roles=MANUFACTURER_QUOTE_ROLES)
+    invitation = RFQInvitation.objects.select_for_update().select_related("rfq", "manufacturer").get(pk=invitation.pk)
+    if invitation.rfq.status not in {RFQ.Status.OPEN, RFQ.Status.QUOTED}:
+        raise ValidationError("This RFQ is not accepting offers.")
+    if invitation.status == RFQInvitation.Status.DECLINED:
+        raise ValidationError("A declined invitation cannot be quoted.")
+    quote = ManufacturerQuote.objects.select_for_update().filter(invitation=invitation).first()
+    if quote and quote.status not in {ManufacturerQuote.Status.DRAFT, ManufacturerQuote.Status.WITHDRAWN}:
+        raise ValidationError("Only a draft or withdrawn Manufacturing Offer can be edited.")
+    if quote is None:
+        quote = ManufacturerQuote(invitation=invitation, unit_price=unit_price, production_lead_days=production_lead_days, created_by=actor)
+    _apply_quote_values(quote, unit_price=unit_price, production_lead_days=production_lead_days, setup_fee=setup_fee, sample_fee=sample_fee, shipping_estimate=shipping_estimate, currency=currency, minimum_order_quantity=minimum_order_quantity, sample_lead_days=sample_lead_days, valid_until=valid_until, notes=notes)
+    quote.status = ManufacturerQuote.Status.DRAFT
+    quote.full_clean(); quote.save()
+    record_audit_event(actor=actor, action="manufacturer_marketplace.quote.draft_saved", instance=quote, metadata={"rfq_id": invitation.rfq_id}, request=request)
+    return quote
+
+
 @transaction.atomic
 def submit_quote(*, invitation, actor, unit_price, production_lead_days, setup_fee=0, sample_fee=0, shipping_estimate=0, currency="EGP", minimum_order_quantity=1, sample_lead_days=None, valid_until=None, notes="", request=None):
-    """Canonical Manufacturing Offer submission, including V2-3 quota consumption."""
+    """Canonical first Submitted transition; V2-3 quota is consumed exactly once."""
     require_org_access(actor, invitation.manufacturer, roles=MANUFACTURER_QUOTE_ROLES)
+    invitation = RFQInvitation.objects.select_for_update().select_related("rfq", "manufacturer").get(pk=invitation.pk)
     if invitation.rfq.status not in {RFQ.Status.OPEN, RFQ.Status.QUOTED}:
         raise ValidationError("This RFQ is not accepting quotes.")
     if invitation.status == RFQInvitation.Status.DECLINED:
         raise ValidationError("A declined invitation cannot be quoted.")
-    quote, _ = ManufacturerQuote.objects.get_or_create(invitation=invitation, defaults={"unit_price": unit_price,"production_lead_days":production_lead_days,"created_by":actor})
-    if quote.status not in {ManufacturerQuote.Status.DRAFT, ManufacturerQuote.Status.WITHDRAWN}:
+    quote = ManufacturerQuote.objects.select_for_update().filter(invitation=invitation).first()
+    if quote and quote.status == ManufacturerQuote.Status.SUBMITTED:
+        return quote
+    if quote and quote.status not in {ManufacturerQuote.Status.DRAFT, ManufacturerQuote.Status.WITHDRAWN}:
         raise ValidationError("Only draft or withdrawn quotes can be submitted.")
-    for field, value in {"unit_price":unit_price,"production_lead_days":production_lead_days,"setup_fee":setup_fee,"sample_fee":sample_fee,"shipping_estimate":shipping_estimate,"currency":currency.upper(),"minimum_order_quantity":minimum_order_quantity,"sample_lead_days":sample_lead_days,"valid_until":valid_until,"notes":notes}.items():
-        setattr(quote, field, value)
+    if quote is None:
+        quote = ManufacturerQuote(invitation=invitation, unit_price=unit_price, production_lead_days=production_lead_days, created_by=actor)
+    _apply_quote_values(quote, unit_price=unit_price, production_lead_days=production_lead_days, setup_fee=setup_fee, sample_fee=sample_fee, shipping_estimate=shipping_estimate, currency=currency, minimum_order_quantity=minimum_order_quantity, sample_lead_days=sample_lead_days, valid_until=valid_until, notes=notes)
     quote.status = ManufacturerQuote.Status.SUBMITTED
     quote.submitted_at = timezone.now()
-    quote.full_clean()
-    quote.save()
+    quote.full_clean(); quote.save()
 
-    # Import locally to keep the marketplace domain authoritative and avoid an
-    # app-import cycle. The quota service locks the Organization subscription,
-    # so concurrent quote submissions serialize before usage is counted.
     from apps.subscriptions.services import consume_manufacturer_offer
-
     consume_manufacturer_offer(quote=quote)
 
     invitation.status = RFQInvitation.Status.QUOTED; invitation.responded_at = timezone.now(); invitation.save(update_fields=["status","responded_at"])
@@ -162,6 +201,8 @@ def decline_invitation(*, invitation, actor, request=None):
 @transaction.atomic
 def select_quote(*, quote, actor, request=None):
     rfq = quote.invitation.rfq
+    if rfq.source != RFQ.Source.DESIGNER_SOURCING:
+        raise PermissionDenied("Customer Order production assignment is FABINZI-controlled.")
     require_org_access(actor, rfq.designer_organization, roles=DESIGNER_SELECT_ROLES)
     if quote.status != ManufacturerQuote.Status.SUBMITTED:
         raise ValidationError("Only submitted quotes can be selected.")
@@ -182,6 +223,8 @@ def select_quote(*, quote, actor, request=None):
 
 @transaction.atomic
 def cancel_rfq(*, rfq, actor, request=None):
+    if rfq.source != RFQ.Source.DESIGNER_SOURCING:
+        raise PermissionDenied("Customer Order routing is controlled by FABINZI operations.")
     require_org_access(actor, rfq.designer_organization, roles=DESIGNER_SELECT_ROLES)
     if rfq.status in {RFQ.Status.SELECTED, RFQ.Status.CLOSED, RFQ.Status.CANCELLED}:
         raise ValidationError("This RFQ can no longer be cancelled.")

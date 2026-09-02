@@ -104,8 +104,16 @@ class RFQ(models.Model):
         CLOSED = "closed", "Closed"
         CANCELLED = "cancelled", "Cancelled"
 
+    class Source(models.TextChoices):
+        DESIGNER_SOURCING = "designer_sourcing", "Designer sourcing"
+        CUSTOMER_ORDER = "customer_order", "Customer order routing"
+
     designer_organization = models.ForeignKey(Organization, on_delete=models.PROTECT, related_name="manufacturer_rfqs")
     designed_product = models.ForeignKey("artwork.DesignedProduct", on_delete=models.PROTECT, related_name="manufacturer_rfqs")
+    source = models.CharField(max_length=24, choices=Source.choices, default=Source.DESIGNER_SOURCING, db_index=True)
+    order_item = models.OneToOneField("checkout.OrderItem", null=True, blank=True, on_delete=models.PROTECT, related_name="manufacturing_rfq")
+    routing_snapshot = models.JSONField(default=dict, blank=True)
+    routed_at = models.DateTimeField(null=True, blank=True)
     title = models.CharField(max_length=220)
     quantity = models.PositiveIntegerField()
     size_breakdown = models.JSONField(default=dict, blank=True)
@@ -127,7 +135,10 @@ class RFQ(models.Model):
 
     class Meta:
         ordering = ("-updated_at",)
-        indexes = [models.Index(fields=["designer_organization", "status"], name="rfq_designer_status_idx")]
+        indexes = [
+            models.Index(fields=["designer_organization", "status"], name="rfq_designer_status_idx"),
+            models.Index(fields=["source", "status"], name="rfq_source_status_idx"),
+        ]
 
     def clean(self):
         if self.designer_organization_id and self.designer_organization.kind != Organization.Kind.DESIGNER:
@@ -138,6 +149,15 @@ class RFQ(models.Model):
             raise ValidationError({"quantity": "Quantity must be at least 1."})
         if self.currency and len(self.currency) != 3:
             raise ValidationError({"currency": "Currency must be a 3-letter code."})
+        if self.source == self.Source.DESIGNER_SOURCING and self.order_item_id:
+            raise ValidationError({"order_item": "Legacy Designer sourcing RFQs do not reference Customer Order items."})
+        if self.source == self.Source.CUSTOMER_ORDER:
+            if not self.order_item_id:
+                raise ValidationError({"order_item": "Customer Order routing requires an OrderItem."})
+            if self.order_item_id and self.designed_product_id != self.order_item.store_product.designed_product_id:
+                raise ValidationError({"order_item": "Operational RFQ product must match the exact OrderItem."})
+            if self.order_item_id and self.designer_organization_id != self.order_item.order.designer_organization_id:
+                raise ValidationError({"order_item": "Operational RFQ Designer lineage must match the OrderItem."})
 
     def __str__(self):
         return self.title
