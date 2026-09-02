@@ -90,6 +90,7 @@ jobs:
         run: |
           pytest -q \
             tests/test_v2_creator_technical_golden.py \
+            tests/test_v2_4_ready_product_composer.py \
             tests/test_designer_portal_acceptance_core.py \
             tests/test_artwork_marketplace_stage7.py \
             tests/test_media_privacy.py
