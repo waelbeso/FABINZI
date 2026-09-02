@@ -33,7 +33,12 @@ class Migration(migrations.Migration):
             name="customer",
             field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, related_name="carts", to=settings.AUTH_USER_MODEL),
         ),
-        migrations.AddField(model_name="cart", name="guest_key_hash", field=models.CharField(blank=True, db_index=True, default="", max_length=64)),
+        migrations.AddField(
+            model_name="cart",
+            name="guest_key_hash",
+            field=models.CharField(blank=True, db_index=True, default="", max_length=64),
+            preserve_default=False,
+        ),
         migrations.AddField(
             model_name="cart",
             name="merged_into",
