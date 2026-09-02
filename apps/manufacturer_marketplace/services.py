@@ -117,8 +117,8 @@ def mark_invitation_viewed(*, invitation, actor):
     return invitation
 
 
-def _apply_quote_values(quote, *, unit_price, production_lead_days, setup_fee, sample_fee, shipping_estimate, currency, minimum_order_quantity, sample_lead_days, valid_until, notes):
-    values = {
+def _quote_values(*, unit_price, production_lead_days, setup_fee, sample_fee, shipping_estimate, currency, minimum_order_quantity, sample_lead_days, valid_until, notes):
+    raw_values = {
         "unit_price": unit_price,
         "production_lead_days": production_lead_days,
         "setup_fee": setup_fee,
@@ -130,6 +130,25 @@ def _apply_quote_values(quote, *, unit_price, production_lead_days, setup_fee, s
         "valid_until": valid_until,
         "notes": notes,
     }
+    return {
+        field: ManufacturerQuote._meta.get_field(field).to_python(value)
+        for field, value in raw_values.items()
+    }
+
+
+def _apply_quote_values(quote, *, unit_price, production_lead_days, setup_fee, sample_fee, shipping_estimate, currency, minimum_order_quantity, sample_lead_days, valid_until, notes):
+    values = _quote_values(
+        unit_price=unit_price,
+        production_lead_days=production_lead_days,
+        setup_fee=setup_fee,
+        sample_fee=sample_fee,
+        shipping_estimate=shipping_estimate,
+        currency=currency,
+        minimum_order_quantity=minimum_order_quantity,
+        sample_lead_days=sample_lead_days,
+        valid_until=valid_until,
+        notes=notes,
+    )
     for field, value in values.items():
         setattr(quote, field, value)
     return quote
@@ -168,6 +187,20 @@ def submit_quote(*, invitation, actor, unit_price, production_lead_days, setup_f
         raise ValidationError("A declined invitation cannot be quoted.")
     quote = ManufacturerQuote.objects.select_for_update().filter(invitation=locked_invitation).first()
     if quote and quote.status == ManufacturerQuote.Status.SUBMITTED:
+        incoming_values = _quote_values(
+            unit_price=unit_price,
+            production_lead_days=production_lead_days,
+            setup_fee=setup_fee,
+            sample_fee=sample_fee,
+            shipping_estimate=shipping_estimate,
+            currency=currency,
+            minimum_order_quantity=minimum_order_quantity,
+            sample_lead_days=sample_lead_days,
+            valid_until=valid_until,
+            notes=notes,
+        )
+        if any(getattr(quote, field) != value for field, value in incoming_values.items()):
+            raise ValidationError("Submitted Manufacturing Offer values are immutable.")
         original_invitation.status = locked_invitation.status
         original_invitation.responded_at = locked_invitation.responded_at
         original_rfq.status = locked_invitation.rfq.status

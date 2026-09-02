@@ -112,6 +112,9 @@ jobs:
             tests/test_stage4_manufacturer_marketplace.py \
             tests/test_stage7_operations.py \
             tests/test_manufacturer_portal_acceptance.py \
+            tests/test_manufacturer_portal_presentation.py \
+            tests/test_manufacturer_technical_presentation.py \
+            tests/test_manufacturer_portal_security_edges.py \
             tests/test_private_media_hardening.py \
             tests/test_v2_3_full_suite_integration.py \
             tests/test_v2_6_pricing_parent_purchase.py \

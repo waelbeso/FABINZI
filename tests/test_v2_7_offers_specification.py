@@ -34,13 +34,106 @@ def test_draft_offer_consumes_no_quota_and_first_submit_consumes_exactly_once():
     draft = save_quote_draft(invitation=invitation, actor=owner, unit_price="100", production_lead_days=7)
     assert draft.status == ManufacturerQuote.Status.DRAFT
     assert not ManufacturerOfferUsage.objects.filter(quote=draft).exists()
-    submitted = submit_quote(invitation=invitation, actor=owner, unit_price="100", production_lead_days=7)
+    submitted = submit_quote(
+        invitation=invitation,
+        actor=owner,
+        unit_price="100",
+        production_lead_days=7,
+        setup_fee="3.50",
+        sample_fee="2.25",
+        shipping_estimate="11.75",
+        currency="EGP",
+        minimum_order_quantity=2,
+        sample_lead_days=3,
+        valid_until="2026-10-01",
+        notes="Frozen offer",
+    )
     assert submitted.pk == draft.pk
     assert submitted.status == ManufacturerQuote.Status.SUBMITTED
+    submitted_at = submitted.submitted_at
     assert ManufacturerOfferUsage.objects.filter(quote=submitted).count() == 1
-    retry = submit_quote(invitation=invitation, actor=owner, unit_price="100", production_lead_days=7)
+    retry = submit_quote(
+        invitation=invitation,
+        actor=owner,
+        unit_price="100.00",
+        production_lead_days=7,
+        setup_fee="3.50",
+        sample_fee="2.25",
+        shipping_estimate="11.75",
+        currency="egp",
+        minimum_order_quantity=2,
+        sample_lead_days=3,
+        valid_until="2026-10-01",
+        notes="Frozen offer",
+    )
     assert retry.pk == submitted.pk
+    retry.refresh_from_db()
+    assert retry.submitted_at == submitted_at
     assert ManufacturerOfferUsage.objects.filter(quote=submitted).count() == 1
+
+
+def test_submitted_offer_conflicting_retry_is_rejected_without_mutation_or_quota():
+    _, owner, _, _, rfq, invitation = _opportunity("v27-offer-conflict")
+    quote = submit_quote(
+        invitation=invitation,
+        actor=owner,
+        unit_price="100",
+        production_lead_days=7,
+        setup_fee="3.50",
+        sample_fee="2.25",
+        shipping_estimate="11.75",
+        currency="EGP",
+        minimum_order_quantity=2,
+        sample_lead_days=3,
+        valid_until="2026-10-01",
+        notes="Frozen offer",
+    )
+    frozen = {
+        field: getattr(quote, field)
+        for field in (
+            "unit_price",
+            "production_lead_days",
+            "setup_fee",
+            "sample_fee",
+            "shipping_estimate",
+            "currency",
+            "minimum_order_quantity",
+            "sample_lead_days",
+            "valid_until",
+            "notes",
+            "submitted_at",
+        )
+    }
+    invitation.refresh_from_db()
+    rfq.refresh_from_db()
+    invitation_state = (invitation.status, invitation.responded_at)
+    rfq_status = rfq.status
+    usage_id = ManufacturerOfferUsage.objects.get(quote=quote).pk
+
+    with pytest.raises(ValidationError):
+        submit_quote(
+            invitation=invitation,
+            actor=owner,
+            unit_price="100",
+            production_lead_days=7,
+            setup_fee="3.50",
+            sample_fee="2.25",
+            shipping_estimate="11.75",
+            currency="EGP",
+            minimum_order_quantity=2,
+            sample_lead_days=3,
+            valid_until="2026-10-01",
+            notes="Changed after submission",
+        )
+
+    quote.refresh_from_db()
+    invitation.refresh_from_db()
+    rfq.refresh_from_db()
+    assert {field: getattr(quote, field) for field in frozen} == frozen
+    assert (invitation.status, invitation.responded_at) == invitation_state
+    assert rfq.status == rfq_status
+    assert ManufacturerOfferUsage.objects.get(quote=quote).pk == usage_id
+    assert ManufacturerOfferUsage.objects.filter(quote=quote).count() == 1
 
 
 def test_withdrawal_resubmission_and_expiration_never_restore_consumed_quota():
