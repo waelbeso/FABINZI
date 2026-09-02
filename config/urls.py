@@ -4,6 +4,8 @@ from django.views.generic import RedirectView
 from two_factor.urls import urlpatterns as tf_urls
 from apps.accounts.views import app_home, profile_preferences, sign_out, signup
 from apps.artwork.media_views import public_artwork_preview_media
+from apps.artwork.ready_product_v2_4_portal import designer_ready_product_composer, designer_ready_product_composer_detail
+from apps.artwork.v2_4_portal import designer_artwork_technical_workspace
 from apps.artwork.views import artwork_detail, artwork_marketplace
 from apps.checkout.views import (
     add_product_to_cart,
@@ -19,6 +21,7 @@ from apps.checkout.views import (
     purchase_detail,
     purchases,
 )
+from apps.design.v2_4_portal import designer_design_technical_workspace
 from apps.finance.views import finance_dashboard
 from apps.manufacturer_marketplace.views import manufacturer_marketplace, manufacturer_public_detail
 from apps.media.designer_views import private_designer_media
@@ -81,9 +84,6 @@ from apps.storefront.studio_views import studio, studio_project
 from apps.storefront.views import public_product, public_storefront, store_marketplace
 
 urlpatterns = [
-    # V2 public shell: Store is the primary public surface. The legacy /store/
-    # path redirects to the same canonical catalog while existing reverse-name
-    # callers continue to resolve directly to the root Store.
     path("", store_marketplace, name="home"),
     path("", store_marketplace, name="store-marketplace"),
     path("store/", RedirectView.as_view(pattern_name="home", permanent=True, query_string=True), name="store-legacy"),
@@ -101,7 +101,6 @@ urlpatterns = [
     path("share/fabinzi-1200x630.png", social_share_image, name="social-share-image"),
     path("", include("apps.platform_ops.launch_urls")),
 
-    # Web-session identity lifecycle. Customer API v1 remains untouched.
     path("account/signup/", signup, name="signup"),
     path("account/logout/", sign_out, name="logout"),
     path(
@@ -174,8 +173,6 @@ urlpatterns = [
     path("manufacturers/", manufacturer_marketplace, name="manufacturer-marketplace"),
     path("manufacturers/<int:pk>/", manufacturer_public_detail, name="manufacturer-public-detail"),
 
-    # V2-3 productized subscription/team routes precede the accepted legacy
-    # team routes. They reuse the same Organization + Membership architecture.
     path("", include("apps.subscriptions.urls")),
 
     path("designer/", designer_portal, name="designer"),
@@ -183,9 +180,13 @@ urlpatterns = [
     path("designer/team/", designer_team, name="designer-team"),
     path("designer/designs/", designer_design_list, name="designer-design-list"),
     path("designer/designs/<int:pk>/", designer_design_detail, name="designer-design-detail"),
+    path("designer/designs/<int:pk>/technical/", designer_design_technical_workspace, name="designer-design-technical-v2-4"),
     path("designer/artworks/", designer_artworks, name="designer-artworks"),
     path("designer/artworks/<int:pk>/", designer_artwork_detail, name="designer-artwork-detail"),
+    path("designer/artworks/<int:pk>/technical/", designer_artwork_technical_workspace, name="designer-artwork-technical-v2-4"),
     path("designer/products/", designer_products, name="designer-products"),
+    path("designer/products/compose/", designer_ready_product_composer, name="designer-ready-product-composer-v2-4"),
+    path("designer/products/compose/<int:pk>/", designer_ready_product_composer_detail, name="designer-ready-product-composer-detail-v2-4"),
     path("designer/products/<int:pk>/", designer_product_detail, name="designer-product-detail"),
     path("designer/rfqs/", designer_rfqs, name="designer-rfqs"),
     path("designer/rfqs/<int:pk>/", designer_rfq_detail, name="designer-rfq-detail"),

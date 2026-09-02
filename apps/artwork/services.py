@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Max
@@ -5,12 +7,26 @@ from django.utils import timezone
 
 from apps.audit.services import record_audit_event
 from apps.design.models import GarmentDesignVersion
+from apps.design.services import evaluate_version_eligibility
 from apps.media.designer_services import claim_or_require_private_designer_asset, require_private_designer_asset
 from apps.media.models import MediaAsset
 from apps.notifications.models import Notification
 from apps.organizations.models import Membership, Organization
 from apps.organizations.services import require_org_access, user_has_org_access
-from .models import Artwork, ArtworkAsset, ArtworkPlacement, ArtworkReview, ArtworkVersion, DesignedProduct, IPCase, IPCaseEvidence, IPDeclaration
+from .models import (
+    Artwork,
+    ArtworkAsset,
+    ArtworkPlacement,
+    ArtworkRegistrationCase,
+    ArtworkRegistrationDocument,
+    ArtworkRegistrationSource,
+    ArtworkReview,
+    ArtworkVersion,
+    DesignedProduct,
+    IPCase,
+    IPCaseEvidence,
+    IPDeclaration,
+)
 
 ARTWORK_EDIT_ROLES = [Membership.Role.OWNER, Membership.Role.MANAGER, Membership.Role.DESIGNER, Membership.Role.DESIGN_MANAGER]
 ARTWORK_MANAGE_ROLES = [Membership.Role.OWNER, Membership.Role.MANAGER, Membership.Role.DESIGN_MANAGER]
@@ -83,13 +99,14 @@ def ensure_public_preview_for_version(*, version, actor=None, request=None):
 
 
 @transaction.atomic
-def create_artwork(*, organization, actor, title, description="", tags=None, request=None):
+def create_artwork(*, organization, actor, title, description="", tags=None, request=None, symbolic_ref=None):
     require_active_designer_org(organization)
     require_org_access(actor, organization, roles=ARTWORK_EDIT_ROLES)
-    artwork = Artwork(organization=organization, title=title, description=description, tags=tags or [], created_by=actor)
+    artwork = Artwork(organization=organization, symbolic_ref=symbolic_ref, title=title, description=description, tags=tags or [], created_by=actor)
     artwork.full_clean(); artwork.save()
     version = ArtworkVersion.objects.create(artwork=artwork, version_number=1, created_by=actor)
     record_audit_event(actor=actor, action="artwork.created", instance=artwork, metadata={"organization_id": organization.pk, "version_id": version.pk}, request=request)
+    record_audit_event(actor=actor, action="artwork.version.created", instance=version, metadata={"artwork_id": artwork.pk, "version_number": 1}, request=request)
     return artwork
 
 
@@ -101,7 +118,15 @@ def create_artwork_revision(*, artwork, actor, request=None):
         raise ValidationError("A new artwork revision can only follow a reviewed version.")
     revoke_public_preview_derivatives(artwork=artwork, actor=actor, reason="new_revision", request=request)
     number = (artwork.versions.aggregate(m=Max("version_number"))["m"] or 0) + 1
-    version = ArtworkVersion.objects.create(artwork=artwork, version_number=number, created_by=actor, color_profile=latest.color_profile if latest else "", production_notes=latest.production_notes if latest else "", metadata=latest.metadata if latest else {})
+    version = ArtworkVersion.objects.create(
+        artwork=artwork,
+        version_number=number,
+        created_by=actor,
+        color_profile=latest.color_profile if latest else "",
+        production_notes=latest.production_notes if latest else "",
+        metadata=latest.metadata if latest else {},
+        intended_methods=latest.intended_methods if latest else [],
+    )
     artwork.status = Artwork.Status.DRAFT; artwork.save(update_fields=["status", "updated_at"])
     record_audit_event(actor=actor, action="artwork.revision.created", instance=version, metadata={"artwork_id": artwork.pk}, request=request)
     return version
@@ -114,7 +139,21 @@ def require_artwork_draft(version, actor):
 
 
 @transaction.atomic
-def add_artwork_asset(*, version, actor, media_asset, kind, label="", request=None):
+def update_artwork_technical_definition(*, version, actor, intended_methods, color_profile="", production_notes="", resolution_evidence=None, embroidery_suitability_evidence=None, request=None):
+    require_artwork_draft(version, actor)
+    version.intended_methods = list(intended_methods or [])
+    version.color_profile = color_profile
+    version.production_notes = production_notes
+    version.resolution_evidence = resolution_evidence or {}
+    version.embroidery_suitability_evidence = embroidery_suitability_evidence or {}
+    version.full_clean()
+    version.save(update_fields=["intended_methods", "color_profile", "production_notes", "resolution_evidence", "embroidery_suitability_evidence"])
+    record_audit_event(actor=actor, action="artwork.technical_data.updated", instance=version, metadata={"artwork_id": version.artwork_id, "intended_methods": version.intended_methods}, request=request)
+    return version
+
+
+@transaction.atomic
+def add_artwork_asset(*, version, actor, media_asset, kind, label="", technical_role="", request=None):
     require_artwork_draft(version, actor)
     organization = version.artwork.organization
     if kind in {ArtworkAsset.Kind.SOURCE, ArtworkAsset.Kind.RIGHTS_EVIDENCE}:
@@ -123,9 +162,9 @@ def add_artwork_asset(*, version, actor, media_asset, kind, label="", request=No
         claim_or_require_private_designer_asset(asset=media_asset, organization=organization, actor=actor, purpose="artwork_preview")
     elif media_asset.uploaded_by_id and media_asset.uploaded_by_id != actor.pk and not actor.is_staff:
         raise PermissionDenied("This media asset is not owned by the current user.")
-    asset = ArtworkAsset(version=version, kind=kind, media_asset=media_asset, label=label)
+    asset = ArtworkAsset(version=version, kind=kind, media_asset=media_asset, label=label, technical_role=technical_role)
     asset.full_clean(); asset.save()
-    record_audit_event(actor=actor, action="artwork.asset.added", instance=asset, metadata={"artwork_id": version.artwork_id, "kind": kind}, request=request)
+    record_audit_event(actor=actor, action="artwork.asset.added", instance=asset, metadata={"artwork_id": version.artwork_id, "kind": kind, "technical_role": technical_role}, request=request)
     return asset
 
 
@@ -138,6 +177,7 @@ def set_ip_declaration(*, version, actor, rights_basis, rights_holder_name, thir
 
 
 def validate_artwork_ready(version):
+    """Accepted Artwork moderation/publication readiness; production-method evidence is separate."""
     try:
         declaration = IPDeclaration.objects.get(version=version)
     except IPDeclaration.DoesNotExist:
@@ -150,8 +190,32 @@ def validate_artwork_ready(version):
         raise ValidationError("Rights evidence is required when third-party content is declared.")
     if not version.assets.filter(kind=ArtworkAsset.Kind.PREVIEW).exists():
         raise ValidationError("Artwork preview is required.")
-    if not version.assets.filter(kind=ArtworkAsset.Kind.SOURCE).exists():
+    if not version.assets.filter(kind=ArtworkAsset.Kind.SOURCE, media_asset__access=MediaAsset.Access.PRIVATE).exists():
         raise ValidationError("Private production source is required.")
+    version.full_clean()
+
+
+def evaluate_artwork_production_readiness(version, production_methods=None):
+    intended = set(version.intended_methods or [])
+    requested = list(production_methods or [])
+    method_coverage = True
+    for method in requested:
+        if method == ArtworkPlacement.ProductionMethod.PRINT_LEGACY:
+            covered = bool(intended & {ArtworkPlacement.ProductionMethod.DTF, ArtworkPlacement.ProductionMethod.DTG})
+        else:
+            covered = method in intended
+        if not covered:
+            method_coverage = False
+            break
+    technical_check_pass = version.technical_check_status == ArtworkVersion.TechnicalCheckStatus.PASS
+    ready = bool(intended and technical_check_pass and method_coverage)
+    return {
+        "moderation_approved": version.status == ArtworkVersion.Status.APPROVED,
+        "intended_methods": sorted(intended),
+        "technical_check_pass": technical_check_pass,
+        "method_coverage": method_coverage,
+        "production_method_ready": ready,
+    }
 
 
 @transaction.atomic
@@ -159,19 +223,25 @@ def submit_artwork_version(*, version, actor, request=None):
     require_artwork_draft(version, actor)
     validate_artwork_ready(version)
 
-    # Enforce the V2-3 active Artwork slot at the canonical user transition
-    # into review rather than on generic model save.
     from apps.subscriptions.services import assert_designer_slot_available
 
-    assert_designer_slot_available(
-        organization=version.artwork.organization,
-        kind="artwork",
-        object_id=version.artwork_id,
-    )
-
+    assert_designer_slot_available(organization=version.artwork.organization, kind="artwork", object_id=version.artwork_id)
     version.status = ArtworkVersion.Status.SUBMITTED; version.submitted_at = timezone.now(); version.save(update_fields=["status", "submitted_at"])
     version.artwork.status = Artwork.Status.IN_REVIEW; version.artwork.save(update_fields=["status", "updated_at"])
-    record_audit_event(actor=actor, action="artwork.version.submitted", instance=version, metadata={"artwork_id": version.artwork_id}, request=request)
+    record_audit_event(actor=actor, action="artwork.version.submitted", instance=version, metadata={"artwork_id": version.artwork_id, "intended_methods": version.intended_methods}, request=request)
+    return version
+
+
+@transaction.atomic
+def record_artwork_technical_check(*, version, reviewer, status, result=None, request=None):
+    if not reviewer.is_staff:
+        raise PermissionDenied("Staff access required.")
+    if status not in dict(ArtworkVersion.TechnicalCheckStatus.choices):
+        raise ValidationError("Unsupported Artwork technical-check status.")
+    version.technical_check_status = status
+    version.technical_check_result = result or {}
+    version.save(update_fields=["technical_check_status", "technical_check_result"])
+    record_audit_event(actor=reviewer, action="artwork.technical_check.recorded", instance=version, metadata={"status": status}, request=request)
     return version
 
 
@@ -183,6 +253,8 @@ def review_artwork_version(*, version, reviewer, decision, notes="", request=Non
         raise ValidationError("Only submitted Artwork Versions can be reviewed.")
     if decision not in dict(ArtworkReview.Decision.choices):
         raise ValidationError("Unsupported Artwork review decision.")
+    if decision == ArtworkReview.Decision.APPROVED:
+        validate_artwork_ready(version)
     ArtworkReview.objects.create(version=version, reviewer=reviewer, decision=decision, notes=notes)
     version.status = decision; version.reviewed_at = timezone.now(); version.reviewed_by = reviewer; version.review_notes = notes
     version.save(update_fields=["status", "reviewed_at", "reviewed_by", "review_notes"])
@@ -196,22 +268,189 @@ def review_artwork_version(*, version, reviewer, decision, notes="", request=Non
     title_ar = {"approved":"تم اعتماد العمل الفني","revision_required":"العمل الفني يحتاج إلى تعديلات","rejected":"تم رفض العمل الفني"}[decision]
     for membership in version.artwork.organization.memberships.filter(is_active=True).select_related("user"):
         Notification.objects.create(recipient=membership.user, type="artwork_review", title_en=title_en, title_ar=title_ar, body_en=notes, body_ar=notes, destination=f"/designer/artworks/{version.artwork_id}/")
-    record_audit_event(actor=reviewer, action=f"artwork.version.{decision}", instance=version, metadata={"artwork_id": version.artwork_id, "notes_present": bool(notes)}, request=request)
+    record_audit_event(actor=reviewer, action=f"artwork.version.{decision}", instance=version, metadata={"artwork_id": version.artwork_id, "notes_present": bool(notes), "production_method_readiness": evaluate_artwork_production_readiness(version), "registration_complete": version.registration_cases.filter(status=ArtworkRegistrationCase.Status.COMPLETED).exists()}, request=request)
     return version
 
 
 @transaction.atomic
-def create_designed_product(*, organization, actor, garment_version, artwork_version, title, description="", request=None):
+def create_registration_case(*, version, applicant, source_snapshot=None, procedure_template_key="", request=None):
+    require_artwork_access(applicant, version.artwork, edit=False)
+    if source_snapshot and source_snapshot.visual_graphic_applicability_confirmed is False:
+        applicability = False
+    else:
+        applicability = False
+    case = ArtworkRegistrationCase(
+        artwork_version=version,
+        applicant=applicant,
+        source_snapshot=source_snapshot,
+        procedure_template_key=procedure_template_key,
+        service_price_egp=Decimal("400.00"),
+        source_applicability_confirmed_for_case=applicability,
+    )
+    case.full_clean(); case.save()
+    record_audit_event(actor=applicant, action="artwork.registration_case.created", instance=case, metadata={"artwork_version_id": version.pk, "source_snapshot_id": source_snapshot.pk if source_snapshot else None, "service_price_egp": "400.00"}, request=request)
+    return case
+
+
+@transaction.atomic
+def add_registration_document(*, case, actor, media_asset, kind, description="", request=None):
+    require_artwork_access(actor, case.artwork_version.artwork, edit=False)
+    if media_asset.access != MediaAsset.Access.PRIVATE:
+        raise ValidationError("Artwork registration supporting documents must remain private.")
+    if (media_asset.metadata or {}).get("studio_private_upload"):
+        raise ValidationError("Customer Studio uploads cannot be repurposed automatically as Artwork registration evidence.")
+    document = ArtworkRegistrationDocument(case=case, kind=kind, media_asset=media_asset, description=description, created_by=actor)
+    document.full_clean(); document.save()
+    record_audit_event(actor=actor, action="artwork.registration_document.added", instance=document, metadata={"case_id": case.pk, "kind": kind}, request=request)
+    return document
+
+
+_REGISTRATION_TRANSITIONS = {
+    ArtworkRegistrationCase.Status.DRAFT: {ArtworkRegistrationCase.Status.EVIDENCE_REQUIRED, ArtworkRegistrationCase.Status.STAFF_REVIEW, ArtworkRegistrationCase.Status.CANCELLED},
+    ArtworkRegistrationCase.Status.EVIDENCE_REQUIRED: {ArtworkRegistrationCase.Status.STAFF_REVIEW, ArtworkRegistrationCase.Status.CANCELLED},
+    ArtworkRegistrationCase.Status.STAFF_REVIEW: {ArtworkRegistrationCase.Status.EVIDENCE_REQUIRED, ArtworkRegistrationCase.Status.READY_FOR_EXTERNAL_SUBMISSION, ArtworkRegistrationCase.Status.REJECTED, ArtworkRegistrationCase.Status.CANCELLED},
+    ArtworkRegistrationCase.Status.READY_FOR_EXTERNAL_SUBMISSION: {ArtworkRegistrationCase.Status.SUBMITTED_EXTERNALLY, ArtworkRegistrationCase.Status.CANCELLED},
+    ArtworkRegistrationCase.Status.SUBMITTED_EXTERNALLY: {ArtworkRegistrationCase.Status.COMPLETED, ArtworkRegistrationCase.Status.REJECTED},
+}
+
+
+@transaction.atomic
+def transition_registration_case(*, case, reviewer, status, notes="", captured_data=None, external_reference=None, request=None):
+    if not reviewer.is_staff:
+        raise PermissionDenied("Staff access required.")
+    if status not in _REGISTRATION_TRANSITIONS.get(case.status, set()):
+        raise ValidationError(f"Artwork Registration transition {case.status} -> {status} is not allowed.")
+    if status in {ArtworkRegistrationCase.Status.READY_FOR_EXTERNAL_SUBMISSION, ArtworkRegistrationCase.Status.SUBMITTED_EXTERNALLY, ArtworkRegistrationCase.Status.COMPLETED}:
+        if not case.source_snapshot_id:
+            raise ValidationError("A versioned procedure/source snapshot is required before external filing states.")
+        if not case.source_snapshot.visual_graphic_applicability_confirmed or not case.source_applicability_confirmed_for_case:
+            raise ValidationError("Real visual/graphic filing cannot be marked ready until source applicability is directly confirmed for the selected versioned procedure.")
+    case.status = status
+    case.reviewed_by = reviewer
+    case.staff_notes = notes
+    if captured_data is not None:
+        case.captured_data = captured_data
+    if status == ArtworkRegistrationCase.Status.SUBMITTED_EXTERNALLY:
+        if not external_reference:
+            raise ValidationError("A genuine externally supplied reference/evidence is required to record external submission.")
+        case.external_reference = external_reference
+        case.external_submitted_at = timezone.now()
+    if status == ArtworkRegistrationCase.Status.COMPLETED:
+        if not case.external_reference or not case.external_submitted_at:
+            raise ValidationError("Registration cannot be completed without previously recorded external submission evidence.")
+        case.completed_at = timezone.now()
+    case.full_clean(); case.save()
+    record_audit_event(actor=reviewer, action="artwork.registration_case.transitioned", instance=case, metadata={"status": status, "source_snapshot_id": case.source_snapshot_id, "external_reference_present": bool(case.external_reference)}, request=request)
+    return case
+
+
+def evaluate_designed_product_eligibility(product):
+    garment = evaluate_version_eligibility(product.garment_version)
+    artwork_moderation_approved = product.artwork_version.status == ArtworkVersion.Status.APPROVED
+    placements_valid = product.placements.exists()
+    placement_methods = []
+    for placement in product.placements.all():
+        placement_methods.append(placement.production_method)
+        try:
+            placement.full_clean()
+        except ValidationError:
+            placements_valid = False
+            break
+    artwork_production = evaluate_artwork_production_readiness(product.artwork_version, placement_methods)
+    commercial = bool(garment["commercial_eligible"] and artwork_moderation_approved and placements_valid and not product.reference_only)
+    production = bool(garment["production_eligible"] and commercial and artwork_production["production_method_ready"])
+    return {
+        "reference_only": product.reference_only,
+        "garment": garment,
+        "artwork_approved": artwork_moderation_approved,
+        "artwork_moderation_approved": artwork_moderation_approved,
+        "artwork_production_method_ready": artwork_production["production_method_ready"],
+        "artwork_production_readiness": artwork_production,
+        "placements_valid": placements_valid,
+        "commercial_eligible": commercial,
+        "production_eligible": production,
+    }
+
+
+@transaction.atomic
+def create_designed_product(*, organization, actor, garment_version, artwork_version, title, description="", request=None, symbolic_ref=None, economic_attribution=None):
     require_active_designer_org(organization)
     require_org_access(actor, organization, roles=ARTWORK_EDIT_ROLES)
+    if organization.pk != garment_version.design.organization_id:
+        raise ValidationError("Ready Designed Product composition must be created by the canonical Garment Design organization.")
     if garment_version.status != GarmentDesignVersion.Status.APPROVED:
         raise ValidationError("Designed Products require an approved Garment Design Version.")
     if artwork_version.status != ArtworkVersion.Status.APPROVED:
         raise ValidationError("Designed Products require an approved Artwork Version.")
-    product = DesignedProduct(organization=organization, garment_version=garment_version, artwork_version=artwork_version, title=title, description=description, created_by=actor)
+    product = DesignedProduct(
+        organization=organization,
+        symbolic_ref=symbolic_ref,
+        garment_version=garment_version,
+        artwork_version=artwork_version,
+        garment_creator_organization=garment_version.design.organization,
+        artwork_creator_organization=artwork_version.artwork.organization,
+        economic_attribution=economic_attribution or {
+            "garment_creator_organization_id": garment_version.design.organization_id,
+            "artwork_creator_organization_id": artwork_version.artwork.organization_id,
+        },
+        title=title,
+        description=description,
+        created_by=actor,
+    )
     product.full_clean(); product.save()
-    record_audit_event(actor=actor, action="designed_product.created", instance=product, metadata={"organization_id": organization.pk}, request=request)
+    record_audit_event(actor=actor, action="designed_product.created", instance=product, metadata={"organization_id": organization.pk, "garment_creator_organization_id": product.garment_creator_organization_id, "artwork_creator_organization_id": product.artwork_creator_organization_id}, request=request)
     return product
+
+
+@transaction.atomic
+def create_reference_designed_product(*, organization, actor, garment_version, artwork_version, title, symbolic_ref, description="", economic_attribution=None, request=None):
+    require_active_designer_org(organization)
+    require_org_access(actor, organization, roles=ARTWORK_EDIT_ROLES)
+    provenance = getattr(garment_version, "reference_provenance", None)
+    if not provenance or not provenance.package.public_reference_allowed or provenance.package.production_engineering_validated:
+        raise ValidationError("Controlled reference composition requires an approved frozen public Golden reference that remains not-for-production.")
+    if artwork_version.status != ArtworkVersion.Status.APPROVED:
+        raise ValidationError("Reference composition requires an approved reference Artwork Version.")
+    product = DesignedProduct(
+        organization=organization,
+        symbolic_ref=symbolic_ref,
+        garment_version=garment_version,
+        artwork_version=artwork_version,
+        garment_creator_organization=garment_version.design.organization,
+        artwork_creator_organization=artwork_version.artwork.organization,
+        economic_attribution=economic_attribution or {"reference_demo": True},
+        reference_only=True,
+        title=title,
+        description=description or "FABINZI REFERENCE DEMO | NOT FOR PRODUCTION",
+        created_by=actor,
+    )
+    product.full_clean(); product.save()
+    record_audit_event(actor=actor, action="designed_product.reference.created", instance=product, metadata={"gdv_ref": garment_version.symbolic_ref, "not_for_production": True}, request=request)
+    return product
+
+
+def _normalize_legacy_placement_transform(transform):
+    normalized = dict(transform or {})
+    canonical = {"x", "y", "width", "height"}
+    if canonical.issubset(normalized):
+        return normalized
+    legacy_keys = {"x", "y", "scale", "rotation"}
+    if {"x", "y", "scale"}.issubset(normalized) and set(normalized).issubset(legacy_keys):
+        try:
+            scale = float(normalized["scale"])
+        except (TypeError, ValueError):
+            raise ValidationError("Legacy Artwork placement scale must be numeric.")
+        if scale <= 0:
+            raise ValidationError("Legacy Artwork placement scale must be positive.")
+        extent = 0.1 * scale
+        return {
+            "x": normalized["x"],
+            "y": normalized["y"],
+            "width": extent,
+            "height": extent,
+            "rotation": normalized.get("rotation", 0),
+        }
+    return normalized
 
 
 @transaction.atomic
@@ -219,9 +458,10 @@ def add_product_placement(*, product, actor, decoration_zone, transform, product
     require_org_access(actor, product.organization, roles=ARTWORK_EDIT_ROLES)
     if product.status != DesignedProduct.Status.DRAFT:
         raise ValidationError("Only draft Designed Products can be edited.")
-    placement = ArtworkPlacement(product=product, decoration_zone=decoration_zone, transform=transform or {}, production_method=production_method)
+    normalized_transform = _normalize_legacy_placement_transform(transform)
+    placement = ArtworkPlacement(product=product, decoration_zone=decoration_zone, transform=normalized_transform, production_method=production_method)
     placement.full_clean(); placement.save()
-    record_audit_event(actor=actor, action="designed_product.placement.added", instance=placement, metadata={"product_id": product.pk, "zone_id": decoration_zone.pk}, request=request)
+    record_audit_event(actor=actor, action="designed_product.placement.added", instance=placement, metadata={"product_id": product.pk, "zone_id": decoration_zone.pk, "production_method": production_method}, request=request)
     return placement
 
 
@@ -234,8 +474,11 @@ def publish_designed_product(*, product, actor, request=None):
         raise ValidationError("Garment Design and Artwork approvals are required.")
     if not product.placements.exists():
         raise ValidationError("At least one Artwork placement is required.")
+    if product.reference_only and not getattr(product.garment_version, "reference_provenance", None):
+        raise ValidationError("Reference-only Designed Product must resolve to immutable reference provenance.")
+    eligibility = evaluate_designed_product_eligibility(product)
     product.status = DesignedProduct.Status.PUBLISHED; product.save(update_fields=["status", "updated_at"])
-    record_audit_event(actor=actor, action="designed_product.published", instance=product, request=request)
+    record_audit_event(actor=actor, action="designed_product.published", instance=product, metadata={"eligibility": eligibility}, request=request)
     return product
 
 
@@ -287,7 +530,9 @@ def moderate_ip_case(*, case, reviewer, status, resolution=IPCase.Resolution.NON
             target_artwork.status = Artwork.Status.APPROVED; target_artwork.save(update_fields=["status", "updated_at"])
             approved_version = target_artwork.versions.filter(status=ArtworkVersion.Status.APPROVED).order_by("-version_number").first()
             ensure_public_preview_for_version(version=approved_version, actor=reviewer, request=request)
-        if case.designed_product_id and case.designed_product.garment_version.status == GarmentDesignVersion.Status.APPROVED and case.designed_product.artwork_version.status == ArtworkVersion.Status.APPROVED:
-            case.designed_product.status = DesignedProduct.Status.PUBLISHED; case.designed_product.save(update_fields=["status", "updated_at"])
+        if case.designed_product_id and case.designed_product.artwork_version.status == ArtworkVersion.Status.APPROVED:
+            eligibility = evaluate_designed_product_eligibility(case.designed_product)
+            if case.designed_product.reference_only or eligibility["commercial_eligible"]:
+                case.designed_product.status = DesignedProduct.Status.PUBLISHED; case.designed_product.save(update_fields=["status", "updated_at"])
     record_audit_event(actor=reviewer, action="ip_case.moderated", instance=case, metadata={"status": status, "resolution": resolution}, request=request)
     return case

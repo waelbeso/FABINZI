@@ -1,0 +1,85 @@
+{% extends "designer/base.html" %}
+{% block title %}Technical Package · {{ design.title }} · FABINZI{% endblock %}
+{% block designer_content %}
+<header class="designer-page-head">
+  <div class="designer-page-head__copy">
+    <div class="eyebrow">CREATOR TECHNICAL WORKFLOW · V2-4</div>
+    <h1>{{ design.title }}</h1>
+    <p class="muted">Canonical Garment Design Version: {{ version.symbolic_ref|default:version.id }} · v{{ version.version_number }}</p>
+    <div class="cluster"><span class="badge">{{ version.get_status_display }}</span><span class="badge">{{ version.get_product_class_display }}</span><span class="badge">{{ version.get_size_system_display }}</span></div>
+  </div>
+  <a class="button button--ghost" href="{% url 'designer-design-detail' design.id %}?version={{ version.id }}">Back to Design</a>
+</header>
+
+<nav class="cluster" aria-label="Design versions">
+{% for item in versions %}<a class="badge {% if item.id == version.id %}badge--info{% endif %}" href="?version={{ item.id }}">v{{ item.version_number }} · {{ item.get_status_display }}</a>{% endfor %}
+</nav>
+
+<section class="designer-status-panel {% if state.technical_complete %}designer-status-panel--success{% else %}designer-status-panel--warning{% endif %}">
+  <h2>Technical completeness</h2>
+  <p><strong>{% if state.technical_complete %}COMPLETE{% else %}INCOMPLETE{% endif %}</strong></p>
+  {% if state.completeness_errors %}<ul>{% for item in state.completeness_errors %}<li>{{ item }}</li>{% endfor %}</ul>{% endif %}
+  <div class="tag-row">
+    <span class="creative-tag">Reference approved: {{ state.eligibility.reference_approved|yesno:"Yes,No" }}</span>
+    <span class="creative-tag">Technical approved: {{ state.eligibility.technical_approved|yesno:"Yes,No" }}</span>
+    <span class="creative-tag">Commercial eligible: {{ state.eligibility.commercial_eligible|yesno:"Yes,No" }}</span>
+    <span class="creative-tag">Production eligible: {{ state.eligibility.production_eligible|yesno:"Yes,No" }}</span>
+  </div>
+</section>
+
+{% if version.reference_provenance %}
+<section class="designer-status-panel designer-status-panel--warning"><h2>Immutable Golden reference</h2><p>This record is mapped from {{ version.reference_provenance.package.product_ref }} / {{ version.reference_provenance.package.canonical_filename }}. Reference visibility never implies real production eligibility. Frozen source data cannot be edited here.</p></section>
+{% endif %}
+
+<section class="designer-section">
+  <div class="designer-section__head"><div><h2>Technical policy</h2><p class="muted">Product class, size system, 3D requirement, Decoration applicability and QC policy are independent technical facts.</p></div></div>
+  <form method="post" class="designer-form-grid">{% csrf_token %}<input type="hidden" name="action" value="save_policy"><input type="hidden" name="version_id" value="{{ version.id }}">
+    <label>Product class<select name="product_class" {% if not can_edit %}disabled{% endif %}>{% for value,label in product_classes %}<option value="{{ value }}" {% if version.product_class == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label>Size system<select name="size_system" {% if not can_edit %}disabled{% endif %}>{% for value,label in size_systems %}<option value="{{ value }}" {% if version.size_system == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label>Decoration applicability<select name="decoration_applicability" {% if not can_edit %}disabled{% endif %}>{% for value,label in decoration_applicability_choices %}<option value="{{ value }}" {% if version.decoration_applicability == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label><input type="checkbox" name="requires_3d_source" {% if version.requires_3d_source %}checked{% endif %} {% if not can_edit %}disabled{% endif %}> 3D source required</label>
+    <label class="field--full">QC requirements JSON<textarea name="qc_requirements" rows="5" {% if not can_edit %}disabled{% endif %}>{{ qc_requirements_json }}</textarea></label>
+    <label class="field--full">Technical policy JSON<textarea name="technical_policy" rows="5" {% if not can_edit %}disabled{% endif %}>{{ technical_policy_json }}</textarea></label>
+    {% if can_edit %}<button class="button" type="submit">Save technical policy</button>{% endif %}
+  </form>
+</section>
+
+<div class="designer-grid-2">
+<section class="designer-section">
+  <div class="designer-section__head"><h2>Points of Measure</h2><span class="badge">{{ version.points_of_measure.count }}</span></div>
+  {% for point in version.points_of_measure.all %}<article class="card"><strong>{{ point.symbolic_ref }} · {{ point.name }}</strong><p class="muted">{{ point.unit }} · +{{ point.tolerance_plus|default:"—" }} / -{{ point.tolerance_minus|default:"—" }}</p><div class="tag-row">{% for value in point.values.all %}<span class="creative-tag">{{ value.size.size_label }}: {{ value.value }} {{ point.unit }}</span>{% endfor %}</div>
+  {% if can_edit %}<details><summary>Add/update size value</summary><form method="post" class="stack">{% csrf_token %}<input type="hidden" name="action" value="save_pom_value"><input type="hidden" name="version_id" value="{{ version.id }}"><input type="hidden" name="point_id" value="{{ point.id }}"><select name="size_id">{% for size in version.size_rows.all %}<option value="{{ size.id }}">{{ size.size_label }}</option>{% endfor %}</select><input name="value" type="number" step="0.001" required><button class="button button--sm">Save value</button></form></details>{% endif %}</article>{% empty %}<p class="muted">No normalized POM definitions yet.</p>{% endfor %}
+  {% if can_edit %}<details><summary class="button button--ghost">Add POM</summary><form method="post" class="stack">{% csrf_token %}<input type="hidden" name="action" value="save_pom"><input type="hidden" name="version_id" value="{{ version.id }}"><input name="symbolic_ref" placeholder="POM-..." required><input name="name" placeholder="Measurement name" required><select name="unit">{% for value,label in pom_units %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select><input name="tolerance_plus" type="number" step="0.001" placeholder="+ tolerance"><input name="tolerance_minus" type="number" step="0.001" placeholder="- tolerance"><label><input type="checkbox" name="required" checked> Required</label><input name="sort_order" type="number" min="0" value="0"><button class="button">Add POM</button></form></details>{% endif %}
+</section>
+
+<section class="designer-section">
+  <div class="designer-section__head"><h2>Structured materials / BOM inputs</h2><span class="badge">{{ version.materials.count }}</span></div>
+  {% for material in version.materials.all %}<article class="card"><strong>{{ material.symbolic_ref }} · {{ material.name }}</strong><p class="muted">{{ material.role }} · {{ material.composition|default:"—" }}{% if material.gsm %} · {{ material.gsm }} GSM{% endif %}</p></article>{% empty %}<p class="muted">No structured material rows yet.</p>{% endfor %}
+  {% if can_edit %}<details><summary class="button button--ghost">Add material</summary><form method="post" class="stack">{% csrf_token %}<input type="hidden" name="action" value="save_material"><input type="hidden" name="version_id" value="{{ version.id }}"><input name="symbolic_ref" placeholder="MAT-..." required><input name="role" placeholder="main_body / lining / trim" required><input name="name" placeholder="Material name" required><input name="composition" placeholder="Composition"><input name="gsm" type="number" step="0.01" placeholder="GSM"><textarea name="specifications" rows="3" placeholder='{"reference_only": false}'></textarea><input name="sort_order" type="number" min="0" value="0"><button class="button">Add material</button></form></details>{% endif %}
+</section>
+</div>
+
+<div class="designer-grid-2">
+<section class="designer-section">
+  <div class="designer-section__head"><h2>Pattern per declared size</h2><span class="badge">{{ version.pattern_requirements.count }}/{{ version.size_rows.count }}</span></div>
+  {% for size in version.size_rows.all %}<article class="card"><strong>{{ size.size_label }}</strong>{% if size.pattern_requirement %}<p class="muted">1:1 intent declared: {{ size.pattern_requirement.declared_scale_1_to_1|yesno:"Yes,No" }} · Asset: {{ size.pattern_requirement.pattern_asset.label|default:"Missing" }}</p>{% else %}<p class="muted">Pattern requirement not configured.</p>{% endif %}
+  {% if can_edit %}<form method="post" class="stack">{% csrf_token %}<input type="hidden" name="action" value="save_pattern"><input type="hidden" name="version_id" value="{{ version.id }}"><input type="hidden" name="size_id" value="{{ size.id }}"><select name="pattern_asset_id"><option value="">— Missing / not yet supplied —</option>{% for asset in pattern_assets %}<option value="{{ asset.id }}" {% if size.pattern_requirement.pattern_asset_id == asset.id %}selected{% endif %}>{{ asset.symbolic_ref|default:asset.id }} · {{ asset.label }}</option>{% endfor %}</select><label><input type="checkbox" name="declared_scale_1_to_1" {% if size.pattern_requirement.declared_scale_1_to_1 %}checked{% endif %}> User declares 1:1 production intent</label><input name="notes" value="{{ size.pattern_requirement.notes|default:'' }}" placeholder="Reviewer/source notes"><button class="button button--sm">Save pattern slot</button></form>{% endif %}</article>{% empty %}<p class="muted">Declare sizes on the main Design page first.</p>{% endfor %}
+  <p class="help-text">FABINZI records the creator's 1:1 declaration and reviewer evidence; it does not claim automated mathematical scale verification.</p>
+</section>
+
+<section class="designer-section">
+  <div class="designer-section__head"><h2>Colorways + images</h2><span class="badge">{{ version.colorways.count }}</span></div>
+  {% for colorway in version.colorways.all %}<article class="card"><strong>{{ colorway.symbolic_ref }} · {{ colorway.name }}</strong><p class="muted">{{ colorway.hex_color|default:"No digital color value" }}</p><div class="tag-row">{% for image in colorway.images.all %}<span class="creative-tag">{{ image.get_role_display }} · {{ image.asset.label|default:image.asset_id }}</span>{% empty %}<span class="muted">No product image attached.</span>{% endfor %}</div>
+  {% if can_edit and product_image_assets %}<form method="post" class="stack">{% csrf_token %}<input type="hidden" name="action" value="attach_colorway_image"><input type="hidden" name="version_id" value="{{ version.id }}"><input type="hidden" name="colorway_id" value="{{ colorway.id }}"><select name="asset_id">{% for asset in product_image_assets %}<option value="{{ asset.id }}">{{ asset.label|default:asset.id }}</option>{% endfor %}</select><select name="role">{% for value,label in image_roles %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select><button class="button button--sm">Attach image role</button></form>{% endif %}</article>{% empty %}<p class="muted">No colorways declared.</p>{% endfor %}
+  {% if can_edit %}<details><summary class="button button--ghost">Add colorway</summary><form method="post" class="stack">{% csrf_token %}<input type="hidden" name="action" value="save_colorway"><input type="hidden" name="version_id" value="{{ version.id }}"><input name="symbolic_ref" placeholder="CW-..." required><input name="name" placeholder="Colorway name" required><input name="hex_color" placeholder="#RRGGBB (digital reference only)"><input name="sort_order" type="number" min="0" value="0"><button class="button">Add colorway</button></form></details>{% endif %}
+</section>
+</div>
+
+<section class="designer-section">
+  <div class="designer-section__head"><div><h2>Canonical Decoration Zone contract</h2><p class="muted">One GDV-owned zone contract serves Designer and authorized Manufacturer technical projection. Explicit NOT APPLICABLE is valid and requires no fake zone.</p></div><span class="badge">{{ version.get_decoration_applicability_display }}</span></div>
+  {% for zone in version.decoration_zones.all %}<article class="card"><strong>{{ zone.symbolic_ref|default:zone.id }} · {{ zone.name }}</strong><p class="muted">{{ zone.surface }} · {{ zone.allowed_methods|join:", " }} · {{ zone.max_width_mm|default:"—" }} × {{ zone.max_height_mm|default:"—" }} mm · min DPI {{ zone.minimum_dpi|default:"—" }}</p><pre>{{ zone.placement }}</pre></article>{% empty %}<p class="muted">No Decoration Zones. If this is intentional, set Decoration applicability to NOT APPLICABLE in the technical policy above.</p>{% endfor %}
+  {% if can_edit and version.decoration_applicability != 'not_applicable' %}<details><summary class="button button--ghost">Add canonical zone</summary><form method="post" class="designer-form-grid">{% csrf_token %}<input type="hidden" name="action" value="save_zone_contract"><input type="hidden" name="version_id" value="{{ version.id }}"><input name="symbolic_ref" placeholder="DZ-..."><input name="name" placeholder="Semantic zone name" required><input name="surface" placeholder="FRONT / BACK / ..."><fieldset><legend>Allowed methods</legend>{% for value,label in production_methods %}<label><input type="checkbox" name="allowed_methods" value="{{ value }}"> {{ label }}</label>{% endfor %}</fieldset><input name="x" type="number" step="0.001" min="0" max="1" placeholder="x"><input name="y" type="number" step="0.001" min="0" max="1" placeholder="y"><input name="width" type="number" step="0.001" min="0" max="1" placeholder="normalized width"><input name="height" type="number" step="0.001" min="0" max="1" placeholder="normalized height"><input name="max_width_mm" type="number" step="0.01" min="0" placeholder="reference max width mm"><input name="max_height_mm" type="number" step="0.01" min="0" placeholder="reference max height mm"><input name="minimum_dpi" type="number" min="1" placeholder="minimum/recommended DPI"><textarea name="embroidery_constraints" rows="3" placeholder='{"max_stitches": "reviewer-defined"}'></textarea><textarea name="notes" rows="3" placeholder="Notes / reference-only limitations"></textarea><button class="button">Add zone</button></form></details>{% endif %}
+</section>
+
+<section class="designer-section"><h2>Technical asset evidence</h2><p class="muted">Technical files remain private. Use the main Design page to upload Product Image, Pattern, Tech Pack, 3D and Technical files. This workspace binds those existing private assets to sizes, colorways and technical roles without creating a second Tech Pack.</p><div class="designer-card-list">{% for asset in version.assets.all %}<article class="card"><strong>{{ asset.symbolic_ref|default:asset.id }} · {{ asset.get_kind_display }}</strong><p class="muted">{{ asset.label|default:"—" }} · {{ asset.media_asset.mime_type }} · {{ asset.media_asset.access }}</p></article>{% empty %}<p class="muted">No assets uploaded.</p>{% endfor %}</div></section>
+{% endblock %}

@@ -11,7 +11,10 @@ from .services import require_artwork_draft
 
 
 def normalize_designed_product_transform(transform):
+    """Normalize the accepted legacy center/scale UI transform into canonical 0..1 geometry."""
     source = transform or {}
+    if all(key in source for key in ("x", "y", "width", "height")):
+        return dict(source)
     try:
         x = float(source.get("x", 0.5))
         y = float(source.get("y", 0.5))
@@ -32,9 +35,10 @@ def normalize_designed_product_transform(transform):
     if x - half_extent < 0 or x + half_extent > 1 or y - half_extent < 0 or y + half_extent > 1:
         raise ValidationError("Artwork placement extends outside the selected Decoration Zone workspace.")
     return {
-        "x": round(x, 5),
-        "y": round(y, 5),
-        "scale": round(scale, 5),
+        "x": round(x - (scale / 2.0), 5),
+        "y": round(y - (scale / 2.0), 5),
+        "width": round(scale, 5),
+        "height": round(scale, 5),
         "rotation": round(rotation, 3),
     }
 

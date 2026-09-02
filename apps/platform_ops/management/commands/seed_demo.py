@@ -502,7 +502,7 @@ class Command(BaseCommand):
             artwork_version=artworks["cairo-lines"]["version"],
             title="Cairo Lines Men's T-Shirt",
             description="Ready Designed Product combining the approved Men's T-Shirt with Cairo Lines artwork.",
-            placement={"zone":designs["mens-tshirt"]["zones"]["Front Chest"],"transform":{"x":0.5,"y":0.42,"scale":0.82,"rotation":0},"method":"print"},
+            placement={"zone":designs["mens-tshirt"]["zones"]["Front Chest"],"transform":{"x":0.09,"y":0.01,"width":0.82,"height":0.82,"rotation":0},"method":"print"},
         )
 
         store, _ = Storefront.objects.get_or_create(
