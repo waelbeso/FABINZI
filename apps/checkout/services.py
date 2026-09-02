@@ -104,10 +104,6 @@ def _production_snapshot(*, product, variant, kind, quantity, studio_project=Non
     return snapshot
 
 
-def _canonical_nonstudio_kind(product):
-    return CartItem.Kind.READY_DESIGNED if product.designed_product.placements.exists() else CartItem.Kind.PLAIN
-
-
 def _validate_commercial_product(product):
     if product.designed_product.reference_only:
         raise ValidationError("Reference-only products are not commercially purchasable.")
@@ -211,11 +207,10 @@ def _validate_cart_item(item, *, quantity=None):
         except ValidationError as exc:
             raise ValidationError(["This customization needs attention before checkout.", *exc.messages]) from exc
     else:
+        if item.kind not in {CartItem.Kind.PLAIN, CartItem.Kind.READY_DESIGNED}:
+            raise ValidationError("Unsupported Cart item type.")
         if item.studio_project_id:
             raise ValidationError("Only Studio cart items may reference a Studio project.")
-        expected = _canonical_nonstudio_kind(item.store_product)
-        if item.kind != expected:
-            raise ValidationError("Cart product type no longer matches the current commercial product state.")
     return True
 
 
@@ -338,7 +333,7 @@ def merge_guest_cart_into_customer(*, guest_identity, customer, request=None):
         return Cart.objects.filter(customer=customer, status=Cart.Status.ACTIVE).first()
 
     guest_items = list(
-        guest_cart.items.select_for_update().select_related("store_product__designed_product", "variant", "studio_project").prefetch_related("store_product__designed_product__placements")
+        guest_cart.items.select_for_update(of=("self",)).select_related("store_product__designed_product", "variant", "studio_project").prefetch_related("store_product__designed_product__placements")
     )
     for item in guest_items:
         if item.kind == CartItem.Kind.STUDIO or item.studio_project_id:
@@ -372,7 +367,7 @@ def merge_guest_cart_into_customer(*, guest_identity, customer, request=None):
         return guest_cart
 
     customer_items = list(
-        customer_cart.items.select_for_update().select_related("store_product__designed_product", "variant", "studio_project").prefetch_related("store_product__designed_product__placements")
+        customer_cart.items.select_for_update(of=("self",)).select_related("store_product__designed_product", "variant", "studio_project").prefetch_related("store_product__designed_product__placements")
     )
     try:
         for item in customer_items:
@@ -445,13 +440,13 @@ def add_cart_item(*, customer=None, product, variant, quantity=1, kind=CartItem.
     authenticated = bool(getattr(customer, "is_authenticated", False))
     if not authenticated and kind == CartItem.Kind.STUDIO:
         raise PermissionDenied("Sign in or create an account to use Studio customization.")
+    if not authenticated and kind not in {CartItem.Kind.PLAIN, CartItem.Kind.READY_DESIGNED}:
+        raise PermissionDenied("Guest Cart supports Plain and Ready Designed products only.")
     cart = get_active_cart(customer if authenticated else None, guest_identity=guest_identity)
     _validate_available_product(product, variant, quantity)
     _validate_commercial_product(product)
     if variant.product_id != product.pk:
         raise ValidationError("Selected variant does not belong to this product.")
-    if kind != CartItem.Kind.STUDIO and kind != _canonical_nonstudio_kind(product):
-        raise ValidationError("Product type does not match the current product configuration.")
     if cart.items.exists():
         cart_currency = cart.items.select_related("store_product").first().store_product.currency.upper()
         if cart_currency != product.currency.upper():
@@ -818,7 +813,7 @@ def _payment_attempt_for_purchase(*, purchase, payment_method, order=None):
 @transaction.atomic
 def place_cart_purchase(*, session, actor, payment_method, guest_identity=None, request=None):
     require_checkout_owner(actor, session, guest_identity=guest_identity)
-    session = CheckoutSession.objects.select_for_update().select_related("cart").get(pk=session.pk)
+    session = CheckoutSession.objects.select_for_update().get(pk=session.pk)
     require_checkout_owner(actor, session, guest_identity=guest_identity)
     if not session.cart_id:
         raise ValidationError("Checkout is not Cart-based.")
