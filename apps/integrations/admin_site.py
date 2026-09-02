@@ -13,6 +13,8 @@ class FabinziAdminSite(AdminSiteOTPRequired):
 
     def get_urls(self):
         from apps.platform_ops import maneg_views
+        from apps.public_profiles import maneg_views as public_profile_maneg
+        from apps.public_inquiries import maneg_views as public_inquiry_maneg
 
         custom = [
             path("users/", self.admin_view(maneg_views.users), name="maneg-users"),
@@ -21,6 +23,11 @@ class FabinziAdminSite(AdminSiteOTPRequired):
             path("organizations/<int:pk>/", self.admin_view(maneg_views.organization_detail), name="maneg-organization-detail"),
             path("verification/", self.admin_view(maneg_views.verification), name="maneg-verification"),
             path("verification/<int:pk>/", self.admin_view(maneg_views.verification_detail), name="maneg-verification-detail"),
+            path("public-profiles/", self.admin_view(public_profile_maneg.public_profile_queue), name="maneg-v2-5-public-profiles"),
+            path("public-profiles/revisions/<int:pk>/", self.admin_view(public_profile_maneg.public_profile_revision_detail), name="maneg-v2-5-public-profile-detail"),
+            path("public-profiles/manufacturers/", self.admin_view(public_profile_maneg.manufacturer_public_controls), name="maneg-v2-5-manufacturer-public-controls"),
+            path("public-inquiries/", self.admin_view(public_inquiry_maneg.public_inquiry_queue), name="maneg-v2-5-public-inquiries"),
+            path("public-inquiries/<int:pk>/", self.admin_view(public_inquiry_maneg.public_inquiry_detail), name="maneg-v2-5-public-inquiry-detail"),
             path("design-review/", self.admin_view(maneg_views.design_review), name="maneg-design-review"),
             path("design-review/<int:pk>/", self.admin_view(maneg_views.design_review_detail), name="maneg-design-review-detail"),
             path("artwork-ip/", self.admin_view(maneg_views.artwork_ip), name="maneg-artwork-ip"),

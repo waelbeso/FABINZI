@@ -4,15 +4,10 @@ from django.utils import timezone
 from django.utils.text import slugify
 
 from apps.audit.services import record_audit_event
-from apps.manufacturer_marketplace.models import ManufacturerListing
-from apps.organizations.models import Membership, OnboardingApplication, Organization
+from apps.organizations.models import Membership, OnboardingApplication, Organization, PublicProfileRevision
 from apps.organizations.services import require_org_access
 from apps.storefront.models import StoreProduct, Storefront
-from .models import (
-    ManufacturerCapabilityVerification,
-    ManufacturerPublicProductApproval,
-    ProfessionalPublicState,
-)
+from .models import ManufacturerCapabilityVerification, ManufacturerPublicProductApproval, ProfessionalPublicState
 
 
 MANAGE_ROLES = [Membership.Role.OWNER, Membership.Role.MANAGER]
@@ -96,28 +91,33 @@ def hide_public_profile(*, organization, actor, request=None):
 
 @transaction.atomic
 def request_public_profile_visibility(*, organization, actor, request=None):
-    if organization.verification_status != Organization.VerificationStatus.ACTIVE or not _approved_application_exists(organization):
-        raise ValidationError("Only an approved active professional organization may request public visibility.")
+    if (
+        organization.verification_status != Organization.VerificationStatus.ACTIVE
+        or not _approved_application_exists(organization)
+    ):
+        raise ValidationError(
+            "Only an approved active professional organization may request public visibility."
+        )
     require_org_access(actor, organization, roles=MANAGE_ROLES)
     state = ensure_public_state(organization)
     if state.visibility == ProfessionalPublicState.Visibility.VISIBLE:
         return state
+
+    from apps.organizations.public_profile_services import current_public_profile_data, save_public_profile_revision, submit_public_profile_revision
+
+    revision = organization.public_profile_revisions.filter(
+        status__in=PublicProfileRevision.EDITABLE_STATUSES
+    ).first()
+    if revision is None:
+        revision = save_public_profile_revision(
+            organization=organization,
+            actor=actor,
+            proposed_data=current_public_profile_data(organization),
+            request=request,
+        )
     state.visibility = ProfessionalPublicState.Visibility.PENDING_APPROVAL
     state.save(update_fields=["visibility", "updated_at"])
-
-    from apps.organizations.public_profile_services import (
-        current_public_profile_data,
-        save_public_profile_revision,
-        submit_public_profile_revision,
-    )
-
-    revision = save_public_profile_revision(
-        organization=organization,
-        actor=actor,
-        proposed_data=current_public_profile_data(organization),
-        request=request,
-    )
-    if revision.status in revision.EDITABLE_STATUSES:
+    if revision.status in PublicProfileRevision.EDITABLE_STATUSES:
         submit_public_profile_revision(
             revision=revision,
             actor=actor,
@@ -134,14 +134,40 @@ def request_public_profile_visibility(*, organization, actor, request=None):
     return state
 
 
+def manufacturer_product_approval_is_public(approval):
+    from apps.artwork.models import DesignedProduct
+
+    if approval.status != ManufacturerPublicProductApproval.Status.APPROVED or not approval.is_visible:
+        return False
+    if not is_public_professional(approval.manufacturer, kind=Organization.Kind.MANUFACTURER):
+        return False
+    product = approval.store_product
+    return bool(
+        product.status == StoreProduct.Status.PUBLISHED
+        and product.storefront.status == Storefront.Status.PUBLISHED
+        and product.designed_product.status == DesignedProduct.Status.PUBLISHED
+    )
+
+
 @transaction.atomic
 def approve_manufacturer_product(*, manufacturer, store_product, reviewer, notes="", request=None):
+    from apps.artwork.models import DesignedProduct
+
     if not reviewer.is_staff:
         raise PermissionDenied("Staff access required.")
-    if manufacturer.kind != Organization.Kind.MANUFACTURER or manufacturer.verification_status != Organization.VerificationStatus.ACTIVE:
+    if (
+        manufacturer.kind != Organization.Kind.MANUFACTURER
+        or manufacturer.verification_status != Organization.VerificationStatus.ACTIVE
+    ):
         raise ValidationError("An active Manufacturer organization is required.")
-    if store_product.status != StoreProduct.Status.PUBLISHED or store_product.storefront.status != Storefront.Status.PUBLISHED:
-        raise ValidationError("Only an actually published Store Product may receive a public Manufacturer approval.")
+    if (
+        store_product.status != StoreProduct.Status.PUBLISHED
+        or store_product.storefront.status != Storefront.Status.PUBLISHED
+        or store_product.designed_product.status != DesignedProduct.Status.PUBLISHED
+    ):
+        raise ValidationError(
+            "Only a currently public Store Product backed by a published Ready Designed Product may receive approval."
+        )
     approval, _ = ManufacturerPublicProductApproval.objects.get_or_create(
         manufacturer=manufacturer,
         store_product=store_product,
@@ -183,13 +209,23 @@ def revoke_manufacturer_product(*, approval, reviewer, notes="", request=None):
 
 
 def approved_manufacturer_products(manufacturer):
+    from apps.artwork.models import DesignedProduct
+
+    if not is_public_professional(manufacturer, kind=Organization.Kind.MANUFACTURER):
+        return ManufacturerPublicProductApproval.objects.none()
     return ManufacturerPublicProductApproval.objects.filter(
         manufacturer=manufacturer,
         status=ManufacturerPublicProductApproval.Status.APPROVED,
         is_visible=True,
         store_product__status=StoreProduct.Status.PUBLISHED,
         store_product__storefront__status=Storefront.Status.PUBLISHED,
-    ).select_related("store_product", "store_product__storefront", "store_product__designed_product")
+        store_product__designed_product__status=DesignedProduct.Status.PUBLISHED,
+    ).select_related(
+        "manufacturer__public_state",
+        "store_product",
+        "store_product__storefront",
+        "store_product__designed_product",
+    )
 
 
 @transaction.atomic
@@ -198,8 +234,10 @@ def verify_manufacturer_capability(*, capability, canonical_code, reviewer, note
         raise PermissionDenied("Staff access required.")
     if canonical_code not in ManufacturerCapabilityVerification.CanonicalCode.values:
         raise ValidationError("Choose an explicit canonical V2 Manufacturer capability.")
-    verification, _ = ManufacturerCapabilityVerification.objects.get_or_create(capability=capability)
-    verification.canonical_code = canonical_code
+    verification, _ = ManufacturerCapabilityVerification.objects.get_or_create(
+        capability=capability,
+        canonical_code=canonical_code,
+    )
     verification.status = ManufacturerCapabilityVerification.Status.VERIFIED
     verification.verified_by = reviewer
     verification.verified_at = timezone.now()
@@ -211,7 +249,31 @@ def verify_manufacturer_capability(*, capability, canonical_code, reviewer, note
         actor=reviewer,
         action="public_profile.manufacturer_capability.verified",
         instance=verification,
-        metadata={"manufacturer_id": capability.listing.organization_id, "canonical_code": canonical_code},
+        metadata={
+            "manufacturer_id": capability.listing.organization_id,
+            "canonical_code": canonical_code,
+        },
+        request=request,
+    )
+    return verification
+
+
+@transaction.atomic
+def revoke_manufacturer_capability_verification(*, verification, reviewer, notes="", request=None):
+    if not reviewer.is_staff:
+        raise PermissionDenied("Staff access required.")
+    verification.status = ManufacturerCapabilityVerification.Status.REVOKED
+    verification.revoked_at = timezone.now()
+    verification.notes = str(notes or verification.notes or "").strip()
+    verification.save(update_fields=["status", "revoked_at", "notes", "updated_at"])
+    record_audit_event(
+        actor=reviewer,
+        action="public_profile.manufacturer_capability.revoked",
+        instance=verification,
+        metadata={
+            "manufacturer_id": verification.capability.listing.organization_id,
+            "canonical_code": verification.canonical_code,
+        },
         request=request,
     )
     return verification

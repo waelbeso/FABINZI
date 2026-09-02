@@ -4,12 +4,11 @@ from django.db import models
 
 
 class ProfessionalPublicState(models.Model):
-    """V2-5 publication control plus public-only profile attributes.
+    """V2-5 publication control plus approved public-only attributes.
 
-    Existing Organization, DesignerProfile and ManufacturerListing records
-    remain canonical for fields they already own.  PublicProfileRevision remains
-    the only proposed-revision truth.  This model does not create a second
-    mutable professional profile.
+    Organization / DesignerProfile / ManufacturerListing remain authoritative
+    for fields they already own. PublicProfileRevision is the one proposed-
+    revision truth; this record is only current approved publication state.
     """
 
     class Visibility(models.TextChoices):
@@ -89,9 +88,11 @@ class ProfessionalPublicState(models.Model):
 
 
 class ManufacturerCapabilityVerification(models.Model):
-    """Explicit FABINZI mapping of a legacy capability to canonical V2 semantics.
+    """Explicit FABINZI canonical verification for a legacy capability row.
 
-    No legacy value, including PRINT, is inferred as DTF, DTG, or both.
+    Multiple independently verified canonical meanings may be attached to one
+    legacy capability only by explicit staff decisions. Nothing infers PRINT as
+    DTF, DTG, or both.
     """
 
     class CanonicalCode(models.TextChoices):
@@ -104,10 +105,10 @@ class ManufacturerCapabilityVerification(models.Model):
         VERIFIED = "verified", "Verified"
         REVOKED = "revoked", "Revoked"
 
-    capability = models.OneToOneField(
+    capability = models.ForeignKey(
         "manufacturer_marketplace.ManufacturerCapability",
         on_delete=models.CASCADE,
-        related_name="public_verification",
+        related_name="public_verifications",
     )
     canonical_code = models.CharField(max_length=32, choices=CanonicalCode.choices)
     status = models.CharField(
@@ -129,16 +130,30 @@ class ManufacturerCapabilityVerification(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["capability", "canonical_code"],
+                name="uniq_public_capability_canonical_code",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["canonical_code", "status"],
+                name="pubcap_code_status_idx",
+            )
+        ]
+
     def __str__(self):
         return f"{self.capability} · {self.canonical_code}"
 
 
 class ManufacturerPublicProductApproval(models.Model):
-    """Explicit FABINZI approval that a Manufacturer can produce a StoreProduct.
+    """Explicit FABINZI approval that a Manufacturer can produce StoreProduct.
 
-    The relationship is never inferred from RFQ, ManufacturerQuote,
-    ProductionJob, order history, or transaction history.  It grants no retail
-    ownership, pricing authority, Artwork ownership, or customer ownership.
+    It is never inferred from RFQ, ManufacturerQuote, ProductionJob, order or
+    transaction history, and grants no retail ownership, pricing authority,
+    Artwork ownership, or customer ownership.
     """
 
     class Status(models.TextChoices):
