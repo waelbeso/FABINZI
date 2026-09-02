@@ -12,7 +12,8 @@ from apps.manufacturer_marketplace.models import (
     ManufacturerPortfolioAsset,
 )
 from apps.media.models import MediaAsset
-from apps.organizations.models import Membership, Organization
+from apps.organizations.models import Membership, OnboardingApplication, Organization
+from apps.public_profiles.models import ManufacturerCapabilityVerification, ProfessionalPublicState
 from apps.storefront.models import Storefront
 
 User = get_user_model()
@@ -183,7 +184,7 @@ def test_staff_navigation_is_independent_of_professional_role_activation(client)
 
 
 @pytest.mark.django_db
-def test_designer_directory_requires_active_organization_and_published_store(client):
+def test_designer_directory_requires_approved_active_visible_profile_not_storefront(client):
     owner = User.objects.create_user(username="directory-owner", password="password12345")
     public_org = Organization.objects.create(
         kind=Organization.Kind.DESIGNER,
@@ -193,26 +194,35 @@ def test_designer_directory_requires_active_organization_and_published_store(cli
         verification_status=Organization.VerificationStatus.ACTIVE,
         created_by=owner,
     )
-    Storefront.objects.create(
+    OnboardingApplication.objects.create(
+        organization=public_org,
+        status=OnboardingApplication.Status.APPROVED,
+    )
+    ProfessionalPublicState.objects.create(
         organization=public_org,
         slug="visible-designer",
-        status=Storefront.Status.PUBLISHED,
-        name_en="Visible Designer",
-        name_ar="مصمم ظاهر",
-        about_en="Publicly approved storefront identity.",
+        visibility=ProfessionalPublicState.Visibility.VISIBLE,
+        public_name_en="Visible Designer",
+        public_name_ar="مصمم ظاهر",
     )
+    assert not Storefront.objects.filter(organization=public_org).exists()
+
     hidden_org = Organization.objects.create(
         kind=Organization.Kind.DESIGNER,
         display_name="Hidden Designer",
         email="hidden@example.test",
-        verification_status=Organization.VerificationStatus.PENDING,
+        verification_status=Organization.VerificationStatus.ACTIVE,
         created_by=owner,
     )
-    Storefront.objects.create(
+    OnboardingApplication.objects.create(
+        organization=hidden_org,
+        status=OnboardingApplication.Status.APPROVED,
+    )
+    ProfessionalPublicState.objects.create(
         organization=hidden_org,
         slug="hidden-designer",
-        status=Storefront.Status.PUBLISHED,
-        name_en="Hidden Designer Store",
+        visibility=ProfessionalPublicState.Visibility.HIDDEN,
+        public_name_en="Hidden Designer",
     )
 
     response = client.get("/designers/")
@@ -225,7 +235,7 @@ def test_designer_directory_requires_active_organization_and_published_store(cli
 
 
 @pytest.mark.django_db
-def test_manufacturer_public_projection_hides_private_contact_capacity_and_legacy_taxonomy(client):
+def test_manufacturer_public_projection_requires_v2_profile_and_only_verified_canonical_capabilities(client):
     owner = User.objects.create_user(username="factory-owner", password="password12345")
     org = Organization.objects.create(
         kind=Organization.Kind.MANUFACTURER,
@@ -234,6 +244,16 @@ def test_manufacturer_public_projection_hides_private_contact_capacity_and_legac
         phone="+201222222222",
         verification_status=Organization.VerificationStatus.ACTIVE,
         created_by=owner,
+    )
+    OnboardingApplication.objects.create(
+        organization=org,
+        status=OnboardingApplication.Status.APPROVED,
+    )
+    state = ProfessionalPublicState.objects.create(
+        organization=org,
+        slug="v2-factory",
+        visibility=ProfessionalPublicState.Visibility.VISIBLE,
+        public_name_en="V2 Factory",
     )
     listing = ManufacturerListing.objects.create(
         organization=org,
@@ -245,7 +265,7 @@ def test_manufacturer_public_projection_hides_private_contact_capacity_and_legac
         available_monthly_capacity=987654,
         min_order_quantity=4321,
     )
-    ManufacturerCapability.objects.create(
+    legacy_print = ManufacturerCapability.objects.create(
         listing=listing,
         capability_type=ManufacturerCapability.CapabilityType.PRINT,
         name="Decorative transfer service",
@@ -258,37 +278,40 @@ def test_manufacturer_public_projection_hides_private_contact_capacity_and_legac
         name="Prototype preparation service",
         is_active=True,
     )
+    assert legacy_print.public_verifications.count() == 0
+    ManufacturerCapabilityVerification.objects.create(
+        capability=legacy_print,
+        canonical_code=ManufacturerCapabilityVerification.CanonicalCode.DTF,
+        status=ManufacturerCapabilityVerification.Status.VERIFIED,
+    )
 
-    directory = client.get("/manufacturers/?capability=print")
+    directory = client.get("/manufacturers/")
     assert directory.status_code == 200
     directory_body = directory.content.decode()
     assert "V2 Factory" in directory_body
     assert 'name="capability"' not in directory_body
     assert "Decorative transfer service" not in directory_body
 
-    detail = client.get(f"/manufacturers/{listing.pk}/")
+    detail = client.get(f"/manufacturers/{state.slug}/")
     assert detail.status_code == 200
     body = detail.content.decode()
     assert "V2 Factory" in body
-    assert "Decorative transfer service" in body
-    assert "Prototype preparation service" in body
-    assert "Published free-text service information." in body
-    for legacy_label in (
-        "Cut & sew",
-        "Printing",
-        "Sampling",
-        "Pattern making",
-        "Finishing",
-        "Packaging",
-        "Other",
-    ):
-        assert legacy_label not in body
+    assert "DTF" in body
+    assert "Decorative transfer service" not in body
+    assert "Prototype preparation service" not in body
+    assert "Published free-text service information." not in body
+    assert "Printing" not in body
+    assert "Sampling" not in body
     assert "private-factory@example.test" not in body
     assert "listed-contact@example.test" not in body
     assert "+201222222222" not in body
     assert "+201333333333" not in body
     assert "987654" not in body
     assert "4321" not in body
+
+    legacy = client.get(f"/manufacturers/{listing.pk}/")
+    assert legacy.status_code == 301
+    assert legacy.headers["Location"].endswith(f"/manufacturers/{state.slug}/")
 
 
 @pytest.mark.django_db
@@ -301,7 +324,11 @@ def test_manufacturer_public_media_requires_public_access_and_explicit_delivery_
         verification_status=Organization.VerificationStatus.ACTIVE,
         created_by=owner,
     )
-    listing = ManufacturerListing.objects.create(
+    OnboardingApplication.objects.create(
+        organization=org,
+        status=OnboardingApplication.Status.APPROVED,
+    )
+    ManufacturerListing.objects.create(
         organization=org,
         status=ManufacturerListing.Status.PUBLISHED,
         headline_en="Published factory profile",
@@ -317,12 +344,6 @@ def test_manufacturer_public_media_requires_public_access_and_explicit_delivery_
         metadata={"public_url": "https://images.example.test/factory-safe.jpg"},
         uploaded_by=owner,
     )
-    ManufacturerPortfolioAsset.objects.create(
-        listing=listing,
-        media_asset=safe_public,
-        caption="Approved factory image",
-    )
-
     public_without_url = MediaAsset.objects.create(
         provider=MediaAsset.Provider.CLOUDFLARE_IMAGES,
         provider_asset_id="provider-internal-must-not-leak",
@@ -333,12 +354,6 @@ def test_manufacturer_public_media_requires_public_access_and_explicit_delivery_
         metadata={},
         uploaded_by=owner,
     )
-    ManufacturerPortfolioAsset.objects.create(
-        listing=listing,
-        media_asset=public_without_url,
-        caption="No delivery URL image",
-    )
-
     private_asset = MediaAsset.objects.create(
         provider=MediaAsset.Provider.AMAZON_S3,
         provider_asset_id="private/signed/internal-object-key",
@@ -349,23 +364,21 @@ def test_manufacturer_public_media_requires_public_access_and_explicit_delivery_
         metadata={"public_url": "https://should-not-render.example.test/private.jpg"},
         uploaded_by=owner,
     )
-    ManufacturerPortfolioAsset.objects.create(
-        listing=listing,
-        media_asset=private_asset,
-        caption="Private image must stay hidden",
+    state = ProfessionalPublicState.objects.create(
+        organization=org,
+        slug="media-safe-factory",
+        visibility=ProfessionalPublicState.Visibility.VISIBLE,
+        public_name_en="Media Safe Factory",
+        profile_image=safe_public,
     )
-
-    response = client.get(f"/manufacturers/{listing.pk}/")
+    response = client.get(f"/manufacturers/{state.slug}/")
     assert response.status_code == 200
     body = response.content.decode()
     assert "https://images.example.test/factory-safe.jpg" in body
-    assert "Approved factory image" in body
     assert "provider-internal-safe-id" not in body
-    assert "provider-internal-must-not-leak" not in body
-    assert "No delivery URL image" not in body
-    assert "private/signed/internal-object-key" not in body
+    assert public_without_url.provider_asset_id not in body
+    assert private_asset.provider_asset_id not in body
     assert "https://should-not-render.example.test/private.jpg" not in body
-    assert "Private image must stay hidden" not in body
 
 
 @pytest.mark.django_db
