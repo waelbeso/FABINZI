@@ -27,7 +27,7 @@ def can_view_operations(actor,order):
     if not getattr(actor,"is_authenticated",False): return False
     if order.customer_id==actor.pk: return True
     return Membership.objects.filter(user=actor,is_active=True,organization_id__in=[order.designer_organization_id,getattr(getattr(order,"production_job",None),"manufacturer_id",None)]).exists()
-def _event(f,status,actor=None,note=""): return FulfillmentEvent.objects.create(fulfillment=f,status=status,actor=actor,note=note)
+def _event(f,status,actor=None,note=""): return FulfillmentEvent.objects.create(fulfillment=f,status=status,actor=actor if getattr(actor,"is_authenticated",False) else None,note=note)
 def _notify_customer(order,title_en,title_ar,body_en,body_ar): Notification.objects.create(recipient=order.customer,type="order_status",title_en=title_en,title_ar=title_ar,body_en=body_en,body_ar=body_ar,destination=f"/orders/{order.pk}/production/")
 
 @transaction.atomic
