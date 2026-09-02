@@ -177,7 +177,7 @@ def build_production_specification_snapshot(*, order_item, manufacturer, quote, 
 @transaction.atomic
 def assign_customer_order_manufacturer(*, quote, actor, request=None):
     _require_staff(actor)
-    quote = ManufacturerQuote.objects.select_for_update().select_related("invitation__rfq__order_item__order", "invitation__manufacturer").get(pk=quote.pk)
+    quote = ManufacturerQuote.objects.select_for_update(of=("self",)).select_related("invitation__rfq__order_item__order", "invitation__manufacturer").get(pk=quote.pk)
     rfq = RFQ.objects.select_for_update().get(pk=quote.invitation.rfq_id)
     if rfq.source != RFQ.Source.CUSTOMER_ORDER or not rfq.order_item_id:
         raise PermissionDenied("This FABINZI operational assignment service accepts CustomerOrder routing only.")
@@ -221,9 +221,9 @@ def verify_specification_integrity(specification):
 @transaction.atomic
 def release_customer_order_production(*, job, actor, request=None):
     _require_staff(actor)
-    job = ProductionJob.objects.select_for_update().select_related("production_specification__order_item__store_product__designed_product__garment_version").get(pk=job.pk)
+    job = ProductionJob.objects.select_for_update().get(pk=job.pk)
     try:
-        specification = job.production_specification
+        specification = ProductionSpecification.objects.select_for_update().get(job=job)
     except ProductionSpecification.DoesNotExist as exc:
         raise ValidationError("CustomerOrder production cannot be released without an immutable ProductionSpecification.") from exc
     if not verify_specification_integrity(specification):
