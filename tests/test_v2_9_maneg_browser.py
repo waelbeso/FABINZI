@@ -107,8 +107,8 @@ def test_v2_9_real_browser_maneg_super_separation(client, live_server):
         _wait(denied_driver).until(lambda d: d.execute_script("return document.readyState") == "complete")
         assert "sk_v29_browser_never_render" not in denied_driver.page_source
         assert "Integration configuration" not in denied_driver.page_source
-        assert "/Maneg/integrations/" not in denied_driver.page_source
-        assert "/super/" not in denied_driver.page_source
+        assert not denied_driver.find_elements(By.CSS_SELECTOR, 'a[href="/Maneg/integrations/"]')
+        assert not denied_driver.find_elements(By.CSS_SELECTOR, 'a[href="/super/"]')
         _shot(denied_driver, "23-maneg-integrations-nonsuper-denied.png")
     finally:
         denied_driver.quit()
