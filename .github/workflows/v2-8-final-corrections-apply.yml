@@ -1,0 +1,37 @@
+name: V2-8 Apply Final Patch
+
+on:
+  push:
+    branches: [work/v2-finance-royalties-payables-payout]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.head_commit.message == 'Trigger V2-8 final patch application'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: work/v2-finance-royalties-payables-payout
+          fetch-depth: 0
+      - name: Apply narrow corrections
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/v2_8_final_patch.py
+          rm .github/v2_8_final_patch.py .github/workflows/v2-8-final-corrections-apply.yml
+          python -m compileall -q apps tests
+          git diff --check
+          test ! -e .github/v2_8_final_patch.py
+          test ! -e .github/workflows/v2-8-final-corrections-apply.yml
+      - name: Commit clean correction tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Wael El-Begearmi'
+          git config user.email 'waelabbas@live.com'
+          git add apps/finance/services.py tests/test_v2_8_finance_boundaries.py templates/maneg/finance.html .github/workflows/flutter-customer.yml .github/v2_8_final_patch.py .github/workflows/v2-8-final-corrections-apply.yml
+          git commit -m 'Preserve legacy finance and deterministic Flutter evidence'
+          git push origin HEAD:work/v2-finance-royalties-payables-payout
