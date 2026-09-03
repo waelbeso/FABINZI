@@ -1,17 +1,16 @@
 name: V2-8 Apply Prepared Bundle
 
 on:
-  push:
-    branches: [work/v2-finance-royalties-payables-payout]
-    paths:
-      - tools/v2_8_apply_bundle.py
-      - .github/workflows/v2-8-apply-bundle.yml
+  pull_request:
+    branches: [feature/v2]
+    types: [opened]
 
 permissions:
   contents: write
 
 jobs:
   apply:
+    if: github.head_ref == 'work/v2-finance-royalties-payables-payout'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -27,12 +26,19 @@ jobs:
         run: |
           set -euo pipefail
           python tools/v2_8_apply_bundle.py
-          rm -f tools/v2_8_apply_bundle.py .github/workflows/v2-8-apply-bundle.yml
+          if test -e tests/test_v2_8_finance.py; then
+            mv tests/test_v2_8_finance.py tests/test_v2_8_finance_policy_payout.py
+          fi
+          rm -f tools/v2_8_apply_bundle.py
+          rm -f tools/_v28_blob_*.tmp
+          rm -f .github/workflows/v2-8-apply-bundle.yml
       - name: Verify transport artifacts removed and Python syntax
         run: |
           set -euo pipefail
           test ! -e tools/v2_8_apply_bundle.py
           test ! -e .github/workflows/v2-8-apply-bundle.yml
+          test -z "$(find tools -maxdepth 1 -name '_v28_blob_*.tmp' -print -quit)"
+          test -e tests/test_v2_8_finance_policy_payout.py
           python -m compileall -q apps tests config
       - name: Commit implementation tree
         run: |
