@@ -101,9 +101,9 @@ jobs:
           mkdir -p artifacts/v2-9-focused
           pytest -q \
             tests/test_v2_9_maneg_super.py \
-            tests/test_v2_9_maneg_browser.py \
             tests/test_maneg_control_center.py \
             tests/test_maneg_control_center_browser.py \
+            tests/test_v2_9_maneg_browser.py \
             tests/test_maneg_presentation_refinement.py \
             tests/test_v2_applications_organizations.py \
             tests/test_v2_3_full_suite_integration.py \
