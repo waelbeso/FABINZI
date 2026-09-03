@@ -70,7 +70,9 @@ def test_maneg_authentication_mfa_permissions_and_superuser(client):
 
     operator = staff("staff-no-otp")
     client.force_login(operator)
-    assert client.get("/Maneg/").status_code == 302
+    unconfigured = client.get("/Maneg/")
+    assert unconfigured.status_code == 200
+    assert b"MFA not configured" in unconfigured.content
 
     otp_login(client, operator)
     assert client.get("/Maneg/").status_code == 200
@@ -282,6 +284,28 @@ def test_integrations_keep_secrets_write_only_and_connection_state_truthful(clie
     grant(operator, "view_integrationconfig", "change_integrationconfig")
     otp_login(client, operator)
 
+    dashboard = client.get("/Maneg/")
+    assert dashboard.status_code == 200
+    assert dashboard.content.count(b'href="/Maneg/integrations/') == 0
+    assert b'href="/super/' not in dashboard.content
+    assert b"sk_never_render_this" not in dashboard.content
+
+    detail = client.get(reverse("fabinzi_admin:maneg-integration-detail", args=[stripe.pk]))
+    assert detail.status_code == 403
+    original_cod_status = cod.last_test_status
+    denied_test = client.post(reverse("fabinzi_admin:maneg-integration-detail", args=[cod.pk]), {"action":"test", "provider":"cod", "config":"{}", "enabled":"on"})
+    assert denied_test.status_code == 403
+    cod.refresh_from_db()
+    assert cod.last_test_status == original_cod_status
+    assert not AuditEvent.objects.filter(action="integration.connection.tested", object_id=str(cod.pk)).exists()
+
+    root = staff("integration-root", superuser=True)
+    otp_login(client, root)
+    root_dashboard = client.get("/Maneg/")
+    assert root_dashboard.status_code == 200
+    assert root_dashboard.content.count(b'href="/Maneg/integrations/') == 1
+    assert root_dashboard.content.count(b'href="/super/') == 1
+
     detail = client.get(reverse("fabinzi_admin:maneg-integration-detail", args=[stripe.pk]))
     html = detail.content.decode()
     assert detail.status_code == 200
@@ -299,6 +323,7 @@ def test_integrations_keep_secrets_write_only_and_connection_state_truthful(clie
     assert sentry_test.status_code == 302
     sentry.refresh_from_db()
     assert sentry.last_test_status == IntegrationConfig.TestStatus.NEVER
+    assert all("sk_never_render_this" not in str(event.metadata) for event in AuditEvent.objects.all())
 
 
 @pytest.mark.django_db
