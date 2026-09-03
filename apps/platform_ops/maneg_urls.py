@@ -43,6 +43,12 @@ urlpatterns = [
     _staff("production-routing/", operations_v2_7_maneg.routing_console, "maneg-v2-7-routing"),
     _staff("subscriptions/", maneg_v2_9.subscriptions, "maneg-v2-9-subscriptions"),
     _staff("commercial-settings/", maneg_v2_9.commercial_settings, "maneg-v2-9-commercial-settings"),
+    # Stable internal reverse contract retained without reviving Django Admin UX.
+    _staff(
+        "commercial-settings/application-review/<int:pk>/",
+        maneg_v2_9.application_review_configuration_compat,
+        "platform_ops_applicationreviewconfiguration_change",
+    ),
     _staff("finance/", maneg_views.finance, "maneg-finance"),
     _staff("finance-policies/", finance_v2_8_maneg.finance_policy_list, "maneg-v2-8-finance-policies"),
     _staff("finance-policies/new/", finance_v2_8_maneg.finance_policy_create, "maneg-v2-8-finance-policy-create"),
