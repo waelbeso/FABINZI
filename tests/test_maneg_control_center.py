@@ -302,7 +302,7 @@ def test_integrations_keep_secrets_write_only_and_connection_state_truthful(clie
     root_dashboard = client.get("/Maneg/")
     assert root_dashboard.status_code == 200
     assert root_dashboard.content.count(b'href="/Maneg/integrations/') == 1
-    assert root_dashboard.content.count(b'href="/Maneg/expert/') == 1
+    assert root_dashboard.content.count(b'href="/super/') == 1
 
     detail = client.get(reverse("fabinzi_admin:maneg-integration-detail", args=[stripe.pk]))
     html = detail.content.decode()
@@ -384,7 +384,7 @@ def test_maneg_noindex_localization_theme_and_no_social_internal_metadata(client
     ar = client.get("/Maneg/", {"lang":"ar"})
     ar_html = ar.content.decode()
     assert ar.status_code == 200
-    assert ar["X-Robots-Tag"] == "noindex, nofollow,noarchive" if False else "noindex, nofollow, noarchive"
+    assert ar["X-Robots-Tag"] == "noindex, nofollow, noarchive"
     assert '<html lang="ar" dir="rtl" data-theme="dark">' in ar_html
     assert '<meta name="robots" content="noindex,nofollow,noarchive">' in ar_html
     assert "property=\"og:" not in ar_html and "property='og:" not in ar_html
