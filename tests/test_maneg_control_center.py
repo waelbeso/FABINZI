@@ -70,7 +70,9 @@ def test_maneg_authentication_mfa_permissions_and_superuser(client):
 
     operator = staff("staff-no-otp")
     client.force_login(operator)
-    assert client.get("/Maneg/").status_code == 302
+    unconfigured = client.get("/Maneg/")
+    assert unconfigured.status_code == 200
+    assert b"MFA not configured" in unconfigured.content
 
     otp_login(client, operator)
     assert client.get("/Maneg/").status_code == 200
