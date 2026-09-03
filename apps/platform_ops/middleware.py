@@ -39,11 +39,14 @@ class SecurityHeadersMiddleware:
         match = getattr(request, "resolver_match", None)
         if not match or match.url_name not in INDEXABLE_URL_NAMES:
             response.headers.setdefault("X-Robots-Tag", "noindex, nofollow, noarchive")
+        if request.path.startswith(("/Maneg/", "/super/")):
+            response.headers.setdefault("Cache-Control", "private, no-store")
+            response.headers.setdefault("Referrer-Policy", "no-referrer")
         return response
 
 
 class MaintenanceModeMiddleware:
-    SAFE_PREFIXES = ("/Maneg/", "/healthz/", "/readyz/", "/static/", "/account/")
+    SAFE_PREFIXES = ("/Maneg/", "/super/", "/healthz/", "/readyz/", "/static/", "/account/")
 
     def __init__(self, get_response):
         self.get_response = get_response
