@@ -13,7 +13,7 @@ from apps.artwork.models import Artwork, ArtworkVersion
 from apps.audit.models import AuditEvent
 from apps.finance.maneg_v2_8 import payout_bank_proof
 from apps.finance.models import FinanceAccount, FinancePolicy, FinanceRecognitionPending, LedgerEntry, OrderFinance, OrderFinanceComponent, PayoutProfile, SettlementRequest
-from apps.finance.services import account_balance, payout_iban, request_settlement, update_payout_profile
+from apps.finance.services import FinancePolicyUnavailable, account_balance, payout_iban, request_settlement, update_payout_profile
 from apps.manufacturer_marketplace.services import submit_quote
 from apps.media.models import MediaAsset
 from apps.operations.models import FulfillmentRecord
@@ -301,3 +301,43 @@ def test_concurrent_distinct_payouts_cannot_overreserve_same_available_balance()
     assert SettlementRequest.objects.filter(organization=organization).count() == 1
     assert account_balance(account)["reserved"] == Decimal("400.00")
     assert account_balance(account)["withdrawable"] == Decimal("100.00")
+
+
+
+def test_legacy_settlement_uses_only_configured_legacy_policy_without_v2_default():
+    owner = user("v28-legacy-settlement-owner")
+    organization = org(owner, kind=Organization.Kind.DESIGNER, name="V2-8 Legacy Settlement Org")
+    legacy = FinancePolicy.objects.create(name="SYNTHETIC LEGACY SETTLEMENT", minimum_payout=Decimal("100.00"), is_active=True)
+    account = FinanceAccount.objects.create(account_type=FinanceAccount.AccountType.ORGANIZATION, organization=organization, currency="EGP")
+    LedgerEntry.objects.create(account=account, entry_type=LedgerEntry.EntryType.DESIGNER_EARNING, amount=Decimal("500.00"), currency="EGP", available_at=timezone.now(), memo="SYNTHETIC legacy earning")
+    PayoutProfile.objects.create(organization=organization, method=PayoutProfile.Method.MANUAL, account_holder="Legacy Owner", destination_hint="MANUAL-LEGACY-QA", status=PayoutProfile.Status.VERIFIED)
+    assert not FinancePolicy.objects.filter(lifecycle_status=FinancePolicy.LifecycleStatus.ACTIVE).exists()
+    with pytest.raises(ValidationError):
+        request_settlement(organization=organization, actor=owner, amount="99.00", currency="EGP", idempotency_key="legacy-too-low")
+    settlement = request_settlement(organization=organization, actor=owner, amount="100.00", currency="EGP", idempotency_key="legacy-accepted")
+    assert settlement.amount == Decimal("100.00")
+    assert legacy.minimum_payout == Decimal("100.00")
+
+
+def test_unconfigured_v2_obligation_never_falls_back_to_legacy_policy():
+    owner = user("v28-v2-no-fallback-owner")
+    organization = org(owner, kind=Organization.Kind.DESIGNER, name="V2-8 No Fallback Org")
+    FinancePolicy.objects.create(name="SYNTHETIC LEGACY NO FALLBACK", minimum_payout=Decimal("1.00"), is_active=True)
+    account = FinanceAccount.objects.create(account_type=FinanceAccount.AccountType.ORGANIZATION, organization=organization, currency="EGP")
+    LedgerEntry.objects.create(account=account, entry_type=LedgerEntry.EntryType.GARMENT_DESIGNER_ROYALTY, amount=Decimal("500.00"), currency="EGP", available_at=timezone.now(), memo="SYNTHETIC unconfigured V2 obligation")
+    PayoutProfile.objects.create(organization=organization, method=PayoutProfile.Method.MANUAL, account_holder="V2 Owner", destination_hint="MANUAL-V2-QA", status=PayoutProfile.Status.VERIFIED)
+    with pytest.raises(FinancePolicyUnavailable):
+        request_settlement(organization=organization, actor=owner, amount="100.00", currency="EGP", idempotency_key="v2-no-legacy-fallback")
+
+
+def test_mixed_legacy_and_v2_settlement_provenance_fails_closed_without_allocation_rule():
+    owner = user("v28-mixed-provenance-owner")
+    organization = org(owner, kind=Organization.Kind.DESIGNER, name="V2-8 Mixed Provenance Org")
+    FinancePolicy.objects.create(name="SYNTHETIC LEGACY MIXED", minimum_payout=Decimal("1.00"), is_active=True)
+    _active_policy("MIXEDPROV", minimum="1.00")
+    account = FinanceAccount.objects.create(account_type=FinanceAccount.AccountType.ORGANIZATION, organization=organization, currency="EGP")
+    LedgerEntry.objects.create(account=account, entry_type=LedgerEntry.EntryType.DESIGNER_EARNING, amount=Decimal("250.00"), currency="EGP", available_at=timezone.now(), memo="SYNTHETIC legacy portion")
+    LedgerEntry.objects.create(account=account, entry_type=LedgerEntry.EntryType.GARMENT_DESIGNER_ROYALTY, amount=Decimal("250.00"), currency="EGP", available_at=timezone.now(), memo="SYNTHETIC V2 portion")
+    PayoutProfile.objects.create(organization=organization, method=PayoutProfile.Method.MANUAL, account_holder="Mixed Owner", destination_hint="MANUAL-MIXED-QA", status=PayoutProfile.Status.VERIFIED)
+    with pytest.raises(ValidationError, match="Mixed legacy/V2 finance provenance"):
+        request_settlement(organization=organization, actor=owner, amount="100.00", currency="EGP", idempotency_key="mixed-provenance")

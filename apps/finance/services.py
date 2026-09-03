@@ -19,6 +19,8 @@ from .snapshots import build_finance_source_snapshot, validate_finance_source_sn
 FINANCE_ROLES = [Membership.Role.OWNER, Membership.Role.MANAGER, Membership.Role.ACCOUNTANT]
 PAYOUT_MUTATION_ROLES = [Membership.Role.OWNER]
 OPEN_SETTLEMENT = {SettlementRequest.Status.REQUESTED, SettlementRequest.Status.UNDER_REVIEW, SettlementRequest.Status.APPROVED, SettlementRequest.Status.PROCESSING}
+LEGACY_SETTLEMENT_EARNING_TYPES = {LedgerEntry.EntryType.DESIGNER_EARNING, LedgerEntry.EntryType.MANUFACTURER_EARNING}
+V2_SETTLEMENT_EARNING_TYPES = {LedgerEntry.EntryType.GARMENT_DESIGNER_ROYALTY, LedgerEntry.EntryType.ARTWORK_DESIGNER_ROYALTY, LedgerEntry.EntryType.MANUFACTURER_PAYABLE}
 
 
 class FinancePolicyUnavailable(ValidationError):
@@ -305,6 +307,20 @@ def _idempotent_settlement(*, key, organization, amount, currency):
     return existing
 
 
+def _settlement_policy_resolution(*, account, currency):
+    has_legacy = account.ledger_entries.filter(entry_type__in=LEGACY_SETTLEMENT_EARNING_TYPES, amount__gt=0).exists()
+    has_v2 = account.ledger_entries.filter(entry_type__in=V2_SETTLEMENT_EARNING_TYPES, amount__gt=0).exists()
+    if has_legacy and has_v2:
+        raise ValidationError("Mixed legacy/V2 finance provenance requires explicit payout allocation before settlement.")
+    if has_legacy:
+        policy = FinancePolicy.objects.filter(is_active=True, lifecycle_status=FinancePolicy.LifecycleStatus.DRAFT).order_by("id").first()
+        if not policy or policy.is_v2_complete:
+            raise ValidationError("Legacy settlement requires an explicitly configured legacy Finance Policy; V2 policy is not a fallback.")
+        return {"provenance": "legacy", "policy": policy, "minimum_payout": _money(policy.minimum_payout)}
+    policy = active_policy(currency)
+    return {"provenance": "v2", "policy": policy, "minimum_payout": _money(policy.v2_minimum_payout)}
+
+
 @transaction.atomic
 def request_settlement(*, organization, actor, amount, currency, idempotency_key=None, request=None):
     require_payout_mutation_access(actor, organization); currency = currency.upper(); amount = _money(amount); idempotency_key = (idempotency_key or "").strip() or None
@@ -316,8 +332,9 @@ def request_settlement(*, organization, actor, amount, currency, idempotency_key
     if not profile: raise ValidationError("A verified payout profile is required.")
     existing = _idempotent_settlement(key=idempotency_key, organization=organization, amount=amount, currency=currency)
     if existing: return existing
-    policy = active_policy(currency)
-    if amount < policy.v2_minimum_payout: raise ValidationError(f"Minimum settlement is {policy.v2_minimum_payout} {currency}.")
+    resolution = _settlement_policy_resolution(account=account, currency=currency)
+    minimum_payout = resolution["minimum_payout"]
+    if amount < minimum_payout: raise ValidationError(f"Minimum settlement is {minimum_payout} {currency}.")
     if amount > account_balance(account)["withdrawable"]: raise ValidationError("Settlement amount exceeds withdrawable balance.")
     settlement = SettlementRequest(organization=organization, account=account, payout_profile=profile, amount=amount, currency=currency, idempotency_key=idempotency_key or f"portal-{organization.pk}-{uuid.uuid4().hex}", payout_snapshot={"method": profile.method, "account_holder": profile.account_holder, "destination_hint": profile.destination_hint, "bank_name": profile.bank_name, "country": profile.country, "currency": profile.currency, "iban_last4": profile.iban_last4}, requested_by=actor, reserved_at=timezone.now()); settlement.full_clean(); settlement.save(); record_audit_event(actor=actor, action="finance.settlement.requested", instance=settlement, metadata={"amount": str(amount), "currency": currency}, request=request); return settlement
 
