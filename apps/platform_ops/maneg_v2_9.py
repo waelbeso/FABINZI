@@ -27,6 +27,26 @@ def _can_any(user, *permissions):
     return user.is_superuser or any(user.has_perm(permission) for permission in permissions)
 
 
+def _update_application_review_target(*, request, config, raw_hours):
+    maneg_views._require(request, "platform_ops.change_applicationreviewconfiguration")
+    try:
+        hours = int(raw_hours)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("Application review target must be a whole number of hours.") from exc
+    config.application_initial_review_target_hours = hours
+    config.updated_by = request.user
+    config.full_clean()
+    config.save()
+    record_audit_event(
+        actor=request.user,
+        action="control_center.application_review_configuration.updated",
+        instance=config,
+        metadata={"application_initial_review_target_hours": hours},
+        request=request,
+    )
+    return config
+
+
 def dashboard(request, extra_context=None):
     metrics = []
     if request.user.has_perm("organizations.view_onboardingapplication"):
@@ -105,6 +125,28 @@ def subscriptions(request):
     return maneg_views._render(request, "maneg/subscriptions.html", **context)
 
 
+def application_review_configuration_compat(request, pk):
+    """Preserve the accepted internal reverse name without reviving Admin UX."""
+    config = get_object_or_404(ApplicationReviewConfiguration, pk=pk)
+    if request.method == "POST":
+        _update_application_review_target(
+            request=request,
+            config=config,
+            raw_hours=request.POST.get("application_initial_review_target_hours"),
+        )
+        messages.success(
+            request,
+            maneg_views._text(
+                request,
+                "Application review target updated.",
+                "تم تحديث مستهدف مراجعة طلبات الانضمام.",
+            ),
+        )
+    else:
+        maneg_views._require(request, "platform_ops.view_applicationreviewconfiguration")
+    return HttpResponseRedirect(reverse("fabinzi_admin:maneg-v2-9-commercial-settings"))
+
+
 def commercial_settings(request):
     if not _can_any(
         request.user,
@@ -118,23 +160,15 @@ def commercial_settings(request):
     if request.method == "POST":
         action = request.POST.get("action", "")
         if action == "application_review_target":
-            maneg_views._require(request, "platform_ops.change_applicationreviewconfiguration")
             try:
-                hours = int(request.POST.get("hours", ""))
                 config, _ = ApplicationReviewConfiguration.objects.get_or_create(singleton_key=1)
-                config.application_initial_review_target_hours = hours
-                config.updated_by = request.user
-                config.full_clean()
-                config.save()
-                record_audit_event(
-                    actor=request.user,
-                    action="control_center.application_review_configuration.updated",
-                    instance=config,
-                    metadata={"application_initial_review_target_hours": hours},
+                _update_application_review_target(
                     request=request,
+                    config=config,
+                    raw_hours=request.POST.get("hours"),
                 )
                 messages.success(request, maneg_views._text(request, "Application review target updated.", "تم تحديث مستهدف مراجعة طلبات الانضمام."))
-            except (TypeError, ValueError, ValidationError) as exc:
+            except ValidationError as exc:
                 messages.error(request, str(exc))
         elif action == "team_invitation_expiry":
             maneg_views._require(request, "subscriptions.change_teaminvitationconfiguration")
