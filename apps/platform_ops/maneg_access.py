@@ -20,7 +20,10 @@ def mfa_configured(user):
 def _private_headers(response):
     response.headers.setdefault("Cache-Control", "private, no-store")
     response.headers.setdefault("X-Robots-Tag", "noindex, nofollow, noarchive")
-    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    # Keep ordinary Control Center form submissions genuinely same-origin so
+    # Django's CSRF Origin validation remains authoritative. Private media
+    # responses retain their stricter no-referrer policy in media services.
+    response.headers.setdefault("Referrer-Policy", "same-origin")
     return response
 
 
@@ -30,6 +33,12 @@ def maneg_staff_required(view):
     Existing configured MFA remains mandatory. A staff user with no confirmed
     device is allowed to reach /Maneg/ so MFA setup cannot become a permanent
     lockout; the UI reports that state truthfully.
+
+    Historical denial semantics are intentionally preserved: unauthenticated
+    users and authenticated non-staff users are redirected through the login
+    gate without exposing Control Center state. Domain authorization remains
+    inside each operational view and therefore returns server-side 403 when a
+    staff user lacks the required permission.
     """
 
     @wraps(view)
@@ -38,7 +47,7 @@ def maneg_staff_required(view):
         if not user.is_authenticated:
             return redirect_to_login(request.get_full_path(), settings.LOGIN_URL)
         if not user.is_active or not user.is_staff:
-            raise PermissionDenied("FABINZI Control Center access requires an active staff account.")
+            return redirect_to_login(request.get_full_path(), settings.LOGIN_URL)
         if mfa_configured(user):
             verified = getattr(user, "is_verified", None)
             if not callable(verified) or not verified():
