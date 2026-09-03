@@ -130,12 +130,23 @@ jobs:
           flutter test test/preferences_test.dart --reporter expanded 2>&1 | tee build-evidence/preferences-tests.log
           grep -F 'placement key is stable per checkout/provider and distinct across providers' build-evidence/preferences-tests.log
           printf 'PASS — explicit preferences_test.dart placement-key behavior evidence\n' > build-evidence/preferences-test-result.txt
+      - name: Checkout submission guard evidence
+        working-directory: mobile/customer_app
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          test -f test/checkout_submission_guard_test.dart
+          grep -Fx 'test/checkout_submission_guard_test.dart' build-evidence/test-inventory.txt
+          flutter test test/checkout_submission_guard_test.dart --reporter expanded 2>&1 | tee build-evidence/checkout-submission-guard-tests.log
+          grep -F 'checkout submission guard allows only one active placement per checkout' build-evidence/checkout-submission-guard-tests.log
+          printf 'PASS — explicit checkout_submission_guard_test.dart execution proved single active placement per checkout\n' > build-evidence/checkout-submission-guard-test-result.txt
       - name: Checkpoint behavior evidence
         working-directory: mobile/customer_app
         shell: bash
         run: |
           set -euo pipefail
-          grep -F 'checkout submission guard allows only one active placement per checkout' build-evidence/tests.log
+          grep -F 'checkout submission guard allows only one active placement per checkout' build-evidence/checkout-submission-guard-tests.log
           grep -F 'placement key is stable per checkout/provider and distinct across providers' build-evidence/preferences-tests.log
           grep -F 'checkout placement sends the persisted Idempotency-Key unchanged' build-evidence/api-client-tests.log
           grep -F 'Studio quantity update uses the frozen PATCH quantity field' build-evidence/api-client-tests.log
@@ -305,6 +316,8 @@ jobs:
           cp evidence/quality/api-client-tests.log "$out/"
           cp evidence/quality/preferences-test-result.txt "$out/"
           cp evidence/quality/preferences-tests.log "$out/"
+          cp evidence/quality/checkout-submission-guard-test-result.txt "$out/"
+          cp evidence/quality/checkout-submission-guard-tests.log "$out/"
           cp evidence/quality/localization-theme-result.txt "$out/"
           cp evidence/quality/contract-result.txt "$out/"
           cp evidence/quality/checkout-idempotency-result.txt "$out/"
@@ -349,6 +362,7 @@ jobs:
               'flutter_tests': 'PASS',
               'critical_api_client_tests': 'PASS — explicit api_client_test.dart execution',
               'preferences_behavior_evidence': 'PASS — explicit preferences_test.dart execution',
+              'checkout_submission_guard_evidence': 'PASS — explicit checkout_submission_guard_test.dart execution',
               'android_build': 'PASS',
               'ios_unsigned_iphoneos_build': 'PASS',
               'customer_api_compatibility': 'PASS',
