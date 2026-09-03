@@ -3,7 +3,6 @@ import os
 import pytest
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
-from django.conf import settings
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 
@@ -16,14 +15,19 @@ from .test_maneg_control_center_browser import (
     _shot,
     _wait,
 )
+from .v2_3_support import ensure_v2_3_reference_rows
 
 User = get_user_model()
 
 
 @pytest.mark.django_db(transaction=True)
-def test_v2_9_real_browser_maneg_super_separation(client, live_server, v2_3_reference_rows):
+def test_v2_9_real_browser_maneg_super_separation(client, live_server):
     if os.getenv("CI") != "true":
         pytest.skip("Real Chrome V2-9 /Maneg/ + /super/ QA is CI-only.")
+
+    # Explicit local setup: this module does not depend on another test module
+    # exporting a pytest fixture as an accidental collection side effect.
+    ensure_v2_3_reference_rows()
 
     root = User.objects.create_superuser(
         username="v29-browser-root",
@@ -101,6 +105,8 @@ def test_v2_9_real_browser_maneg_super_separation(client, live_server, v2_3_refe
         _wait(denied_driver).until(lambda d: d.execute_script("return document.readyState") == "complete")
         assert "sk_v29_browser_never_render" not in denied_driver.page_source
         assert "Integration configuration" not in denied_driver.page_source
+        assert "/Maneg/integrations/" not in denied_driver.page_source
+        assert "/super/" not in denied_driver.page_source
         _shot(denied_driver, "23-maneg-integrations-nonsuper-denied.png")
     finally:
         denied_driver.quit()
