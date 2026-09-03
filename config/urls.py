@@ -1,3 +1,4 @@
+from django.contrib import admin
 from django.contrib.auth import views as auth_views
 from django.urls import include, path
 from django.views.generic import RedirectView
@@ -17,8 +18,8 @@ from apps.notifications.views import notification_center
 from apps.operations.views import order_operations
 from apps.platform_ops.launch_views import bad_request as public_handler400
 from apps.platform_ops.public_shell_views import discover, how_it_works, robots_txt, sitemap_xml
+from apps.platform_ops.super_admin import configure_stock_super_admin
 from apps.platform_ops.views import apple_touch_icon, favicon, handler403 as public_handler403, handler404 as public_handler404, handler500 as public_handler500, healthz, readyz, site_icon_192, site_icon_512, site_manifest, social_share_image
-from apps.integrations.admin_site import fabinzi_admin_site
 from apps.organizations.designer_views import designer_artwork_detail, designer_artworks, designer_design_detail, designer_design_list, designer_finance, designer_fulfillment, designer_portal, designer_product_detail, designer_products, designer_profile, designer_rfq_detail, designer_rfqs, designer_store, designer_store_product, designer_team
 from apps.organizations.manufacturer_views import manufacturer_capabilities, manufacturer_finance, manufacturer_opportunities, manufacturer_portal, manufacturer_production, manufacturer_production_detail, manufacturer_profile, manufacturer_qc, manufacturer_quote_detail, manufacturer_quotes, manufacturer_ready_to_ship, manufacturer_rfq_detail, manufacturer_shipment, manufacturer_team
 from apps.organizations.views import edit_onboarding, submit_onboarding
@@ -29,6 +30,8 @@ from apps.public_profiles.portal_views import designer_public_profile, manufactu
 from apps.public_profiles.public_views import designer_directory, designer_public_detail, manufacturer_directory, manufacturer_legacy_redirect, manufacturer_public_detail
 from apps.storefront.studio_views import studio, studio_project
 from apps.storefront.views import public_product, public_storefront, store_marketplace
+
+configure_stock_super_admin()
 
 urlpatterns = [
     path("", store_marketplace, name="home"),
@@ -146,7 +149,8 @@ urlpatterns = [
     path("readyz/", readyz, name="readyz"),
     path("api/v1/", include(("api.urls", "v1"), namespace="v1")),
     path("", include(tf_urls)),
-    path("Maneg/", fabinzi_admin_site.urls),
+    path("Maneg/", include(("apps.platform_ops.maneg_urls", "fabinzi_admin"), namespace="fabinzi_admin")),
+    path("super/", admin.site.urls),
 ]
 
 handler400 = public_handler400
