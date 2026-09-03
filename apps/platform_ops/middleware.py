@@ -1,9 +1,13 @@
 import logging
 
+from django.conf import settings
+from django.contrib.auth.views import redirect_to_login
 from django.db import DatabaseError
+from django.http import HttpResponseForbidden
 from django.shortcuts import render
 from django.utils.translation import activate
 
+from .maneg_access import mfa_configured
 from .models import MaintenanceWindow
 from .seo import INDEXABLE_URL_NAMES
 
@@ -31,6 +35,14 @@ class SecurityHeadersMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
+        if request.path.startswith("/super/") and request.user.is_authenticated:
+            if not request.user.is_active or not request.user.is_staff or not request.user.is_superuser:
+                return HttpResponseForbidden("Stock Django Admin is restricted to the FABINZI Platform Owner/superuser.")
+            if mfa_configured(request.user):
+                verified = getattr(request.user, "is_verified", None)
+                if not callable(verified) or not verified():
+                    return redirect_to_login(request.get_full_path(), settings.LOGIN_URL)
+
         response = self.get_response(request)
         response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
