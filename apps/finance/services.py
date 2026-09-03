@@ -31,6 +31,10 @@ def _money(value):
     return Decimal(value or 0).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+def legacy_minimum_payout_default():
+    return _money(FinancePolicy._meta.get_field("minimum_payout").get_default())
+
+
 def _actor(actor):
     return actor if getattr(actor, "is_authenticated", False) else None
 
@@ -313,9 +317,14 @@ def _settlement_policy_resolution(*, account, currency):
     if has_legacy and has_v2:
         raise ValidationError("Mixed legacy/V2 finance provenance requires explicit payout allocation before settlement.")
     if has_legacy:
-        policy = FinancePolicy.objects.filter(is_active=True, lifecycle_status=FinancePolicy.LifecycleStatus.DRAFT).order_by("id").first()
-        if not policy or policy.is_v2_complete:
-            raise ValidationError("Legacy settlement requires an explicitly configured legacy Finance Policy; V2 policy is not a fallback.")
+        policies = list(FinancePolicy.objects.filter(is_active=True, lifecycle_status=FinancePolicy.LifecycleStatus.DRAFT).order_by("id")[:2])
+        if len(policies) > 1:
+            raise ValidationError("Legacy settlement Finance Policy is ambiguous; exactly one explicit legacy policy is required.")
+        if not policies:
+            return {"provenance": "legacy", "policy": None, "minimum_payout": legacy_minimum_payout_default()}
+        policy = policies[0]
+        if policy.is_v2_complete:
+            raise ValidationError("Legacy settlement requires a legacy Finance Policy; V2 policy is not a fallback.")
         return {"provenance": "legacy", "policy": policy, "minimum_payout": _money(policy.minimum_payout)}
     policy = active_policy(currency)
     return {"provenance": "v2", "policy": policy, "minimum_payout": _money(policy.v2_minimum_payout)}
