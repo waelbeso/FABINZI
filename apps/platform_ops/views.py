@@ -1,8 +1,10 @@
 import os
 from xml.etree import ElementTree as ET
 
+from django.core.exceptions import ImproperlyConfigured
 from django.db import connection
 from django.db.models import Prefetch
+from django.db.utils import DatabaseError, OperationalError
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.templatetags.static import static
@@ -274,5 +276,15 @@ def readyz(request):
             cursor.execute("SELECT 1")
             cursor.fetchone()
         return JsonResponse({"status": "ready", "database": "ok"})
+    except ImproperlyConfigured:
+        diagnostic = "database_configuration"
+    except OperationalError:
+        diagnostic = "database_unavailable"
+    except DatabaseError:
+        diagnostic = "database_error"
     except Exception:
-        return JsonResponse({"status": "not_ready", "database": "error"}, status=503)
+        diagnostic = "readiness_check_error"
+    return JsonResponse(
+        {"status": "not_ready", "database": "error", "diagnostic": diagnostic},
+        status=503,
+    )
