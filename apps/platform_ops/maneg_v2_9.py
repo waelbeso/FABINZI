@@ -127,6 +127,10 @@ def subscriptions(request):
 
 def application_review_configuration_compat(request, pk):
     """Preserve the accepted internal reverse name without reviving Admin UX."""
+    if request.method == "POST":
+        maneg_views._require(request, "platform_ops.change_applicationreviewconfiguration")
+    else:
+        maneg_views._require(request, "platform_ops.view_applicationreviewconfiguration")
     config = get_object_or_404(ApplicationReviewConfiguration, pk=pk)
     if request.method == "POST":
         _update_application_review_target(
@@ -142,8 +146,6 @@ def application_review_configuration_compat(request, pk):
                 "تم تحديث مستهدف مراجعة طلبات الانضمام.",
             ),
         )
-    else:
-        maneg_views._require(request, "platform_ops.view_applicationreviewconfiguration")
     return HttpResponseRedirect(reverse("fabinzi_admin:maneg-v2-9-commercial-settings"))
 
 
