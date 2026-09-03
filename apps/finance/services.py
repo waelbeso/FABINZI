@@ -140,9 +140,25 @@ def _immutable_source(order):
     if job:
         try: specification = job.production_specification
         except ProductionSpecification.DoesNotExist: pass
-        if getattr(job, "selection_id", None): quote = job.selection.quote
+        if specification and specification.accepted_quote_id:
+            quote = specification.accepted_quote
+        elif getattr(job, "selection_id", None):
+            quote = job.selection.quote
     quote_data = None
-    if quote:
+    if specification:
+        immutable_offer = dict((specification.snapshot or {}).get("manufacturing_offer") or {})
+        immutable_assignment = dict((specification.snapshot or {}).get("assignment") or {})
+        if immutable_offer:
+            quote_data = {
+                "quote_id": immutable_offer.get("quote_id") or specification.accepted_quote_id,
+                "manufacturer_id": immutable_assignment.get("manufacturer_id") or specification.manufacturer_id,
+                "currency": str(immutable_offer.get("currency") or "").upper(),
+                "unit_price": immutable_offer.get("unit_price"),
+                "setup_fee": immutable_offer.get("setup_fee"),
+                "sample_fee": immutable_offer.get("sample_fee"),
+                "shipping_estimate": immutable_offer.get("shipping_estimate"),
+            }
+    if quote_data is None and quote:
         quote_data = {"quote_id": quote.pk, "manufacturer_id": job.manufacturer_id, "currency": quote.currency.upper(), "unit_price": str(_money(quote.unit_price)), "setup_fee": str(_money(quote.setup_fee or 0)), "sample_fee": str(_money(quote.sample_fee or 0)), "shipping_estimate": str(_money(quote.shipping_estimate or 0))}
     designed = item.store_product.designed_product if item and item.store_product_id else None
     production = dict(getattr(item, "production_snapshot", None) or {})
@@ -185,6 +201,9 @@ def capture_finance_recognition(*, order, actor=None, request=None, trigger_even
 def _manufacturer_payable(policy, source):
     quote = source.get("manufacturer_quote")
     if not quote: return Decimal("0.00")
+    required = ("quote_id", "manufacturer_id", "currency", "unit_price", "setup_fee", "sample_fee", "shipping_estimate")
+    if any(quote.get(key) in {None, ""} for key in required):
+        raise FinancePolicyUnavailable("Immutable Manufacturing Offer snapshot is incomplete; Manufacturer payable remains blocked.")
     if quote["currency"].upper() != source["currency"].upper(): raise ValidationError("Manufacturer quote currency differs from immutable order currency; FX policy is not configured.")
     total = Decimal("0"); quantity = Decimal(source.get("quantity") or 1)
     if policy.manufacturer_include_unit_price: total += Decimal(quote["unit_price"]) * quantity
