@@ -53,7 +53,10 @@ class SecurityHeadersMiddleware:
             response.headers.setdefault("X-Robots-Tag", "noindex, nofollow, noarchive")
         if request.path.startswith(("/Maneg/", "/super/")):
             response.headers.setdefault("Cache-Control", "private, no-store")
-            response.headers.setdefault("Referrer-Policy", "no-referrer")
+            # Privileged HTML forms must remain same-origin so browser POSTs
+            # carry a valid Origin for Django's CSRF middleware. Individual
+            # private-media responses keep no-referrer where appropriate.
+            response.headers.setdefault("Referrer-Policy", "same-origin")
         return response
 
 
