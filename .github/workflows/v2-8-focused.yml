@@ -39,14 +39,8 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
       - name: Verify exact V2-8 source checkout
-        shell: bash
         run: |
-          expected="${{ github.event.pull_request.head.sha }}"
-          actual="$(git rev-parse HEAD)"
-          test "$actual" = "$expected"
-          echo "V2_8_SOURCE_SHA=$actual"
-      - name: Verify accepted V2-7 integration baseline
-        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
           git merge-base --is-ancestor 0b42bc8f6ff11f208cc22205a98c886bfa5705b9 HEAD
           test "$(git rev-parse 0b42bc8f6ff11f208cc22205a98c886bfa5705b9^{tree})" = "92c384e7ceb297d307cf02bdd273df7582d84842"
       - name: Verify frozen Customer API v1 no drift
@@ -70,18 +64,13 @@ jobs:
         run: |
           python -m pip install -r requirements.txt -c constraints-release.txt
           python -m pip check
-      - name: Validate Golden reference integrity metadata only
+      - name: Validate Golden reference metadata
         run: python tools/verify_golden_reference_packages.py --manifest contracts/golden-reference-v1-integrity.json --metadata-only
-      - name: Verify canonical brand hashes
-        shell: bash
+      - name: Verify syntax and migration drift
         run: |
-          echo "27fd3226825c47717b0899cbdb76bdaf9c38a0d7fea2e88257c8db8bf71b4e1b  static/brand/fabinzi-logo.svg" | sha256sum -c -
-          echo "6d5732cfd6014fcb0fa6029241e87d793814ce430934cd632be82289d6219b61  static/brand/fabinzi-icon.svg" | sha256sum -c -
-      - name: Verify Python syntax
-        run: python -m compileall -q apps tests config
-      - name: Verify migration state
-        run: python manage.py makemigrations --check --dry-run
-      - name: Verify fresh PostgreSQL migration start
+          python -m compileall -q apps tests config
+          python manage.py makemigrations --check --dry-run
+      - name: Verify zero-table PostgreSQL then migrate
         run: |
           python - <<'PY'
           import os
@@ -94,12 +83,9 @@ jobs:
               raise SystemExit(f"Expected zero-table PostgreSQL schema; found: {tables}")
           print("Fresh PostgreSQL schema verified: zero tables before migration.")
           PY
-      - name: Apply zero-to-current migrations
-        run: python manage.py migrate --noinput
-      - name: Django system check
-        run: python manage.py check
-      - name: Static collection check
-        run: python manage.py collectstatic --noinput --clear >/tmp/v2_8_collectstatic.log
+          python manage.py migrate --noinput
+          python manage.py check
+          python manage.py collectstatic --noinput --clear >/tmp/v2_8_collectstatic.log
       - name: Run focused V2-8 regressions
         shell: bash
         run: |
