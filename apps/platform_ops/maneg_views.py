@@ -38,6 +38,7 @@ from apps.storefront.models import StoreProduct, Storefront
 
 from .maneg_forms import MaintenanceWindowForm, PlatformAnnouncementForm
 from .maneg_services import (
+    reactivate_organization,
     run_integration_test,
     save_announcement,
     save_integration_config,
@@ -208,10 +209,18 @@ def organization_detail(request, pk):
     organization = get_object_or_404(Organization.objects.select_related("onboarding_application"), pk=pk)
     if request.method == "POST":
         _require(request, "organizations.change_organization")
-        if request.POST.get("action") != "suspend":
-            raise ValidationError("Unsupported organization action.")
-        suspend_organization(organization=organization, actor=request.user, request=request)
-        messages.success(request, _text(request, "Organization suspended and audited.", "تم إيقاف المنظمة وتسجيل العملية."))
+        action = request.POST.get("action")
+        try:
+            if action == "suspend":
+                suspend_organization(organization=organization, actor=request.user, request=request)
+                messages.success(request, _text(request, "Organization suspended and audited.", "تم إيقاف المنظمة وتسجيل العملية."))
+            elif action == "reactivate":
+                reactivate_organization(organization=organization, actor=request.user, request=request)
+                messages.success(request, _text(request, "Organization reactivated and audited.", "تمت إعادة تفعيل المنظمة وتسجيل العملية."))
+            else:
+                raise ValidationError("Unsupported organization action.")
+        except ValidationError as exc:
+            messages.error(request, "; ".join(exc.messages))
         return HttpResponseRedirect(reverse("fabinzi_admin:maneg-organization-detail", args=[organization.pk]))
     members = organization.memberships.select_related("user").order_by("role", "joined_at") if request.user.has_perm("organizations.view_membership") else []
     documents = organization.onboarding_application.verification_documents.select_related("media_asset") if hasattr(organization, "onboarding_application") and request.user.has_perm("organizations.view_verificationdocument") else []

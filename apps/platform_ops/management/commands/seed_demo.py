@@ -43,6 +43,8 @@ from apps.storefront.models import (
     Storefront,
     StudioProject,
 )
+from apps.subscriptions.models import ArtworkPlanEntitlementState, DesignPlanEntitlementState
+from apps.subscriptions.services import ensure_subscription_for_organization
 
 
 DEMO_PREFIX = "FABINZI Demo"
@@ -114,6 +116,14 @@ class Command(BaseCommand):
         application.review_notes = "Approved QA demo organization."
         application.reviewed_at = application.reviewed_at or timezone.now()
         application.save()
+        # Demo activation is explicit, idempotent, and uses the same canonical
+        # professional-subscription boundary as reviewed applications. It never
+        # fabricates Designer Pro payment or restarts a consumed Manufacturer trial.
+        ensure_subscription_for_organization(
+            org,
+            activation_at=application.reviewed_at,
+            actor=owner,
+        )
         return org
 
     def _media(self, owner, key, filename):
@@ -444,6 +454,36 @@ class Command(BaseCommand):
             _, version = self._artwork(designer_org, designer, spec, media)
             artworks[spec["key"]] = {"version": version, "media": media}
 
+        # Preserve the accepted five-design/three-artwork QA graph without
+        # pretending the Designer paid for Pro. Starter entitlement accounting
+        # retains two active slots of each type and plan-pauses the excess only
+        # in entitlement state; canonical technical-review statuses stay intact.
+        overlay_now = timezone.now()
+        for index, row in enumerate(designs.values()):
+            paused = index >= 2
+            DesignPlanEntitlementState.objects.update_or_create(
+                design=row["version"].design,
+                defaults={
+                    "plan_paused": paused,
+                    "retained": not paused,
+                    "protected_active_chain": False,
+                    "pause_reason": "demo_seed_starter_overlay" if paused else "",
+                    "paused_at": overlay_now if paused else None,
+                },
+            )
+        for index, row in enumerate(artworks.values()):
+            paused = index >= 2
+            ArtworkPlanEntitlementState.objects.update_or_create(
+                artwork=row["version"].artwork,
+                defaults={
+                    "plan_paused": paused,
+                    "retained": not paused,
+                    "protected_active_chain": False,
+                    "pause_reason": "demo_seed_starter_overlay" if paused else "",
+                    "paused_at": overlay_now if paused else None,
+                },
+            )
+
         base_products = {}
         for key, row in designs.items():
             base_products[key] = self._designed_product(
@@ -462,7 +502,7 @@ class Command(BaseCommand):
             artwork_version=artworks["cairo-lines"]["version"],
             title="Cairo Lines Men's T-Shirt",
             description="Ready Designed Product combining the approved Men's T-Shirt with Cairo Lines artwork.",
-            placement={"zone":designs["mens-tshirt"]["zones"]["Front Chest"],"transform":{"x":0.5,"y":0.42,"scale":0.82,"rotation":0},"method":"print"},
+            placement={"zone":designs["mens-tshirt"]["zones"]["Front Chest"],"transform":{"x":0.09,"y":0.01,"width":0.82,"height":0.82,"rotation":0},"method":"print"},
         )
 
         store, _ = Storefront.objects.get_or_create(

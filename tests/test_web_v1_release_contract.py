@@ -84,12 +84,13 @@ def test_exact_dependency_constraints_match_installed_release_environment():
         assert canonicalize_name(top_level_name) in pins
 
 
-def test_local_migration_graph_matches_release_manifest_exactly():
-    actual = sorted(
-        path.relative_to(ROOT).as_posix()
-        for path in ROOT.glob("apps/*/migrations/[0-9]*.py")
-    )
-    assert actual == sorted(_manifest()["local_migrations"])
+def test_web_v1_release_manifest_migration_baseline_remains_present():
+    manifest_migrations = _manifest()["local_migrations"]
+    assert len(manifest_migrations) == len(set(manifest_migrations))
+    for relative in manifest_migrations:
+        path = ROOT / relative
+        assert path.is_file(), relative
+        assert path.match("apps/*/migrations/[0-9]*.py"), relative
 
 
 def test_release_docs_and_known_limitations_are_explicit():
@@ -159,11 +160,38 @@ def test_health_exposes_only_safe_release_traceability(client, monkeypatch):
     assert ready.json() == {"status": "ready", "database": "ok"}
 
 
-def test_ci_release_contract_checks_exact_head_static_and_migration_freeze():
+def test_ci_v2_engineering_baseline_uses_narrow_locks_and_real_regression():
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
     assert "github.event.pull_request.head.sha || github.sha" in workflow
-    assert "Verify release static and migration freeze" in workflow
-    assert "git diff --exit-code \"$RELEASE_INTEGRATION_BASE_SHA\"...HEAD -- static/" in workflow
-    assert "apps/*/migrations/*.py" in workflow
+    assert "branches: [main, feature/v2]" in workflow
+
+    assert "Verify release static and migration freeze" not in workflow
+    assert 'git diff --exit-code "$RELEASE_INTEGRATION_BASE_SHA"...HEAD -- static/' not in workflow
+    assert "Verify frozen Customer API v1 contract" in workflow
+    assert "CUSTOMER_API_V1_FREEZE_BASE_SHA" in workflow
+    for relative in (
+        "contracts/customer-api-v1-manifest.json",
+        "contracts/customer-api-v1-fixtures.json",
+        "docs/api/fabinzi-customer-api-v1.openapi.json",
+        "docs/API_V1_CUSTOMER_CONTRACT.md",
+        "docs/FLUTTER_API_HANDOFF.md",
+        "docs/CUSTOMER_API_V1_ENDPOINT_INVENTORY.md",
+        "docs/API_V1_CUSTOMER_REPRODUCIBILITY.md",
+    ):
+        assert relative in workflow
+
+    assert "Validate Golden reference integrity metadata" in workflow
+    assert "golden-reference-v1-integrity.json" in workflow
+    assert "--metadata-only" in workflow
+    assert "Golden package bytes NOT VERIFIED" not in workflow
+
+    assert "python manage.py makemigrations --check --dry-run" in workflow
+    assert "Verify fresh PostgreSQL migration start" in workflow
+    assert "python manage.py migrate --noinput" in workflow
+    assert "python manage.py check" in workflow
+    assert "python manage.py collectstatic --noinput" in workflow
+    assert "python manage.py check --deploy" in workflow
+    assert "pytest -q" in workflow
     assert "web-v1-release-contract" in workflow
+    assert "customer-api-v1-contract" in workflow
     assert "release-evidence.json" in workflow

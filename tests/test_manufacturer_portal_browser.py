@@ -18,10 +18,12 @@ from apps.design.models import DesignAsset
 from apps.finance.models import FinanceAccount, LedgerEntry, PayoutProfile, SettlementRequest
 from apps.manufacturer_marketplace.models import ManufacturerCapability, ManufacturerQuote
 from apps.operations.models import FulfillmentRecord, ProductionJob, ProductionMilestone, QCInspection
-from apps.organizations.models import Membership
+from apps.organizations.models import Membership, PublicProfileRevision
+from apps.organizations.public_profile_services import review_public_profile_revision, start_public_profile_review
 from apps.storefront.models import CustomizationElement
 
 from .test_manufacturer_portal_acceptance import assigned_job, invited_rfq, manufacturer, private_asset
+from .v2_3_support import v2_3_reference_rows
 
 User = get_user_model()
 ARTIFACT_DIR = Path("artifacts/manufacturer-browser-qa")
@@ -103,12 +105,18 @@ def _clear_artifacts():
 
 
 @pytest.mark.django_db(transaction=True)
-def test_manufacturer_portal_real_chrome_a_to_h(client, live_server):
+def test_manufacturer_portal_real_chrome_a_to_h(client, live_server, v2_3_reference_rows):
     if os.getenv("CI") != "true":
         pytest.skip("Real Chrome Manufacturer QA is CI-only.")
 
     _clear_artifacts()
     owner, org, profile, _ = manufacturer("browser-owner")
+    reviewer = User.objects.create_user(
+        username="browser-profile-reviewer",
+        email="browser-profile-reviewer@example.test",
+        password="password123",
+        is_staff=True,
+    )
     owner.theme_preference = User.Theme.LIGHT
     owner.language_preference = User.Language.ENGLISH
     owner.save(update_fields=["theme_preference", "language_preference"])
@@ -188,7 +196,28 @@ def test_manufacturer_portal_real_chrome_a_to_h(client, live_server):
         _replace(driver, driver.find_element(By.NAME, "city"), "New Cairo")
         _replace(driver, driver.find_element(By.NAME, "primary_contact_person"), "Browser Operations Lead")
         _click(driver, By.CSS_SELECTOR, 'form button[type="submit"]')
+        wait.until(
+            lambda _d: PublicProfileRevision.objects.filter(
+                organization=org, status=PublicProfileRevision.Status.SUBMITTED
+            ).exists()
+        )
+        revision = PublicProfileRevision.objects.get(organization=org)
+        org.refresh_from_db(); profile.refresh_from_db()
+        assert org.display_name == "Factory browser-owner"
+        assert org.city == "Cairo"
+        assert profile.primary_contact_person == "Browser Operations Lead"
+        assert revision.proposed_data["organization"]["display_name"] == "Browser Factory Works"
+        assert revision.proposed_data["organization"]["city"] == "New Cairo"
+        assert "Manufacturer profile updated." in driver.page_source
+        start_public_profile_review(revision=revision, reviewer=reviewer)
+        review_public_profile_revision(
+            revision=revision,
+            reviewer=reviewer,
+            decision=PublicProfileRevision.Status.APPROVED,
+            notes="Browser QA manufacturer public identity approved",
+        )
         wait.until(lambda _d: org.__class__.objects.filter(pk=org.pk, display_name="Browser Factory Works", city="New Cairo").exists())
+        driver.refresh()
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Browser Factory Works"))
         assert _no_overflow(driver)
         _shot(driver, EXPECTED_SCREENSHOTS[1])

@@ -147,7 +147,7 @@ def test_designed_product_transform_persists_and_bounds_are_enforced():
     product = create_designed_product(organization=org, actor=owner, garment_version=garment, artwork_version=artwork_version, title="Placement")
     placement = add_validated_product_placement(product=product, actor=owner, decoration_zone=zone, transform={"x": .5, "y": .5, "scale": .3, "rotation": 33}, production_method="print")
     placement.refresh_from_db()
-    assert placement.transform == {"x": .5, "y": .5, "scale": .3, "rotation": 33.0}
+    assert placement.transform == {"x": .35, "y": .35, "width": .3, "height": .3, "rotation": 33.0}
     with pytest.raises(ValidationError):
         normalize_designed_product_transform({"x": .02, "y": .5, "scale": .5, "rotation": 45})
     with pytest.raises(ValidationError):

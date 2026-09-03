@@ -1,0 +1,28 @@
+{% extends "admin/change_form.html" %}
+{% block object-tools-items %}
+  {{ block.super }}
+  {% if original %}
+    <li>
+      <form method="post" action="{% url 'fabinzi_admin:subscriptions_activate_pro' original.pk %}">
+        {% csrf_token %}
+        <input type="number" name="billing_confirmation_id" placeholder="Confirmed billing ID" required>
+        <button type="submit">Activate confirmed Pro</button>
+      </form>
+    </li>
+    <li>
+      <form method="post" action="{% url 'fabinzi_admin:subscriptions_downgrade_starter' original.pk %}">
+        {% csrf_token %}
+        <button type="submit">Move to Starter safely</button>
+      </form>
+    </li>
+    {% if original.organization.kind == "manufacturer" and request.user.is_superuser %}
+      <li>
+        <form method="post" action="{% url 'fabinzi_admin:subscriptions_trial_exception' original.pk %}">
+          {% csrf_token %}
+          <input type="text" name="reason" placeholder="Required trial exception reason" required>
+          <button type="submit">Superuser trial exception</button>
+        </form>
+      </li>
+    {% endif %}
+  {% endif %}
+{% endblock %}

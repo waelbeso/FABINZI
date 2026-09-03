@@ -6,7 +6,7 @@ from apps.checkout.models import CustomerOrder
 from apps.notifications.models import Notification
 from apps.organizations.models import Membership, Organization
 from apps.storefront.models import StoreProduct
-from .models import FulfillmentEvent, FulfillmentRecord, ProductionAsset, ProductionJob, ProductionMilestone, QCInspection
+from .models import FulfillmentEvent, FulfillmentRecord, ProductionAsset, ProductionJob, ProductionMilestone, ProductionSpecification, QCInspection
 
 DESIGNER_OP_ROLES={Membership.Role.OWNER,Membership.Role.MANAGER}
 MFR_PRODUCTION_ROLES={Membership.Role.OWNER,Membership.Role.MANAGER,Membership.Role.PRODUCTION_MANAGER,Membership.Role.OPERATOR}
@@ -27,8 +27,10 @@ def can_view_operations(actor,order):
     if not getattr(actor,"is_authenticated",False): return False
     if order.customer_id==actor.pk: return True
     return Membership.objects.filter(user=actor,is_active=True,organization_id__in=[order.designer_organization_id,getattr(getattr(order,"production_job",None),"manufacturer_id",None)]).exists()
-def _event(f,status,actor=None,note=""): return FulfillmentEvent.objects.create(fulfillment=f,status=status,actor=actor,note=note)
-def _notify_customer(order,title_en,title_ar,body_en,body_ar): Notification.objects.create(recipient=order.customer,type="order_status",title_en=title_en,title_ar=title_ar,body_en=body_en,body_ar=body_ar,destination=f"/orders/{order.pk}/production/")
+def _event(f,status,actor=None,note=""): return FulfillmentEvent.objects.create(fulfillment=f,status=status,actor=actor if getattr(actor,"is_authenticated",False) else None,note=note)
+def _notify_customer(order,title_en,title_ar,body_en,body_ar):
+    if order.customer_id:
+        Notification.objects.create(recipient=order.customer,type="order_status",title_en=title_en,title_ar=title_ar,body_en=body_en,body_ar=body_ar,destination=f"/orders/{order.pk}/production/")
 
 @transaction.atomic
 def start_order_operations(*,order,actor=None,request=None):
@@ -55,6 +57,14 @@ def assign_manufacturer(*,job,selection,actor,request=None):
 @transaction.atomic
 def start_production(*,job,actor,request=None):
     job=ProductionJob.objects.select_for_update().get(pk=job.pk); require_manufacturer_job_access(actor,job)
+    from apps.manufacturer_marketplace.models import RFQ
+    if RFQ.objects.filter(order_item=job.order.item, source=RFQ.Source.CUSTOMER_ORDER).exists():
+        try:
+            specification=job.production_specification
+        except ProductionSpecification.DoesNotExist as exc:
+            raise ValidationError("FABINZI production release is required before CustomerOrder manufacturing can start.") from exc
+        if not specification.released_at:
+            raise ValidationError("FABINZI production release is required before CustomerOrder manufacturing can start.")
     if job.status not in {ProductionJob.Status.QUEUED,ProductionJob.Status.QC_FAILED}: raise ValidationError("Production cannot start from its current state.")
     job.status=ProductionJob.Status.IN_PRODUCTION; job.started_at=job.started_at or timezone.now(); job.save(update_fields=["status","started_at","updated_at"]); record_audit_event(actor=actor,action="production_job.started",instance=job,request=request); return job
 @transaction.atomic

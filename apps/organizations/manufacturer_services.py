@@ -4,81 +4,75 @@ from django.db import transaction
 from apps.audit.services import record_audit_event
 from apps.manufacturer_marketplace.models import ManufacturerCapability, ManufacturerListing
 from .models import Membership, Organization
+from .public_profile_services import (
+    current_public_profile_data,
+    propose_and_submit_public_profile_update,
+)
 from .services import require_org_access
 
 
 def _actor_membership(actor, organization):
-    return Membership.objects.filter(
-        organization=organization,
-        user=actor,
-        is_active=True,
-    ).first()
+    return Membership.objects.filter(organization=organization, user=actor, is_active=True).first()
 
 
 @transaction.atomic
-def update_active_manufacturer_profile(
-    *, organization, actor, organization_data, profile_data, request=None
-):
+def update_active_manufacturer_profile(*, organization, actor, organization_data, profile_data, request=None):
     if organization.kind != Organization.Kind.MANUFACTURER:
         raise ValidationError("Manufacturer profile updates require a Manufacturer organization.")
-    require_org_access(
-        actor,
-        organization,
-        roles=[Membership.Role.OWNER, Membership.Role.MANAGER],
-    )
+    require_org_access(actor, organization, roles=[Membership.Role.OWNER, Membership.Role.MANAGER])
     if organization.verification_status != Organization.VerificationStatus.ACTIVE:
-        raise ValidationError("Only an active Manufacturer organization may update its live profile here.")
+        raise ValidationError("Only an active Manufacturer organization may update its profile here.")
 
-    editable_org_fields = {
-        "display_name",
-        "email",
-        "phone",
-        "website",
-        "address_line1",
-        "address_line2",
-        "city",
-        "region",
-        "country",
-    }
+    private_org_fields = {"email", "phone", "address_line1", "address_line2"}
     for field, value in organization_data.items():
-        if field in editable_org_fields:
+        if field in private_org_fields:
             setattr(organization, field, value)
     organization.full_clean(exclude=["created_by"])
     organization.save()
 
     profile = organization.manufacturer_profile
-    editable_profile_fields = {
-        "google_maps_url",
-        "primary_contact_person",
-        "contact_job_title",
-        "whatsapp",
-    }
+    private_profile_fields = {"google_maps_url", "primary_contact_person", "contact_job_title", "whatsapp"}
     for field, value in profile_data.items():
-        if field in editable_profile_fields:
+        if field in private_profile_fields:
             setattr(profile, field, value)
     profile.full_clean()
     profile.save()
+
+    proposed_public = current_public_profile_data(organization)
+    for field in {"display_name", "website", "city", "region", "country"}:
+        if field in organization_data:
+            proposed_public["organization"][field] = organization_data[field]
+    revision = propose_and_submit_public_profile_update(
+        organization=organization,
+        actor=actor,
+        proposed_data=proposed_public,
+        request=request,
+    )
     record_audit_event(
         actor=actor,
         action="manufacturer.profile.updated",
         instance=organization,
-        metadata={"organization_id": organization.pk},
+        metadata={"organization_id": organization.pk, "public_revision_id": revision.pk if revision else None},
         request=request,
     )
     return organization
 
 
+def _assert_non_owner_team_capacity(*, organization, target):
+    if target and target.is_active and target.role != Membership.Role.OWNER:
+        return
+    from apps.subscriptions.services import entitlement_summary
+
+    summary = entitlement_summary(organization)
+    if summary["team_used"] >= summary["team_limit"]:
+        raise ValidationError(f"The current plan allows {summary['team_limit']} active/pending subaccount seat(s).")
+
+
 @transaction.atomic
-def secure_manufacturer_member_upsert(
-    *, organization, actor, user, role, request=None
-):
+def secure_manufacturer_member_upsert(*, organization, actor, user, role, request=None):
     if organization.kind != Organization.Kind.MANUFACTURER:
         raise ValidationError("Manufacturer team actions require a Manufacturer organization.")
-    require_org_access(
-        actor,
-        organization,
-        roles=[Membership.Role.OWNER, Membership.Role.MANAGER],
-    )
+    require_org_access(actor, organization, roles=[Membership.Role.OWNER, Membership.Role.MANAGER])
     actor_membership = _actor_membership(actor, organization)
     if not actor_membership:
         raise PermissionDenied("Active Manufacturer membership is required.")
@@ -106,6 +100,8 @@ def secure_manufacturer_member_upsert(
         ).count()
         if target.is_active and active_owner_count <= 1:
             raise ValidationError("The last active Owner cannot be changed to another role.")
+    if role != Membership.Role.OWNER:
+        _assert_non_owner_team_capacity(organization=organization, target=target)
 
     membership, _ = Membership.objects.get_or_create(
         organization=organization,
@@ -120,11 +116,7 @@ def secure_manufacturer_member_upsert(
         actor=actor,
         action="business.member.upserted",
         instance=membership,
-        metadata={
-            "organization_id": organization.pk,
-            "user_id": user.pk,
-            "role": role,
-        },
+        metadata={"organization_id": organization.pk, "user_id": user.pk, "role": role},
         request=request,
     )
     return membership
@@ -135,11 +127,7 @@ def secure_manufacturer_member_deactivate(*, membership, actor, request=None):
     organization = membership.organization
     if organization.kind != Organization.Kind.MANUFACTURER:
         raise ValidationError("Manufacturer team actions require a Manufacturer organization.")
-    require_org_access(
-        actor,
-        organization,
-        roles=[Membership.Role.OWNER, Membership.Role.MANAGER],
-    )
+    require_org_access(actor, organization, roles=[Membership.Role.OWNER, Membership.Role.MANAGER])
     actor_membership = _actor_membership(actor, organization)
     if not actor_membership:
         raise PermissionDenied("Active Manufacturer membership is required.")
@@ -159,10 +147,7 @@ def secure_manufacturer_member_deactivate(*, membership, actor, request=None):
         actor=actor,
         action="business.member.deactivated",
         instance=membership,
-        metadata={
-            "organization_id": membership.organization_id,
-            "user_id": membership.user_id,
-        },
+        metadata={"organization_id": membership.organization_id, "user_id": membership.user_id},
         request=request,
     )
     return membership
@@ -171,11 +156,7 @@ def secure_manufacturer_member_deactivate(*, membership, actor, request=None):
 def _manufacturer_listing(organization, actor):
     if organization.kind != Organization.Kind.MANUFACTURER:
         raise ValidationError("Manufacturer capabilities require a Manufacturer organization.")
-    require_org_access(
-        actor,
-        organization,
-        roles=[Membership.Role.OWNER, Membership.Role.MANAGER],
-    )
+    require_org_access(actor, organization, roles=[Membership.Role.OWNER, Membership.Role.MANAGER])
     if organization.verification_status != Organization.VerificationStatus.ACTIVE:
         raise ValidationError("Only an active Manufacturer organization may manage capabilities.")
     listing, _ = ManufacturerListing.objects.get_or_create(organization=organization)
@@ -183,10 +164,7 @@ def _manufacturer_listing(organization, actor):
 
 
 @transaction.atomic
-def create_manufacturer_capability(
-    *, organization, actor, capability_type, name, description="", methods=None,
-    min_quantity=None, max_quantity=None, lead_time_days=None, request=None
-):
+def create_manufacturer_capability(*, organization, actor, capability_type, name, description="", methods=None, min_quantity=None, max_quantity=None, lead_time_days=None, request=None):
     listing = _manufacturer_listing(organization, actor)
     capability = ManufacturerCapability(
         listing=listing,
@@ -201,38 +179,21 @@ def create_manufacturer_capability(
     )
     capability.full_clean()
     capability.save()
-    record_audit_event(
-        actor=actor,
-        action="manufacturer_marketplace.capability.added",
-        instance=capability,
-        metadata={"organization_id": organization.pk, "listing_id": listing.pk},
-        request=request,
-    )
+    record_audit_event(actor=actor, action="manufacturer_marketplace.capability.added", instance=capability, metadata={"organization_id": organization.pk, "listing_id": listing.pk}, request=request)
     return capability
 
 
 @transaction.atomic
-def update_manufacturer_capability(
-    *, capability, actor, data, request=None
-):
+def update_manufacturer_capability(*, capability, actor, data, request=None):
     organization = capability.listing.organization
     _manufacturer_listing(organization, actor)
-    editable = {
-        "capability_type", "name", "description", "methods",
-        "min_quantity", "max_quantity", "lead_time_days",
-    }
+    editable = {"capability_type", "name", "description", "methods", "min_quantity", "max_quantity", "lead_time_days"}
     for field, value in data.items():
         if field in editable:
             setattr(capability, field, value)
     capability.full_clean()
     capability.save()
-    record_audit_event(
-        actor=actor,
-        action="manufacturer_marketplace.capability.updated",
-        instance=capability,
-        metadata={"organization_id": organization.pk},
-        request=request,
-    )
+    record_audit_event(actor=actor, action="manufacturer_marketplace.capability.updated", instance=capability, metadata={"organization_id": organization.pk}, request=request)
     return capability
 
 
@@ -242,11 +203,5 @@ def deactivate_manufacturer_capability(*, capability, actor, request=None):
     _manufacturer_listing(organization, actor)
     capability.is_active = False
     capability.save(update_fields=["is_active"])
-    record_audit_event(
-        actor=actor,
-        action="manufacturer_marketplace.capability.deactivated",
-        instance=capability,
-        metadata={"organization_id": organization.pk},
-        request=request,
-    )
+    record_audit_event(actor=actor, action="manufacturer_marketplace.capability.deactivated", instance=capability, metadata={"organization_id": organization.pk}, request=request)
     return capability

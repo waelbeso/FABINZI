@@ -32,10 +32,12 @@ from apps.manufacturer_marketplace.services import add_capability, get_or_create
 from apps.media.designer_services import create_private_designer_asset
 from apps.media.models import MediaAsset
 from apps.operations.models import FulfillmentRecord, ProductionJob
-from apps.organizations.models import DesignerProfile, Membership, OnboardingApplication, Organization
+from apps.organizations.models import DesignerProfile, Membership, OnboardingApplication, Organization, PublicProfileRevision
+from apps.organizations.public_profile_services import review_public_profile_revision, start_public_profile_review
 from apps.storefront.models import StoreProduct, Storefront
 
 from .conftest import VALID_PNG
+from .v2_3_support import v2_3_reference_rows
 
 User = get_user_model()
 ARTIFACT_DIR = Path("artifacts/designer-browser-qa")
@@ -354,7 +356,7 @@ def _create_order_visibility(customer, org, product, variant):
 
 
 @pytest.mark.django_db(transaction=True)
-def test_designer_portal_real_chrome_a_to_g(client, live_server):
+def test_designer_portal_real_chrome_a_to_g(client, live_server, v2_3_reference_rows):
     if os.getenv("CI") != "true":
         pytest.skip("Real Chrome Designer QA is CI-only.")
 
@@ -395,6 +397,26 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server):
         _replace(driver, profile_form.find_element(By.ID, "profile-studio-name"), "Atelier North Studio")
         _replace(driver, profile_form.find_element(By.ID, "profile-city"), "New Cairo")
         _click_element(driver, profile_form.find_element(By.CSS_SELECTOR, 'button[type="submit"]'))
+        wait.until(
+            lambda _d: PublicProfileRevision.objects.filter(
+                organization=org, status=PublicProfileRevision.Status.SUBMITTED
+            ).exists()
+        )
+        revision = PublicProfileRevision.objects.get(organization=org)
+        org.refresh_from_db()
+        org.designer_profile.refresh_from_db()
+        assert org.city == "Cairo"
+        assert org.designer_profile.studio_name == "Atelier North"
+        assert revision.proposed_data["organization"]["city"] == "New Cairo"
+        assert revision.proposed_data["profile"]["studio_name"] == "Atelier North Studio"
+        assert "Designer profile updated." in driver.page_source
+        start_public_profile_review(revision=revision, reviewer=staff)
+        review_public_profile_revision(
+            revision=revision,
+            reviewer=staff,
+            decision=PublicProfileRevision.Status.APPROVED,
+            notes="Browser QA public identity approved",
+        )
         wait.until(lambda _d: Organization.objects.filter(pk=org.pk, city="New Cairo").exists())
         org.refresh_from_db()
         org.designer_profile.refresh_from_db()

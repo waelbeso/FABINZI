@@ -30,7 +30,6 @@
     <div class="surface stack">
       <h2 class="section-title">{% if request.LANGUAGE_CODE == 'ar' %}اختر المنتج{% else %}Choose your product{% endif %}</h2>
       {% if variants %}
-        {% if user.is_authenticated %}
         <form id="product-purchase-form" method="post" action="{% url 'cart-add-product' product.id %}" class="stack">
           {% csrf_token %}
           <div class="field">
@@ -48,11 +47,13 @@
           <button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}أضف إلى السلة{% else %}Add to Cart{% endif %}</button>
         </form>
         {% if product.customization_enabled %}
-        <a class="button button--ghost" id="product-customize-link" data-studio-base="{% url 'studio' %}?product={{ product.id }}" href="{% url 'studio' %}?product={{ product.id }}">{% if request.LANGUAGE_CODE == 'ar' %}خصّص في الاستوديو{% else %}Customize in Studio{% endif %}</a>
-        <p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}التخصيص اختياري. اختيار المقاس/اللون الحالي سيُحمل إلى Studio، ويمكنك شراء المنتج مباشرة دون فتحه.{% else %}Customization is optional. Your current size/color selection carries into Studio, and you can still buy directly without opening it.{% endif %}</p>
-        {% endif %}
-        {% else %}
-        <a class="button" href="{% url 'two_factor:login' %}?next={{ request.path }}">{% if request.LANGUAGE_CODE == 'ar' %}سجّل الدخول للشراء{% else %}Sign in to buy{% endif %}</a>
+          {% if user.is_authenticated %}
+          <a class="button button--ghost" id="product-customize-link" data-studio-base="{% url 'studio' %}?product={{ product.id }}" href="{% url 'studio' %}?product={{ product.id }}">{% if request.LANGUAGE_CODE == 'ar' %}خصّص في الاستوديو{% else %}Customize in Studio{% endif %}</a>
+          <p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}التخصيص اختياري. اختيار المقاس/اللون الحالي سيُحمل إلى Studio، ويمكنك شراء المنتج مباشرة دون فتحه.{% else %}Customization is optional. Your current size/color selection carries into Studio, and you can still buy directly without opening it.{% endif %}</p>
+          {% else %}
+          <a class="button button--ghost" href="{% url 'two_factor:login' %}?next={% url 'studio' %}%3Fproduct%3D{{ product.id }}">{% if request.LANGUAGE_CODE == 'ar' %}سجّل الدخول للتخصيص{% else %}Sign in to customize{% endif %}</a>
+          <p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}يمكنك الشراء كضيف الآن. يتطلب Studio تسجيل الدخول لأن التخصيص والصور الخاصة تُحفظ في حسابك.{% else %}You can buy as a Guest now. Studio requires sign-in because customization and private uploads are saved to your account.{% endif %}</p>
+          {% endif %}
         {% endif %}
       {% else %}
       <div class="empty-state"><h3>{% if request.LANGUAGE_CODE == 'ar' %}غير متاح للشراء حاليًا{% else %}Currently unavailable{% endif %}</h3><p>{% if request.LANGUAGE_CODE == 'ar' %}لا توجد خيارات نشطة لهذا المنتج حاليًا.{% else %}There are no active variants for this product right now.{% endif %}</p></div>

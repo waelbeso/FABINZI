@@ -7,7 +7,7 @@
     <div class="trust-kicker">FABINZI</div>
     <h1 id="signin-title">{% if LANGUAGE_CODE == 'ar' %}تسجيل الدخول{% else %}Sign in{% endif %}</h1>
     {% if wizard.steps.current == 'auth' %}
-      <p>{% if LANGUAGE_CODE == 'ar' %}استخدم بيانات حسابك الحالية. إذا كان حسابك يتطلب مصادقة إضافية فسيطلب منك FABINZI رمز التحقق في الخطوة التالية.{% else %}Use your existing account credentials. If your account requires an additional authentication factor, FABINZI will request it in the next step.{% endif %}</p>
+      <p>{% if LANGUAGE_CODE == 'ar' %}استخدم بيانات حساب FABINZI الواحد. إذا كان لديك جهاز مصادقة إضافية مهيأ فسيطلب منك رمز التحقق في الخطوة التالية، أما الحساب بدون جهاز مهيأ فلن يُحجز خلف خطوة غير متاحة.{% else %}Use your single FABINZI account. If a multi-factor device is configured, FABINZI requests its verification token next; an account without a configured device is not blocked behind an unavailable factor.{% endif %}</p>
     {% elif wizard.steps.current == 'token' %}
       <p>{{ device|as_verbose_action }}</p>
     {% elif wizard.steps.current == 'backup' %}
@@ -27,31 +27,13 @@
         </div>
       {% endfor %}
 
-      {% if other_devices %}
-        <div class="trust-note">
-          <strong>{% if LANGUAGE_CODE == 'ar' %}طريقة تحقق أخرى{% else %}Another verification method{% endif %}</strong>
-          <div class="error-actions">
-            {% for other in other_devices %}
-              <button name="challenge_device" value="{{ other.persistent_id }}" class="button button--ghost" type="submit">{{ other|as_action }}</button>
-            {% endfor %}
-          </div>
-        </div>
-      {% endif %}
-
-      <div class="error-actions">
-        <button class="button" type="submit">{% if LANGUAGE_CODE == 'ar' %}متابعة{% else %}Continue{% endif %}</button>
-        {% if wizard.steps.prev %}<button class="button button--ghost" type="submit" name="wizard_goto_step" value="{{ wizard.steps.prev }}" formnovalidate>{% if LANGUAGE_CODE == 'ar' %}رجوع{% else %}Back{% endif %}</button>{% endif %}
-      </div>
+      {% if other_devices %}<div class="trust-note"><strong>{% if LANGUAGE_CODE == 'ar' %}طريقة تحقق أخرى{% else %}Another verification method{% endif %}</strong><div class="error-actions">{% for other in other_devices %}<button name="challenge_device" value="{{ other.persistent_id }}" class="button button--ghost" type="submit">{{ other|as_action }}</button>{% endfor %}</div></div>{% endif %}
+      <div class="error-actions"><button class="button" type="submit">{% if LANGUAGE_CODE == 'ar' %}متابعة{% else %}Continue{% endif %}</button>{% if wizard.steps.prev %}<button class="button button--ghost" type="submit" name="wizard_goto_step" value="{{ wizard.steps.prev }}" formnovalidate>{% if LANGUAGE_CODE == 'ar' %}رجوع{% else %}Back{% endif %}</button>{% endif %}</div>
     </form>
 
-    {% if backup_tokens %}
-      <form method="post" action="" class="trust-note">
-        {% csrf_token %}
-        {{ wizard.management_form }}
-        <p>{% if LANGUAGE_CODE == 'ar' %}إذا تعذر استخدام جهاز التحقق يمكنك استخدام رمز احتياطي صالح.{% else %}If your verification device is unavailable, you can use a valid backup token.{% endif %}</p>
-        <button name="wizard_goto_step" type="submit" value="backup" class="button button--ghost">{% if LANGUAGE_CODE == 'ar' %}استخدام رمز احتياطي{% else %}Use backup token{% endif %}</button>
-      </form>
-    {% endif %}
+    {% if wizard.steps.current == 'auth' %}<div class="trust-note identity-links"><a href="{% url 'signup' %}">{% if LANGUAGE_CODE == 'ar' %}إنشاء حساب FABINZI{% else %}Create a FABINZI account{% endif %}</a><span aria-hidden="true"> · </span><a href="{% url 'password-reset' %}">{% if LANGUAGE_CODE == 'ar' %}نسيت كلمة المرور؟{% else %}Forgot password?{% endif %}</a></div>{% endif %}
+
+    {% if backup_tokens %}<form method="post" action="" class="trust-note">{% csrf_token %}{{ wizard.management_form }}<p>{% if LANGUAGE_CODE == 'ar' %}إذا تعذر استخدام جهاز التحقق يمكنك استخدام رمز احتياطي صالح.{% else %}If your verification device is unavailable, you can use a valid backup token.{% endif %}</p><button name="wizard_goto_step" type="submit" value="backup" class="button button--ghost">{% if LANGUAGE_CODE == 'ar' %}استخدام رمز احتياطي{% else %}Use backup token{% endif %}</button></form>{% endif %}
 
     <p class="trust-note">{% if LANGUAGE_CODE == 'ar' %}لا تطلب FABINZI كلمة المرور أو رمز المصادقة من خلال صفحة دعم عامة. لا تشارك أسرار المصادقة متعددة العوامل مع أي شخص.{% else %}FABINZI does not ask for your password or MFA secret through a public support page. Never share multi-factor authentication secrets with anyone.{% endif %}</p>
   </div>

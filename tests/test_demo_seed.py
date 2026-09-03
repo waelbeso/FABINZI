@@ -10,6 +10,7 @@ from apps.manufacturer_marketplace.models import ManufacturerCapability, Manufac
 from apps.organizations.models import Organization
 from apps.platform_ops.public_urls import absolute_public_url
 from apps.storefront.models import StoreProduct, StudioProject
+from .v2_3_support import v2_3_reference_rows
 
 
 DEMO_SETTINGS = {
@@ -40,7 +41,7 @@ def test_seed_demo_requires_password_environment_values():
 
 
 @pytest.mark.django_db
-def test_seed_demo_is_idempotent_and_builds_real_domain_graph():
+def test_seed_demo_is_idempotent_and_builds_real_domain_graph(v2_3_reference_rows):
     with override_settings(**DEMO_SETTINGS):
         call_command("seed_demo", verbosity=0)
         first = {

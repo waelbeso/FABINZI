@@ -44,7 +44,7 @@ DEMO_CUSTOMER_PASSWORD = env("DEMO_CUSTOMER_PASSWORD", default="")
 INSTALLED_APPS = [
     "django.contrib.admin","django.contrib.auth","django.contrib.contenttypes","django.contrib.sessions","django.contrib.messages","django.contrib.staticfiles","django.contrib.sites",
     "rest_framework","rest_framework_simplejwt.token_blacklist","django_otp","django_otp.plugins.otp_totp","django_otp.plugins.otp_static","two_factor",
-    "apps.accounts","apps.audit","apps.integrations","apps.media","apps.notifications","apps.platform_ops","apps.organizations","apps.design","apps.artwork","apps.manufacturer_marketplace","apps.storefront","apps.checkout","apps.operations","apps.finance",
+    "apps.accounts","apps.audit","apps.integrations","apps.media","apps.notifications","apps.platform_ops","apps.organizations","apps.design","apps.artwork","apps.manufacturer_marketplace","apps.storefront","apps.checkout","apps.operations","apps.finance","apps.subscriptions","apps.public_profiles","apps.public_inquiries",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware","whitenoise.middleware.WhiteNoiseMiddleware","django.contrib.sessions.middleware.SessionMiddleware","django.middleware.locale.LocaleMiddleware","apps.platform_ops.middleware.PublicLocaleMiddleware","django.middleware.common.CommonMiddleware","django.middleware.csrf.CsrfViewMiddleware","django.contrib.auth.middleware.AuthenticationMiddleware","django_otp.middleware.OTPMiddleware","django.contrib.messages.middleware.MessageMiddleware","django.middleware.clickjacking.XFrameOptionsMiddleware","apps.platform_ops.middleware.SecurityHeadersMiddleware","apps.platform_ops.middleware.MaintenanceModeMiddleware",
@@ -123,7 +123,10 @@ CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_TASK_TIME_LIMIT = 300
 CELERY_TASK_SOFT_TIME_LIMIT = 270
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
-CELERY_BEAT_SCHEDULE = {"dispatch-pending-notifications":{"task":"apps.notifications.tasks.dispatch_pending_deliveries","schedule":60.0}}
+CELERY_BEAT_SCHEDULE = {
+    "dispatch-pending-notifications":{"task":"apps.notifications.tasks.dispatch_pending_deliveries","schedule":60.0},
+    "process-professional-subscription-lifecycle":{"task":"apps.subscriptions.tasks.process_subscription_lifecycle","schedule":3600.0},
+}
 
 INTEGRATION_ENCRYPTION_KEY = env("INTEGRATION_ENCRYPTION_KEY", default="")
 if DEBUG and not INTEGRATION_ENCRYPTION_KEY:

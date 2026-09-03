@@ -39,6 +39,47 @@ class ProductionJob(models.Model):
                 raise ValidationError({"selection": "Manufacturer selection must belong to this order's Designed Product."})
 
 
+class ProductionSpecification(models.Model):
+    """Immutable assignment-time production evidence for CustomerOrder manufacturing."""
+
+    job = models.OneToOneField(ProductionJob, on_delete=models.PROTECT, related_name="production_specification")
+    order_item = models.OneToOneField("checkout.OrderItem", on_delete=models.PROTECT, related_name="production_specification")
+    manufacturer = models.ForeignKey("organizations.Organization", on_delete=models.PROTECT, related_name="production_specifications")
+    accepted_quote = models.ForeignKey("manufacturer_marketplace.ManufacturerQuote", on_delete=models.PROTECT, related_name="production_specifications")
+    snapshot = models.JSONField(default=dict)
+    snapshot_sha256 = models.CharField(max_length=64, db_index=True)
+    authorized_media_asset_ids = models.JSONField(default=list)
+    required_canonical_capabilities = models.JSONField(default=list)
+    assigned_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="assigned_production_specifications")
+    created_at = models.DateTimeField(auto_now_add=True)
+    released_at = models.DateTimeField(null=True, blank=True)
+    released_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="released_production_specifications")
+    release_block_reason = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def clean(self):
+        if self.job_id and self.order_item_id and self.job.order_id != self.order_item.order_id:
+            raise ValidationError({"order_item": "ProductionSpecification OrderItem must belong to the ProductionJob order."})
+        if self.job_id and self.manufacturer_id and self.job.manufacturer_id != self.manufacturer_id:
+            raise ValidationError({"manufacturer": "ProductionSpecification Manufacturer must match the ProductionJob."})
+        if self.accepted_quote_id and self.manufacturer_id and self.accepted_quote.invitation.manufacturer_id != self.manufacturer_id:
+            raise ValidationError({"accepted_quote": "Accepted Manufacturing Offer must belong to the assigned Manufacturer."})
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            original = type(self).objects.get(pk=self.pk)
+            immutable = (
+                "job_id", "order_item_id", "manufacturer_id", "accepted_quote_id",
+                "snapshot", "snapshot_sha256", "authorized_media_asset_ids",
+                "required_canonical_capabilities", "assigned_by_id", "created_at",
+            )
+            if any(getattr(original, field) != getattr(self, field) for field in immutable):
+                raise ValidationError("ProductionSpecification assignment evidence is immutable.")
+        return super().save(*args, **kwargs)
+
+
 class ProductionMilestone(models.Model):
     class Kind(models.TextChoices):
         MATERIALS = "materials", "Materials"

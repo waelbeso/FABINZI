@@ -27,7 +27,8 @@ from apps.organizations.designer_services import (
     secure_deactivate_member,
     update_active_designer_profile,
 )
-from apps.organizations.models import DesignerProfile, Membership, OnboardingApplication, Organization, VerificationDocument
+from apps.organizations.models import DesignerProfile, Membership, OnboardingApplication, Organization, PublicProfileRevision, VerificationDocument
+from apps.organizations.public_profile_services import review_public_profile_revision, start_public_profile_review
 
 from .conftest import VALID_PNG
 
@@ -171,6 +172,7 @@ def test_team_api_matches_web_rbac(client):
 @pytest.mark.django_db
 def test_active_profile_mutation_is_allowlisted_and_audited():
     owner = User.objects.create_user(username="profile-owner", password="password123")
+    reviewer = User.objects.create_user(username="profile-reviewer", password="password123", is_staff=True)
     org = designer_org(owner, "Profile Studio")
     profile = org.designer_profile
     profile.legal_registration_number = "LEGAL-KEEP"
@@ -180,16 +182,59 @@ def test_active_profile_mutation_is_allowlisted_and_audited():
     update_active_designer_profile(
         organization=org,
         actor=owner,
-        organization_data={"display_name": "Profile Studio Updated", "legal_name": "SHOULD-NOT-CHANGE"},
-        profile_data={"studio_name": "Updated Studio", "tax_number": "NO", "payout_information": "NO"},
+        organization_data={
+            "display_name": "Profile Studio Updated",
+            "email": "private-profile@example.test",
+            "phone": "01000001111",
+            "address_line1": "Private address",
+            "city": "New Cairo",
+            "legal_name": "SHOULD-NOT-CHANGE",
+        },
+        profile_data={
+            "studio_name": "Updated Studio",
+            "tax_number": "NO",
+            "payout_information": "NO",
+        },
+    )
+    org.refresh_from_db(); profile.refresh_from_db()
+    assert org.display_name == "Profile Studio"
+    assert org.city == ""
+    assert org.email == "private-profile@example.test"
+    assert org.phone == "01000001111"
+    assert org.address_line1 == "Private address"
+    assert org.legal_name == ""
+    assert profile.studio_name == "Profile Studio"
+    assert profile.legal_registration_number == "LEGAL-KEEP"
+    assert profile.tax_number == "TAX-KEEP"
+    assert profile.payout_information == "PRIVATE-KEEP"
+
+    revision = PublicProfileRevision.objects.get(organization=org)
+    assert revision.status == PublicProfileRevision.Status.SUBMITTED
+    assert revision.proposed_data["organization"]["display_name"] == "Profile Studio Updated"
+    assert revision.proposed_data["organization"]["city"] == "New Cairo"
+    assert revision.proposed_data["profile"]["studio_name"] == "Updated Studio"
+    serialized = repr(revision.proposed_data)
+    for private_value in ("private-profile@example.test", "01000001111", "Private address", "LEGAL-KEEP", "TAX-KEEP", "PRIVATE-KEEP"):
+        assert private_value not in serialized
+    assert AuditEvent.objects.filter(action="designer.profile.updated", metadata__organization_id=org.pk).exists()
+
+    start_public_profile_review(revision=revision, reviewer=reviewer)
+    revision.refresh_from_db()
+    assert revision.status == PublicProfileRevision.Status.UNDER_REVIEW
+    org.refresh_from_db(); profile.refresh_from_db()
+    assert org.display_name == "Profile Studio"
+    assert profile.studio_name == "Profile Studio"
+
+    review_public_profile_revision(
+        revision=revision,
+        reviewer=reviewer,
+        decision=PublicProfileRevision.Status.APPROVED,
+        notes="Approved public identity",
     )
     org.refresh_from_db(); profile.refresh_from_db()
     assert org.display_name == "Profile Studio Updated"
-    assert org.legal_name == ""
+    assert org.city == "New Cairo"
     assert profile.studio_name == "Updated Studio"
-    assert profile.tax_number == "TAX-KEEP"
-    assert profile.payout_information == "PRIVATE-KEEP"
-    assert AuditEvent.objects.filter(action="designer.profile.updated", metadata__organization_id=org.pk).exists()
 
 
 @pytest.mark.django_db

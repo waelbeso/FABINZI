@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="1024" height="1024" role="img" aria-label="FABINZI icon">
+  <defs>
+    <linearGradient id="g" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7C5CFF"/>
+      <stop offset="1" stop-color="#5A36E6"/>
+    </linearGradient>
+  </defs>
+  <rect x="3" y="3" width="58" height="58" rx="16" fill="#111827"/>
+  <path d="M18 16h29v9H29v8h15v9H29v14H18V16Z" fill="url(#g)"/>
+  <path d="M46.5 12.5 53 19l-3.2 3.2-6.5-6.5 3.2-3.2Z" fill="#21D3AE"/>
+  <circle cx="48" cy="45" r="2.3" fill="#21D3AE"/>
+  <circle cx="53" cy="49" r="2" fill="#21D3AE" opacity=".82"/>
+  <circle cx="56" cy="54" r="1.7" fill="#21D3AE" opacity=".62"/>
+</svg>

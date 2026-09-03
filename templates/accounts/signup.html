@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% load i18n %}{% get_current_language as LANGUAGE_CODE %}
+{% block title %}{% if LANGUAGE_CODE == 'ar' %}إنشاء حساب | FABINZI{% else %}Create account | FABINZI{% endif %}{% endblock %}
+{% block content %}
+<section class="identity-shell" aria-labelledby="signup-title">
+  <div class="panel identity-panel">
+    <div class="eyebrow">FABINZI IDENTITY</div>
+    <h1 class="page-title" id="signup-title">{% if LANGUAGE_CODE == 'ar' %}أنشئ هويتك الواحدة على FABINZI{% else %}Create your single FABINZI identity{% endif %}</h1>
+    <p class="lead">{% if LANGUAGE_CODE == 'ar' %}ابدأ كعميل. إذا أردت لاحقًا العمل كمصمم أو مصنع فستستخدم نفس الحساب في مسار التقديم المناسب، بدون إنشاء هوية منفصلة.{% else %}Start with one account. If you later apply as a Designer or Manufacturer, you keep this same identity and use the appropriate business onboarding path.{% endif %}</p>
+    <form method="post" class="stack" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="flash flash--error" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+      {% for field in form %}<div class="field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<small class="help-text">{{ field.help_text|safe }}</small>{% endif %}{% for error in field.errors %}<div class="error" role="alert">{{ error }}</div>{% endfor %}</div>{% endfor %}
+      <button class="button" type="submit">{% if LANGUAGE_CODE == 'ar' %}إنشاء الحساب{% else %}Create account{% endif %}</button>
+    </form>
+    <p class="identity-footnote">{% if LANGUAGE_CODE == 'ar' %}لديك حساب بالفعل؟{% else %}Already have an account?{% endif %} <a href="{% url 'two_factor:login' %}">{% if LANGUAGE_CODE == 'ar' %}تسجيل الدخول{% else %}Sign in{% endif %}</a></p>
+  </div>
+</section>
+{% endblock %}
