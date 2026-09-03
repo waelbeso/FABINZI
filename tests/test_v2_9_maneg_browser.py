@@ -25,9 +25,11 @@ def test_v2_9_real_browser_maneg_super_separation(client, live_server):
     if os.getenv("CI") != "true":
         pytest.skip("Real Chrome V2-9 /Maneg/ + /super/ QA is CI-only.")
 
-    # Explicit local setup: this module does not depend on another test module
-    # exporting a pytest fixture as an accidental collection side effect.
+    # Explicit local setup: this module does not depend on another test module,
+    # migration seed visibility, collection order, or pre-existing database rows.
     ensure_v2_3_reference_rows()
+    for provider, _label in IntegrationConfig.Provider.choices:
+        IntegrationConfig.objects.get_or_create(provider=provider)
 
     root = User.objects.create_superuser(
         username="v29-browser-root",
