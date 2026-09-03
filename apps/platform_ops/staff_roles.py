@@ -29,6 +29,7 @@ ROLE_SPECS = {
         "extra_permissions": (
             "organizations.change_organization",
             "organizations.change_onboardingapplication",
+            "organizations.change_publicprofilerevision",
             "public_profiles.change_professionalpublicstate",
             "public_profiles.change_manufacturercapabilityverification",
             "public_profiles.change_manufacturerpublicproductapproval",
@@ -74,6 +75,8 @@ ROLE_SPECS = {
     ROLE_CONTENT_MARKETPLACE: {
         "view_apps": ("storefront", "public_profiles", "artwork"),
         "extra_permissions": (
+            "organizations.view_publicprofilerevision",
+            "organizations.change_publicprofilerevision",
             "storefront.change_storefront",
             "storefront.change_storeproduct",
             "public_profiles.change_professionalpublicstate",
