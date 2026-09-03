@@ -5,15 +5,15 @@ from django.contrib import admin
 from apps.integrations.admin_site import fabinzi_admin_site
 
 
-_TEMPLATE_ATTRIBUTES = (
-    "add_form_template",
-    "change_form_template",
-    "change_list_template",
-    "delete_confirmation_template",
-    "delete_selected_confirmation_template",
-    "object_history_template",
-    "popup_response_template",
-)
+_STOCK_TEMPLATE_ATTRIBUTES = {
+    "add_form_template": "admin/change_form.html",
+    "change_form_template": "admin/change_form.html",
+    "change_list_template": "admin/change_list.html",
+    "delete_confirmation_template": "admin/delete_confirmation.html",
+    "delete_selected_confirmation_template": "admin/delete_selected_confirmation.html",
+    "object_history_template": "admin/object_history.html",
+    "popup_response_template": "admin/popup_response.html",
+}
 
 
 def _superuser_has_permission(_site, request):
@@ -33,8 +33,14 @@ def _stock_get_urls(self):
 
 
 def _stock_admin_class(source_admin):
-    """Reuse expert ModelAdmin behavior without FABINZI AdminSite presentation."""
-    attrs = {attribute: None for attribute in _TEMPLATE_ATTRIBUTES}
+    """Reuse expert ModelAdmin behavior with Django's stock presentation only.
+
+    Explicit stock template paths are required rather than ``None`` because
+    Django's normal app/model template discovery would otherwise rediscover
+    historical FABINZI admin templates such as IntegrationConfig's custom
+    Test Connection change form.
+    """
+    attrs = dict(_STOCK_TEMPLATE_ATTRIBUTES)
     attrs["get_urls"] = _stock_get_urls
     attrs["__module__"] = __name__
     return type(f"Stock{source_admin.__class__.__name__}", (source_admin.__class__,), attrs)
