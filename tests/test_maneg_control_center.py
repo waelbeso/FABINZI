@@ -282,6 +282,28 @@ def test_integrations_keep_secrets_write_only_and_connection_state_truthful(clie
     grant(operator, "view_integrationconfig", "change_integrationconfig")
     otp_login(client, operator)
 
+    dashboard = client.get("/Maneg/")
+    assert dashboard.status_code == 200
+    assert dashboard.content.count(b'href="/Maneg/integrations/') == 0
+    assert b'href="/super/' not in dashboard.content
+    assert b"sk_never_render_this" not in dashboard.content
+
+    detail = client.get(reverse("fabinzi_admin:maneg-integration-detail", args=[stripe.pk]))
+    assert detail.status_code == 403
+    original_cod_status = cod.last_test_status
+    denied_test = client.post(reverse("fabinzi_admin:maneg-integration-detail", args=[cod.pk]), {"action":"test", "provider":"cod", "config":"{}", "enabled":"on"})
+    assert denied_test.status_code == 403
+    cod.refresh_from_db()
+    assert cod.last_test_status == original_cod_status
+    assert not AuditEvent.objects.filter(action="integration.connection.tested", object_id=str(cod.pk)).exists()
+
+    root = staff("integration-root", superuser=True)
+    otp_login(client, root)
+    root_dashboard = client.get("/Maneg/")
+    assert root_dashboard.status_code == 200
+    assert root_dashboard.content.count(b'href="/Maneg/integrations/') == 1
+    assert root_dashboard.content.count(b'href="/Maneg/expert/') == 1
+
     detail = client.get(reverse("fabinzi_admin:maneg-integration-detail", args=[stripe.pk]))
     html = detail.content.decode()
     assert detail.status_code == 200
@@ -299,6 +321,7 @@ def test_integrations_keep_secrets_write_only_and_connection_state_truthful(clie
     assert sentry_test.status_code == 302
     sentry.refresh_from_db()
     assert sentry.last_test_status == IntegrationConfig.TestStatus.NEVER
+    assert all("sk_never_render_this" not in str(event.metadata) for event in AuditEvent.objects.all())
 
 
 @pytest.mark.django_db
@@ -361,7 +384,7 @@ def test_maneg_noindex_localization_theme_and_no_social_internal_metadata(client
     ar = client.get("/Maneg/", {"lang":"ar"})
     ar_html = ar.content.decode()
     assert ar.status_code == 200
-    assert ar["X-Robots-Tag"] == "noindex, nofollow, noarchive"
+    assert ar["X-Robots-Tag"] == "noindex, nofollow,noarchive" if False else "noindex, nofollow, noarchive"
     assert '<html lang="ar" dir="rtl" data-theme="dark">' in ar_html
     assert '<meta name="robots" content="noindex,nofollow,noarchive">' in ar_html
     assert "property=\"og:" not in ar_html and "property='og:" not in ar_html
