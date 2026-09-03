@@ -1,0 +1,3 @@
+{% extends 'maneg/base.html' %}
+{% block page_intro %}<p>High-impact financial action for <strong>{{ policy.code }}</strong>. This action is audited and does not reconcile historical blocked finance automatically.</p>{% endblock %}
+{% block content %}<section class="panel"><dl><dt>Status</dt><dd>{{ policy.get_lifecycle_status_display }}</dd><dt>Currency</dt><dd>{{ policy.currency }}</dd><dt>Validated</dt><dd>{{ policy.validated_at|default:'Not validated' }}</dd></dl><form method="post" data-confirm="Confirm {{ action }} for {{ policy.code }}?">{% csrf_token %}<input type="hidden" name="confirm" value="yes"><button class="button {% if action == 'retire' %}button--danger{% endif %}">Confirm {{ action }}</button></form></section>{% endblock %}
