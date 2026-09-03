@@ -39,7 +39,7 @@ def _activate_synthetic(code, staff, **kwargs):
 
 
 def _delivered_without_policy(prefix):
-    line = order_line(prefix); designed = line["product"].designed_product; designed.garment_creator_organization = line["designer_org"]; designed.artwork_creator_organization = line["designer_org"]; designed.economic_attribution = {"garment_creator_organization_id": line["designer_org"].pk, "artwork_creator_organization_id": line["designer_org"].pk}; designed.save(update_fields=["garment_creator_organization", "artwork_creator_organization", "economic_attribution", "updated_at"])
+    line = order_line(prefix, purchase_kind="ready_designed"); designed = line["product"].designed_product; designed.garment_creator_organization = line["designer_org"]; designed.artwork_creator_organization = line["designer_org"]; designed.economic_attribution = {"garment_creator_organization_id": line["designer_org"].pk, "artwork_creator_organization_id": line["designer_org"].pk}; designed.save(update_fields=["garment_creator_organization", "artwork_creator_organization", "economic_attribution", "updated_at"])
     fulfillment = line["fulfillment"]; fulfillment.status = FulfillmentRecord.Status.SHIPPED; fulfillment.shipped_at = timezone.now(); fulfillment.carrier = "SYNTHETIC-QA"; fulfillment.tracking_number = f"QA-{prefix}"; fulfillment.save(); delivered = deliver_order(fulfillment=fulfillment, actor=line["designer"]); return line, delivered
 
 
@@ -57,19 +57,9 @@ def _raw_snapshot_payload():
         "currency": "EGP",
         "gross_amount": Decimal("123.4500"),
         "quantity": 2,
-        "pricing_snapshot": {
-            "line_subtotal": Decimal("123.4500"),
-            "nested": {"captured_on": date(2026, 9, 3)},
-        },
-        "production_snapshot": {
-            "garment_version_id": nested_uuid,
-            "captured_at": datetime(2026, 9, 3, 9, 30, 15, 123456, tzinfo=datetime_timezone.utc),
-            "status": FinancePolicy.LifecycleStatus.DRAFT,
-        },
-        "customization_snapshot": {
-            "enabled": True,
-            "elements": [{"artwork_version_id": nested_uuid, "transform": {"x": 0.125, "y": 0.25, "width": 0.5, "height": 0.5}}],
-        },
+        "pricing_snapshot": {"line_subtotal": Decimal("123.4500"), "nested": {"captured_on": date(2026, 9, 3)}},
+        "production_snapshot": {"garment_version_id": nested_uuid, "captured_at": datetime(2026, 9, 3, 9, 30, 15, 123456, tzinfo=datetime_timezone.utc), "status": FinancePolicy.LifecycleStatus.DRAFT},
+        "customization_snapshot": {"enabled": True, "elements": [{"artwork_version_id": nested_uuid, "transform": {"x": 0.125, "y": 0.25, "width": 0.5, "height": 0.5}}]},
         "garment_creator_organization_id": 404,
         "artwork_creator_organization_id": 505,
         "manufacturer_quote": {"quote_id": 606, "manufacturer_id": 707, "currency": "EGP", "unit_price": Decimal("10.00"), "setup_fee": Decimal("2.50"), "sample_fee": Decimal("0.00"), "shipping_estimate": Decimal("1.25")},

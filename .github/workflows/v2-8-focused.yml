@@ -93,6 +93,7 @@ jobs:
           mkdir -p artifacts/v2-8-focused
           pytest -q \
             tests/test_v2_8_finance_policy_payout.py \
+            tests/test_v2_8_finance_boundaries.py \
             tests/test_stage8_finance.py \
             tests/test_v2_6_pricing_parent_purchase.py \
             tests/test_v2_7_routing_boundaries.py \

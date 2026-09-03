@@ -145,15 +145,25 @@ def _immutable_source(order):
     if quote:
         quote_data = {"quote_id": quote.pk, "manufacturer_id": job.manufacturer_id, "currency": quote.currency.upper(), "unit_price": str(_money(quote.unit_price)), "setup_fee": str(_money(quote.setup_fee or 0)), "sample_fee": str(_money(quote.sample_fee or 0)), "shipping_estimate": str(_money(quote.shipping_estimate or 0))}
     designed = item.store_product.designed_product if item and item.store_product_id else None
-    garment_org_id = getattr(designed, "garment_creator_organization_id", None) if designed else None
-    artwork_org_id = getattr(designed, "artwork_creator_organization_id", None) if designed else None
+    production = dict(getattr(item, "production_snapshot", None) or {})
     customization = dict(getattr(item, "customization_snapshot", None) or {})
-    studio_versions = [e.get("artwork_version_id") for e in customization.get("elements", []) if e.get("kind") == "artwork" and e.get("artwork_version_id")]
-    if studio_versions and not artwork_org_id:
-        from apps.artwork.models import ArtworkVersion
-        orgs = list(ArtworkVersion.objects.filter(pk__in=studio_versions).values_list("artwork__organization_id", flat=True).distinct())
-        if len(orgs) == 1: artwork_org_id = orgs[0]
-    source = {"purchase_id": order.purchase_id, "order_id": order.pk, "order_number": order.number, "order_item_id": item.pk if item else None, "currency": order.currency.upper(), "gross_amount": str(_money(order.total)), "quantity": int(item.quantity if item else 1), "pricing_snapshot": dict(getattr(item, "pricing_snapshot", None) or {}), "production_snapshot": dict(getattr(item, "production_snapshot", None) or {}), "customization_snapshot": customization, "garment_creator_organization_id": garment_org_id, "artwork_creator_organization_id": artwork_org_id, "manufacturer_quote": quote_data, "production_specification": {"id": specification.pk, "snapshot_sha256": specification.snapshot_sha256, "snapshot": specification.snapshot} if specification else None}
+    product_type = str(getattr(item, "purchase_kind", "") or production.get("product_type") or "").lower()
+    garment_org_id = production.get("garment_creator_organization_id")
+    if not garment_org_id and designed:
+        garment_org_id = getattr(designed, "garment_creator_organization_id", None) or designed.garment_version.design.organization_id
+    artwork_org_ids = []
+    if product_type == "ready_designed":
+        artwork_org_id = production.get("artwork_creator_organization_id")
+        if not artwork_org_id and designed:
+            artwork_org_id = getattr(designed, "artwork_creator_organization_id", None) or designed.artwork_version.artwork.organization_id
+        if artwork_org_id: artwork_org_ids = [artwork_org_id]
+    elif product_type == "studio":
+        studio_versions = sorted({e.get("artwork_version_id") for e in customization.get("elements", []) if e.get("kind") == "artwork" and e.get("artwork_version_id")})
+        if studio_versions:
+            from apps.artwork.models import ArtworkVersion
+            artwork_org_ids = sorted(set(ArtworkVersion.objects.filter(pk__in=studio_versions).values_list("artwork__organization_id", flat=True)))
+    artwork_org_id = artwork_org_ids[0] if len(artwork_org_ids) == 1 else None
+    source = {"purchase_id": order.purchase_id, "order_id": order.pk, "order_number": order.number, "order_item_id": item.pk if item else None, "currency": order.currency.upper(), "gross_amount": str(_money(order.total)), "quantity": int(item.quantity if item else 1), "pricing_snapshot": dict(getattr(item, "pricing_snapshot", None) or {}), "production_snapshot": production, "customization_snapshot": customization, "garment_creator_organization_id": garment_org_id, "artwork_creator_organization_id": artwork_org_id, "artwork_creator_organization_ids": artwork_org_ids, "manufacturer_quote": quote_data, "production_specification": {"id": specification.pk, "snapshot_sha256": specification.snapshot_sha256, "snapshot": specification.snapshot} if specification else None}
     return item, specification, quote, build_finance_source_snapshot(source)
 
 
@@ -202,13 +212,16 @@ def reconcile_finance_pending(*, pending, actor, request=None, require_permissio
     policy = active_policy(pending.currency)
     if not _trigger_eligible(policy, pending): raise FinancePolicyUnavailable("The ACTIVE Finance Policy settlement eligibility trigger is not yet satisfied.")
     source = validate_finance_source_snapshot(pending.source_snapshot or {}); gross = _money(source["gross_amount"]); quantity = int(source.get("quantity") or 1)
+    artwork_org_ids = list(source.get("artwork_creator_organization_ids") or ([] if not source.get("artwork_creator_organization_id") else [source.get("artwork_creator_organization_id")]))
+    if len(set(artwork_org_ids)) > 1: raise FinancePolicyUnavailable("Studio line contains multiple Marketplace Artwork beneficiaries; explicit split-royalty policy is required before finance can be resolved.")
+    artwork_org_id = artwork_org_ids[0] if artwork_org_ids else source.get("artwork_creator_organization_id")
     manufacturer_payable = _manufacturer_payable(policy, source)
     garment_amount = _rule_amount(policy.garment_royalty_rule_type, policy.garment_royalty_rule_value, gross=gross, quantity=quantity) if source.get("garment_creator_organization_id") else Decimal("0.00")
-    artwork_amount = _rule_amount(policy.artwork_royalty_rule_type, policy.artwork_royalty_rule_value, gross=gross, quantity=quantity) if source.get("artwork_creator_organization_id") else Decimal("0.00")
+    artwork_amount = _rule_amount(policy.artwork_royalty_rule_type, policy.artwork_royalty_rule_value, gross=gross, quantity=quantity) if artwork_org_id else Decimal("0.00")
     fabinzi_amount = _rule_amount(policy.fabinzi_rule_type, policy.fabinzi_rule_value, gross=gross, quantity=quantity)
     recognized_at = timezone.now(); available_at = recognized_at + timedelta(days=int(policy.settlement_hold_days))
     from apps.organizations.models import Organization
-    garment_org = Organization.objects.filter(pk=source.get("garment_creator_organization_id")).first(); artwork_org = Organization.objects.filter(pk=source.get("artwork_creator_organization_id")).first(); manufacturer_org = Organization.objects.filter(pk=(source.get("manufacturer_quote") or {}).get("manufacturer_id")).first()
+    garment_org = Organization.objects.filter(pk=source.get("garment_creator_organization_id")).first(); artwork_org = Organization.objects.filter(pk=artwork_org_id).first(); manufacturer_org = Organization.objects.filter(pk=(source.get("manufacturer_quote") or {}).get("manufacturer_id")).first()
     fallback_designer = garment_org or pending.order.designer_organization
     garment_account = organization_account(garment_org, pending.currency) if garment_org else None; artwork_account = organization_account(artwork_org, pending.currency) if artwork_org else None; manufacturer_account = organization_account(manufacturer_org, pending.currency) if manufacturer_org else None; p_account = platform_account(pending.currency); compat_account = garment_account or organization_account(fallback_designer, pending.currency)
     try:
@@ -264,19 +277,27 @@ def review_payout_profile(*, profile, reviewer, decision, notes="", request=None
     profile.status = decision; profile.verification_notes = notes; profile.verified_by = reviewer; profile.verified_at = timezone.now() if decision == PayoutProfile.Status.VERIFIED else None; profile.save(); record_audit_event(actor=reviewer, action=f"finance.payout_profile.{decision}", instance=profile, request=request); return profile
 
 
+def _idempotent_settlement(*, key, organization, amount, currency):
+    if not key: return None
+    existing = SettlementRequest.objects.filter(idempotency_key=key).first()
+    if not existing: return None
+    if existing.organization_id != organization.pk: raise PermissionDenied("Settlement idempotency key belongs to another organization.")
+    if existing.currency.upper() != currency.upper() or _money(existing.amount) != _money(amount): raise ValidationError("Settlement idempotency key was already used with different amount/currency.")
+    return existing
+
+
 @transaction.atomic
 def request_settlement(*, organization, actor, amount, currency, idempotency_key=None, request=None):
-    require_payout_mutation_access(actor, organization); currency = currency.upper()
-    if idempotency_key:
-        existing = SettlementRequest.objects.filter(idempotency_key=idempotency_key).first()
-        if existing:
-            if existing.organization_id != organization.pk: raise PermissionDenied("Settlement idempotency key belongs to another organization.")
-            return existing
+    require_payout_mutation_access(actor, organization); currency = currency.upper(); amount = _money(amount); idempotency_key = (idempotency_key or "").strip() or None
+    existing = _idempotent_settlement(key=idempotency_key, organization=organization, amount=amount, currency=currency)
+    if existing: return existing
     account = FinanceAccount.objects.select_for_update().filter(account_type=FinanceAccount.AccountType.ORGANIZATION, organization=organization, currency=currency).first()
     if not account: raise ValidationError("No finance account exists for this currency.")
     profile = PayoutProfile.objects.select_for_update().filter(organization=organization, status=PayoutProfile.Status.VERIFIED).first()
     if not profile: raise ValidationError("A verified payout profile is required.")
-    policy = active_policy(currency); amount = _money(amount)
+    existing = _idempotent_settlement(key=idempotency_key, organization=organization, amount=amount, currency=currency)
+    if existing: return existing
+    policy = active_policy(currency)
     if amount < policy.v2_minimum_payout: raise ValidationError(f"Minimum settlement is {policy.v2_minimum_payout} {currency}.")
     if amount > account_balance(account)["withdrawable"]: raise ValidationError("Settlement amount exceeds withdrawable balance.")
     settlement = SettlementRequest(organization=organization, account=account, payout_profile=profile, amount=amount, currency=currency, idempotency_key=idempotency_key or f"portal-{organization.pk}-{uuid.uuid4().hex}", payout_snapshot={"method": profile.method, "account_holder": profile.account_holder, "destination_hint": profile.destination_hint, "bank_name": profile.bank_name, "country": profile.country, "currency": profile.currency, "iban_last4": profile.iban_last4}, requested_by=actor, reserved_at=timezone.now()); settlement.full_clean(); settlement.save(); record_audit_event(actor=actor, action="finance.settlement.requested", instance=settlement, metadata={"amount": str(amount), "currency": currency}, request=request); return settlement

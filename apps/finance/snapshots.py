@@ -32,6 +32,7 @@ _SOURCE_FIELDS = {
     "customization_snapshot",
     "garment_creator_organization_id",
     "artwork_creator_organization_id",
+    "artwork_creator_organization_ids",
     "manufacturer_quote",
     "production_specification",
 }
