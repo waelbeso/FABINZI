@@ -14,6 +14,7 @@ from apps.operations.models import FulfillmentRecord, ProductionSpecification
 from apps.organizations.models import Membership
 from apps.organizations.services import require_org_access
 from .models import FinanceAccount, FinanceAdjustment, FinancePolicy, FinanceRecognitionPending, LedgerEntry, OrderFinance, OrderFinanceComponent, PayoutProfile, SettlementRequest
+from .snapshots import build_finance_source_snapshot, validate_finance_source_snapshot
 
 FINANCE_ROLES = [Membership.Role.OWNER, Membership.Role.MANAGER, Membership.Role.ACCOUNTANT]
 PAYOUT_MUTATION_ROLES = [Membership.Role.OWNER]
@@ -153,7 +154,7 @@ def _immutable_source(order):
         orgs = list(ArtworkVersion.objects.filter(pk__in=studio_versions).values_list("artwork__organization_id", flat=True).distinct())
         if len(orgs) == 1: artwork_org_id = orgs[0]
     source = {"purchase_id": order.purchase_id, "order_id": order.pk, "order_number": order.number, "order_item_id": item.pk if item else None, "currency": order.currency.upper(), "gross_amount": str(_money(order.total)), "quantity": int(item.quantity if item else 1), "pricing_snapshot": dict(getattr(item, "pricing_snapshot", None) or {}), "production_snapshot": dict(getattr(item, "production_snapshot", None) or {}), "customization_snapshot": customization, "garment_creator_organization_id": garment_org_id, "artwork_creator_organization_id": artwork_org_id, "manufacturer_quote": quote_data, "production_specification": {"id": specification.pk, "snapshot_sha256": specification.snapshot_sha256, "snapshot": specification.snapshot} if specification else None}
-    return item, specification, quote, source
+    return item, specification, quote, build_finance_source_snapshot(source)
 
 
 @transaction.atomic
@@ -200,7 +201,7 @@ def reconcile_finance_pending(*, pending, actor, request=None, require_permissio
         pending.status = FinanceRecognitionPending.Status.RECONCILED; pending.reconciled_finance = existing; pending.reconciled_at = pending.reconciled_at or timezone.now(); pending.last_attempt_at = timezone.now(); pending.save(update_fields=["status", "reconciled_finance", "reconciled_at", "last_attempt_at", "updated_at"]); return existing
     policy = active_policy(pending.currency)
     if not _trigger_eligible(policy, pending): raise FinancePolicyUnavailable("The ACTIVE Finance Policy settlement eligibility trigger is not yet satisfied.")
-    source = dict(pending.source_snapshot or {}); gross = _money(source["gross_amount"]); quantity = int(source.get("quantity") or 1)
+    source = validate_finance_source_snapshot(pending.source_snapshot or {}); gross = _money(source["gross_amount"]); quantity = int(source.get("quantity") or 1)
     manufacturer_payable = _manufacturer_payable(policy, source)
     garment_amount = _rule_amount(policy.garment_royalty_rule_type, policy.garment_royalty_rule_value, gross=gross, quantity=quantity) if source.get("garment_creator_organization_id") else Decimal("0.00")
     artwork_amount = _rule_amount(policy.artwork_royalty_rule_type, policy.artwork_royalty_rule_value, gross=gross, quantity=quantity) if source.get("artwork_creator_organization_id") else Decimal("0.00")

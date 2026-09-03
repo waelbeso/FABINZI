@@ -1,5 +1,8 @@
+import json
 import threading
+from datetime import date, datetime, timezone as datetime_timezone
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from django.contrib.auth.models import Permission
@@ -10,6 +13,13 @@ from django.utils import timezone
 from apps.audit.models import AuditEvent
 from apps.finance.models import FinancePolicy, FinanceRecognitionPending, LedgerEntry, OrderFinance
 from apps.finance.services import activate_policy, reconcile_finance_pending, validate_policy_draft
+from apps.finance.snapshots import (
+    FINANCE_SOURCE_SNAPSHOT_SCHEMA,
+    FINANCE_SOURCE_SNAPSHOT_VERSION,
+    FinanceSnapshotValidationError,
+    build_finance_source_snapshot,
+    canonicalize_finance_value,
+)
 from apps.operations.models import FulfillmentRecord
 from apps.operations.services import deliver_order
 from tests.v2_7_helpers import order_line, user
@@ -37,15 +47,79 @@ def _finance_staff(prefix):
     staff = user(f"{prefix}-finance-staff", staff=True); _grant(staff, "view_finance_policy_governance", "manage_finance_policy_governance", "activate_finance_policy_governance", "reconcile_finance_recognition"); return staff
 
 
+def _raw_snapshot_payload():
+    nested_uuid = uuid4()
+    return {
+        "purchase_id": 101,
+        "order_id": 202,
+        "order_number": uuid4(),
+        "order_item_id": 303,
+        "currency": "EGP",
+        "gross_amount": Decimal("123.4500"),
+        "quantity": 2,
+        "pricing_snapshot": {
+            "line_subtotal": Decimal("123.4500"),
+            "nested": {"captured_on": date(2026, 9, 3)},
+        },
+        "production_snapshot": {
+            "garment_version_id": nested_uuid,
+            "captured_at": datetime(2026, 9, 3, 9, 30, 15, 123456, tzinfo=datetime_timezone.utc),
+            "status": FinancePolicy.LifecycleStatus.DRAFT,
+        },
+        "customization_snapshot": {
+            "enabled": True,
+            "elements": [{"artwork_version_id": nested_uuid, "transform": {"x": 0.125, "y": 0.25, "width": 0.5, "height": 0.5}}],
+        },
+        "garment_creator_organization_id": 404,
+        "artwork_creator_organization_id": 505,
+        "manufacturer_quote": {"quote_id": 606, "manufacturer_id": 707, "currency": "EGP", "unit_price": Decimal("10.00"), "setup_fee": Decimal("2.50"), "sample_fee": Decimal("0.00"), "shipping_estimate": Decimal("1.25")},
+        "production_specification": {"id": 808, "snapshot_sha256": "a" * 64, "snapshot": {"source_uuid": nested_uuid}},
+    }
+
+
+def test_finance_snapshot_canonicalizer_is_explicit_exact_and_json_safe():
+    raw = _raw_snapshot_payload(); expected_order_number = str(raw["order_number"]); expected_nested_uuid = str(raw["production_snapshot"]["garment_version_id"])
+    snapshot = build_finance_source_snapshot(raw)
+    assert snapshot["schema"] == FINANCE_SOURCE_SNAPSHOT_SCHEMA
+    assert snapshot["schema_version"] == FINANCE_SOURCE_SNAPSHOT_VERSION
+    assert snapshot["order_number"] == expected_order_number
+    assert snapshot["gross_amount"] == "123.4500"
+    assert snapshot["pricing_snapshot"]["line_subtotal"] == "123.4500"
+    assert snapshot["production_snapshot"]["garment_version_id"] == expected_nested_uuid
+    assert snapshot["production_snapshot"]["captured_at"] == "2026-09-03T09:30:15.123456+00:00"
+    assert snapshot["production_snapshot"]["status"] == FinancePolicy.LifecycleStatus.DRAFT.value
+    assert snapshot["customization_snapshot"]["elements"][0]["artwork_version_id"] == expected_nested_uuid
+    assert snapshot["manufacturer_quote"]["unit_price"] == "10.00"
+    assert json.loads(json.dumps(snapshot, sort_keys=True, separators=(",", ":"))) == snapshot
+    assert build_finance_source_snapshot(raw) == snapshot
+
+
+def test_finance_snapshot_rejects_models_querysets_unknown_objects_and_binary():
+    line = order_line("v28-snapshot-reject")
+    with pytest.raises(FinanceSnapshotValidationError): canonicalize_finance_value(line["order"])
+    with pytest.raises(FinanceSnapshotValidationError): canonicalize_finance_value(OrderFinance.objects.all())
+    with pytest.raises(FinanceSnapshotValidationError): canonicalize_finance_value(object())
+    with pytest.raises(FinanceSnapshotValidationError): canonicalize_finance_value(b"bank-proof-bytes")
+
+
+@pytest.mark.parametrize("protected_key", ["iban", "full_iban", "iban_encrypted", "bank_proof", "payment_secret", "client_secret", "card_number", "cvv"])
+def test_finance_snapshot_rejects_protected_financial_credentials(protected_key):
+    raw = _raw_snapshot_payload(); raw["customization_snapshot"] = {"nested": {protected_key: "PROHIBITED-QA-VALUE"}}
+    with pytest.raises(FinanceSnapshotValidationError): build_finance_source_snapshot(raw)
+
+
 def test_no_active_policy_delivery_remains_legitimate_and_durable_pending_exists():
     FinancePolicy.objects.create(name="LEGACY QA SENTINEL 10-7-100", platform_fee_bps=1000, settlement_delay_days=7, minimum_payout=Decimal("100.00"), is_active=True)
     line, delivered = _delivered_without_policy("v28-blocked"); delivered.refresh_from_db(); assert delivered.status == FulfillmentRecord.Status.DELIVERED; assert not OrderFinance.objects.filter(order=line["order"]).exists(); assert not LedgerEntry.objects.filter(order_finance__order=line["order"]).exists()
-    pending = FinanceRecognitionPending.objects.get(order=line["order"]); assert pending.status == FinanceRecognitionPending.Status.BLOCKED; assert pending.currency == "EGP"; assert pending.purchase_id == line["purchase"].pk; assert pending.order_item_id == line["item"].pk; assert pending.source_snapshot["order_id"] == line["order"].pk; assert pending.source_snapshot["gross_amount"] == "500.00"; assert "ACTIVE V2 Finance Policy" in pending.block_reason
+    pending = FinanceRecognitionPending.objects.get(order=line["order"]); assert pending.status == FinanceRecognitionPending.Status.BLOCKED; assert pending.currency == "EGP"; assert pending.purchase_id == line["purchase"].pk; assert pending.order_item_id == line["item"].pk; assert pending.source_snapshot["order_id"] == line["order"].pk; assert pending.source_snapshot["order_number"] == str(line["order"].number); assert pending.source_snapshot["schema"] == FINANCE_SOURCE_SNAPSHOT_SCHEMA; assert pending.source_snapshot["schema_version"] == FINANCE_SOURCE_SNAPSHOT_VERSION; assert pending.source_snapshot["gross_amount"] == "500.00"; assert "ACTIVE V2 Finance Policy" in pending.block_reason
+    serialized = json.dumps(pending.source_snapshot, sort_keys=True); lowered = serialized.lower(); assert "iban" not in lowered; assert "bank_proof" not in lowered; assert "payment_secret" not in lowered
 
 
 def test_explicit_reconciliation_binds_exact_policy_and_retry_is_idempotent():
     line, _ = _delivered_without_policy("v28-reconcile"); pending = FinanceRecognitionPending.objects.get(order=line["order"]); staff = _finance_staff("v28-reconcile"); policy = _activate_synthetic("FIN-POL-QA-V1", staff); pending.refresh_from_db(); assert pending.status == FinanceRecognitionPending.Status.BLOCKED; assert not OrderFinance.objects.filter(order=line["order"]).exists()
     first = reconcile_finance_pending(pending=pending, actor=staff); again = reconcile_finance_pending(pending=pending, actor=staff); assert again.pk == first.pk; assert first.finance_policy_id == policy.pk; assert first.policy_snapshot["code"] == "FIN-POL-QA-V1"; assert first.garment_designer_royalty == Decimal("50.00"); assert first.artwork_designer_royalty == Decimal("25.00"); assert first.fabinzi_component == Decimal("37.50"); assert OrderFinance.objects.filter(order=line["order"]).count() == 1; assert first.components.count() == 3; assert first.ledger_entries.count() == 3; assert first.ledger_entries.values("event_key").distinct().count() == 3
+    expected = (first.garment_designer_royalty, first.artwork_designer_royalty, first.fabinzi_component, first.manufacturer_payable, first.policy_snapshot, first.source_snapshot)
+    reloaded_pending = FinanceRecognitionPending.objects.get(pk=pending.pk); reloaded = reconcile_finance_pending(pending=reloaded_pending, actor=staff); reloaded.refresh_from_db(); assert (reloaded.garment_designer_royalty, reloaded.artwork_designer_royalty, reloaded.fabinzi_component, reloaded.manufacturer_payable, reloaded.policy_snapshot, reloaded.source_snapshot) == expected
 
 
 @pytest.mark.django_db(transaction=True)
