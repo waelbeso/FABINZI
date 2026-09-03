@@ -5,7 +5,7 @@ from apps.operations import maneg_v2_7 as operations_v2_7_maneg
 from apps.public_inquiries import maneg_views as public_inquiry_maneg
 from apps.public_profiles import maneg_views as public_profile_maneg
 
-from . import maneg_views
+from . import maneg_v2_9, maneg_views
 from .maneg_access import maneg_staff_required, maneg_superuser_required, stock_admin_redirect
 
 app_name = "fabinzi_admin"
@@ -20,7 +20,7 @@ def _super(route, view, name):
 
 
 urlpatterns = [
-    _staff("", maneg_views.dashboard, "index"),
+    _staff("", maneg_v2_9.dashboard, "index"),
     _staff("users/", maneg_views.users, "maneg-users"),
     _staff("users/<int:pk>/", maneg_views.user_detail, "maneg-user-detail"),
     _staff("organizations/", maneg_views.organizations, "maneg-organizations"),
@@ -41,6 +41,8 @@ urlpatterns = [
     _staff("orders/", maneg_views.orders, "maneg-orders"),
     _staff("production/", maneg_views.production, "maneg-production"),
     _staff("production-routing/", operations_v2_7_maneg.routing_console, "maneg-v2-7-routing"),
+    _staff("subscriptions/", maneg_v2_9.subscriptions, "maneg-v2-9-subscriptions"),
+    _staff("commercial-settings/", maneg_v2_9.commercial_settings, "maneg-v2-9-commercial-settings"),
     _staff("finance/", maneg_views.finance, "maneg-finance"),
     _staff("finance-policies/", finance_v2_8_maneg.finance_policy_list, "maneg-v2-8-finance-policies"),
     _staff("finance-policies/new/", finance_v2_8_maneg.finance_policy_create, "maneg-v2-8-finance-policy-create"),
