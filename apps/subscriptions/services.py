@@ -1528,3 +1528,20 @@ def grant_manufacturer_trial_exception(
         request=request,
     )
     return subscription
+
+
+# Consolidated authenticated-customer/business onboarding commercial authorities.
+# Existing V2 lifecycle helpers above remain the shared entitlement/period engine;
+# the approved onboarding module owns the changed provisioning, confirmation,
+# initial activation and historical-trial boundary semantics.
+from .onboarding_services import (  # noqa: E402,F401
+    activate_paid_pro,
+    apply_approved_onboarding_plan_selection,
+    confirm_subscription_billing,
+    ensure_onboarding_plan_selection,
+    ensure_subscription_for_organization,
+    grant_manufacturer_trial_exception,
+    onboarding_commercial_summary,
+    onboarding_plan_options,
+    set_onboarding_plan_selection,
+)
