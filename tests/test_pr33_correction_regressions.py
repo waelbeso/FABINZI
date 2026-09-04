@@ -5,6 +5,7 @@ from apps.accounts.models import User
 from apps.organizations.models import OnboardingApplication, Organization
 from apps.organizations.services import submit_application
 from apps.subscriptions.models import OnboardingPlanSelection
+from .v2_3_support import v2_3_reference_rows
 
 
 @pytest.mark.django_db
