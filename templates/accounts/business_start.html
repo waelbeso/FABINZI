@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}{% if request.LANGUAGE_CODE == 'ar' %}ابدأ نشاطك | FABINZI{% else %}Start your Business | FABINZI{% endif %}{% endblock %}
+{% block content %}
+<section class="section--tight">
+  <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}النشاط المهني{% else %}START YOUR BUSINESS{% endif %}</div>
+  <h1 class="page-title">{% if request.LANGUAGE_CODE == 'ar' %}اختر دورك المهني{% else %}Choose your professional role{% endif %}</h1>
+  <p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}حساب FABINZI الواحد يمكنه متابعة رحلة العميل والنشاط المهني. طلبات المصمم والمصنع تبقى منفصلة ويخضع كل منها لمراجعة FABINZI.{% else %}Your FABINZI account can keep its customer journey while adding professional activity. Designer and Manufacturer applications remain separate and each follows FABINZI review.{% endif %}</p>
+</section>
+<section class="card-grid card-grid--2 customer-section">
+  <article class="card role-card">
+    <span class="role-card__number">D</span><h2>{% if request.LANGUAGE_CODE == 'ar' %}مصمم{% else %}Designer{% endif %}</h2>
+    <p class="muted">{% if request.LANGUAGE_CODE == 'ar' %}أنشئ جهة تصميم، قدم أعمالك ومنتجاتك، ثم استخدم أدوات النشر والتصنيع بعد الاعتماد.{% else %}Create a Designer organization, submit your work and products, then use publishing and sourcing tools after approval.{% endif %}</p>
+    {% if designer_membership %}
+      <p><span class="badge">{{ designer_membership.organization.get_verification_status_display }}</span> {{ designer_membership.organization.display_name }}{% if designer_application %} · {{ designer_application.get_status_display }}{% endif %}</p>
+      {% if designer_application.status == 'draft' %}<a class="button" href="{% url 'edit-onboarding' designer_application.pk %}">{% if request.LANGUAGE_CODE == 'ar' %}تابع طلب المصمم{% else %}Continue Designer application{% endif %}</a>
+      {% elif designer_application.status == 'submitted' %}<a class="button button--ghost" href="{% url 'designer' %}?org={{ designer_membership.organization_id }}">{% if request.LANGUAGE_CODE == 'ar' %}الطلب قيد المراجعة{% else %}Designer application under review{% endif %}</a>
+      {% elif designer_application.status == 'revision_required' %}<a class="button" href="{% url 'edit-onboarding' designer_application.pk %}">{% if request.LANGUAGE_CODE == 'ar' %}حدّث طلب المصمم{% else %}Update Designer application{% endif %}</a>
+      {% elif designer_application.status == 'approved' %}<a class="button" href="{% url 'designer' %}?org={{ designer_membership.organization_id }}">{% if request.LANGUAGE_CODE == 'ar' %}فتح مساحة المصمم{% else %}Open Designer workspace{% endif %}</a>
+      {% elif designer_application.status == 'rejected' %}<form method="post" action="{% url 'submit-onboarding' designer_application.pk %}">{% csrf_token %}<input type="hidden" name="action" value="reapply"><button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}إعادة التقديم كمصمم{% else %}Reapply as Designer{% endif %}</button></form>
+      {% else %}<a class="button" href="{% url 'designer' %}?org={{ designer_membership.organization_id }}">{% if request.LANGUAGE_CODE == 'ar' %}فتح نشاط المصمم{% else %}Open Designer Business{% endif %}</a>{% endif %}
+    {% else %}<a class="button" href="{% url 'designer' %}">{% if request.LANGUAGE_CODE == 'ar' %}ابدأ كمصمم{% else %}Start as Designer{% endif %}</a>{% endif %}
+  </article>
+  <article class="card role-card">
+    <span class="role-card__number">M</span><h2>{% if request.LANGUAGE_CODE == 'ar' %}مصنع{% else %}Manufacturer{% endif %}</h2>
+    <p class="muted">{% if request.LANGUAGE_CODE == 'ar' %}أنشئ جهة تصنيع موثقة وقدّم بيانات القدرة والإنتاج قبل فتح العمليات المهنية.{% else %}Create a verified Manufacturer organization and submit capability and production information before professional operations open.{% endif %}</p>
+    {% if manufacturer_membership %}
+      <p><span class="badge">{{ manufacturer_membership.organization.get_verification_status_display }}</span> {{ manufacturer_membership.organization.display_name }}{% if manufacturer_application %} · {{ manufacturer_application.get_status_display }}{% endif %}</p>
+      {% if manufacturer_application.status == 'draft' %}<a class="button" href="{% url 'edit-onboarding' manufacturer_application.pk %}">{% if request.LANGUAGE_CODE == 'ar' %}تابع طلب المصنع{% else %}Continue Manufacturer application{% endif %}</a>
+      {% elif manufacturer_application.status == 'submitted' %}<a class="button button--ghost" href="{% url 'manufacturer' %}?org={{ manufacturer_membership.organization_id }}">{% if request.LANGUAGE_CODE == 'ar' %}الطلب قيد المراجعة{% else %}Manufacturer application under review{% endif %}</a>
+      {% elif manufacturer_application.status == 'revision_required' %}<a class="button" href="{% url 'edit-onboarding' manufacturer_application.pk %}">{% if request.LANGUAGE_CODE == 'ar' %}حدّث طلب المصنع{% else %}Update Manufacturer application{% endif %}</a>
+      {% elif manufacturer_application.status == 'approved' %}<a class="button" href="{% url 'manufacturer' %}?org={{ manufacturer_membership.organization_id }}">{% if request.LANGUAGE_CODE == 'ar' %}فتح مساحة المصنع{% else %}Open Manufacturer workspace{% endif %}</a>
+      {% elif manufacturer_application.status == 'rejected' %}<form method="post" action="{% url 'submit-onboarding' manufacturer_application.pk %}">{% csrf_token %}<input type="hidden" name="action" value="reapply"><button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}إعادة التقديم كمصنع{% else %}Reapply as Manufacturer{% endif %}</button></form>
+      {% else %}<a class="button" href="{% url 'manufacturer' %}?org={{ manufacturer_membership.organization_id }}">{% if request.LANGUAGE_CODE == 'ar' %}فتح نشاط المصنع{% else %}Open Manufacturer Business{% endif %}</a>{% endif %}
+    {% else %}<a class="button" href="{% url 'manufacturer' %}">{% if request.LANGUAGE_CODE == 'ar' %}ابدأ كمصنع{% else %}Start as Manufacturer{% endif %}</a>{% endif %}
+  </article>
+</section>
+<section class="panel customer-section"><h2>{% if request.LANGUAGE_CODE == 'ar' %}الخطة تُختار داخل الطلب{% else %}Plan choice is part of the application{% endif %}</h2><p class="muted">{% if request.LANGUAGE_CODE == 'ar' %}Starter هي الخطة الافتراضية المجانية. اختيار Pro يسجل نية تجارية فقط؛ بعد الاعتماد تبقى الصلاحية الفعلية Starter حتى يؤكد نظام الفوترة المخول الدفع خلال نافذة 27 يومًا.{% else %}Starter is the free default. Choosing Pro records commercial intent only; after approval actual entitlement remains Starter until authorized billing confirms payment within the 27-day payment window.{% endif %}</p></section>
+{% endblock %}

@@ -47,13 +47,38 @@ def _lock_and_reject_duplicate_application(*, user, kind):
         )
 
 
+def _split_requested_plan(profile_data):
+    data = dict(profile_data)
+    return data, data.pop("plan_policy_id", None)
+
+
+def _persist_requested_plan(*, application, actor, plan_policy_id, request=None):
+    if plan_policy_id in (None, ""):
+        return None
+    from apps.subscriptions.models import SubscriptionPlanPolicy
+    from apps.subscriptions.services import set_onboarding_plan_selection
+
+    try:
+        policy = SubscriptionPlanPolicy.objects.get(pk=int(plan_policy_id))
+    except (TypeError, ValueError, SubscriptionPlanPolicy.DoesNotExist) as exc:
+        raise ValidationError("Selected onboarding plan is invalid.") from exc
+    return set_onboarding_plan_selection(
+        application=application,
+        actor=actor,
+        selected_plan_policy=policy,
+        request=request,
+    )
+
+
 @transaction.atomic
 def create_designer_onboarding(*, user, organization_data, profile_data, request=None):
     _lock_and_reject_duplicate_application(user=user, kind=Organization.Kind.DESIGNER)
+    profile_data, plan_policy_id = _split_requested_plan(profile_data)
     org = Organization.objects.create(kind=Organization.Kind.DESIGNER, created_by=user, **organization_data)
     Membership.objects.create(organization=org, user=user, role=Membership.Role.OWNER)
     DesignerProfile.objects.create(organization=org, **profile_data)
     application = OnboardingApplication.objects.create(organization=org)
+    _persist_requested_plan(application=application, actor=user, plan_policy_id=plan_policy_id, request=request)
     record_audit_event(actor=user, action="onboarding.designer.created", instance=application, metadata={"organization_id": org.pk}, request=request)
     return application
 
@@ -61,10 +86,12 @@ def create_designer_onboarding(*, user, organization_data, profile_data, request
 @transaction.atomic
 def create_manufacturer_onboarding(*, user, organization_data, profile_data, request=None):
     _lock_and_reject_duplicate_application(user=user, kind=Organization.Kind.MANUFACTURER)
+    profile_data, plan_policy_id = _split_requested_plan(profile_data)
     org = Organization.objects.create(kind=Organization.Kind.MANUFACTURER, created_by=user, **organization_data)
     Membership.objects.create(organization=org, user=user, role=Membership.Role.OWNER)
     ManufacturerProfile.objects.create(organization=org, **profile_data)
     application = OnboardingApplication.objects.create(organization=org)
+    _persist_requested_plan(application=application, actor=user, plan_policy_id=plan_policy_id, request=request)
     record_audit_event(actor=user, action="onboarding.manufacturer.created", instance=application, metadata={"organization_id": org.pk}, request=request)
     return application
 
@@ -174,6 +201,9 @@ def submit_application(*, application, actor, request=None):
     if application.status not in {OnboardingApplication.Status.DRAFT, OnboardingApplication.Status.REVISION_REQUIRED}:
         raise ValidationError("This application cannot be submitted from its current state.")
     _validate_submission(application)
+    from apps.subscriptions.services import ensure_onboarding_plan_selection
+
+    ensure_onboarding_plan_selection(application=application, actor=actor, request=request)
     submitted_at = timezone.now()
     application.status = OnboardingApplication.Status.SUBMITTED
     application.submitted_at = submitted_at
@@ -245,16 +275,22 @@ def review_application(*, application, reviewer, decision, notes="", request=Non
     application.organization.save(update_fields=["verification_status", "updated_at"])
 
     subscription = None
+    selection = None
     if decision == OnboardingApplication.Status.APPROVED:
-        # V2-3 provisioning is an explicit professional-activation side effect,
-        # not a hidden Organization.save() command. Re-entry is idempotent and
-        # therefore cannot restart an already-consumed Manufacturer trial.
-        from apps.subscriptions.services import ensure_subscription_for_organization
+        from apps.subscriptions.services import (
+            apply_approved_onboarding_plan_selection,
+            ensure_subscription_for_organization,
+        )
         from apps.subscriptions.team_services import reconcile_team_capacity_for_subscription
 
         subscription = ensure_subscription_for_organization(
             application.organization,
             activation_at=application.reviewed_at,
+            actor=reviewer,
+            request=request,
+        )
+        selection = apply_approved_onboarding_plan_selection(
+            application=application,
             actor=reviewer,
             request=request,
         )
@@ -277,6 +313,7 @@ def review_application(*, application, reviewer, decision, notes="", request=Non
             "notes_present": bool(notes),
             "activated_membership_id": applicant_membership.pk if applicant_membership else None,
             "subscription_id": subscription.pk if subscription else None,
+            "onboarding_plan_selection_id": selection.pk if selection else None,
         },
         request=request,
     )
@@ -288,6 +325,7 @@ def update_onboarding(*, application, actor, organization_data, profile_data, re
     require_org_access(actor, application.organization, roles=[Membership.Role.OWNER, Membership.Role.MANAGER])
     if application.status not in {OnboardingApplication.Status.DRAFT, OnboardingApplication.Status.REVISION_REQUIRED}:
         raise ValidationError("Only draft or revision-required applications can be edited.")
+    profile_data, plan_policy_id = _split_requested_plan(profile_data)
     org = application.organization
     for field, value in organization_data.items():
         setattr(org, field, value)
@@ -298,6 +336,13 @@ def update_onboarding(*, application, actor, organization_data, profile_data, re
         setattr(profile, field, value)
     profile.full_clean()
     profile.save()
+    if plan_policy_id not in (None, ""):
+        _persist_requested_plan(
+            application=application,
+            actor=actor,
+            plan_policy_id=plan_policy_id,
+            request=request,
+        )
     record_audit_event(actor=actor, action="onboarding.updated", instance=application, metadata={"organization_id": org.pk}, request=request)
     return application
 
@@ -307,9 +352,6 @@ def _assert_non_owner_team_capacity(*, organization, user):
     if target and target.is_active and target.role != Membership.Role.OWNER:
         return
     if organization.verification_status != Organization.VerificationStatus.ACTIVE:
-        # Accepted onboarding behavior: Team setup may precede professional
-        # approval. Subscription creation/entitlement enforcement starts only
-        # at the explicit ACTIVE boundary and is reconciled there.
         return
     from apps.subscriptions.services import entitlement_summary
 

@@ -141,16 +141,22 @@ def test_public_and_customer_site_real_chrome_acceptance(client, live_server):
         _login(driver, live_server, client, customer)
         driver.get(live_server.url + "/app/")
         wait.until(EC.presence_of_element_located((By.CLASS_NAME, "customer-welcome")))
-        assert "Live products to explore" in driver.page_source
-        assert product.title_en in driver.page_source
+        assert "Recent purchases" in driver.page_source
+        assert "Customization projects" in driver.page_source
         assert "Account preferences" in driver.page_source
+        assert "Live products to explore" not in driver.page_source
+        assert "Approved artwork to discover" not in driver.page_source
+        assert product.title_en not in driver.page_source
         assert "Save preferences" not in driver.page_source
         _assert_dom_accessibility_baseline(driver)
         _full_page_shot(driver, "10-customer-home-desktop-light.png")
 
         driver.get(live_server.url + "/app/settings/preferences/")
-        wait.until(EC.presence_of_element_located((By.ID, "preference-language")))
-        assert driver.find_element(By.CSS_SELECTOR, ".account-settings-intro h1").text == "Language & appearance"
+        wait.until(EC.presence_of_element_located((By.ID, "id_language")))
+        assert driver.find_element(By.CSS_SELECTOR, ".account-settings-intro h1").text == "Profile & preferences"
+        for control_id in ("id_first_name", "id_last_name", "id_language", "id_theme", "id_email", "id_current_password"):
+            assert driver.find_element(By.ID, control_id).is_displayed()
+        assert "Secure email change" in driver.page_source
         _assert_dom_accessibility_baseline(driver)
         (ARTIFACT_DIR / "public-performance.json").write_text(json.dumps({"navigation": nav, "vitals": vitals}, indent=2), encoding="utf-8")
     finally:
@@ -167,7 +173,9 @@ def test_public_and_customer_site_real_chrome_acceptance(client, live_server):
         html = mobile.find_element(By.TAG_NAME, "html")
         assert html.get_attribute("dir") == "rtl"
         assert html.get_attribute("data-theme") == "dark"
-        assert "منتجات منشورة الآن" in mobile.page_source
+        assert "آخر المشتريات" in mobile.page_source
+        assert "مشاريع التخصيص" in mobile.page_source
+        assert "منتجات منشورة الآن" not in mobile.page_source
         _assert_dom_accessibility_baseline(mobile)
 
         mobile.get(live_server.url + "/discover/?lang=ar")

@@ -1,3 +1,4 @@
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -5,6 +6,7 @@ from dateutil.relativedelta import relativedelta
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.urls import resolve
+from django.utils import timezone
 
 from apps.artwork.models import Artwork, ArtworkVersion
 from apps.design.models import GarmentDesign, GarmentDesignVersion
@@ -72,8 +74,9 @@ def test_application_approval_sets_active_and_creates_exactly_one_subscription(v
 
 
 @pytest.mark.django_db
-def test_manufacturer_approval_creates_one_six_month_trial(v2_3_reference_rows):
+def test_legacy_submitted_manufacturer_approval_defaults_to_starter_without_trial(v2_3_reference_rows):
     from apps.organizations.services import review_application
+    from apps.subscriptions.models import OnboardingPlanSelection
 
     owner = _user("v23-manufacturer-approval-owner")
     reviewer = _user("v23-manufacturer-approval-reviewer", staff=True)
@@ -85,33 +88,53 @@ def test_manufacturer_approval_creates_one_six_month_trial(v2_3_reference_rows):
         decision=OnboardingApplication.Status.APPROVED,
     )
     sub = OrganizationSubscription.objects.get(organization=org)
-    assert sub.status == OrganizationSubscription.Status.TRIALING
-    assert sub.current_plan.code == "manufacturer_pro"
-    assert sub.trial_consumed is True
-    assert sub.trial_ends_at == sub.trial_started_at + relativedelta(months=6)
+    assert sub.status == OrganizationSubscription.Status.ACTIVE
+    assert sub.current_plan.code == "manufacturer_starter"
+    assert sub.trial_started_at is None
+    assert sub.trial_ends_at is None
+    assert sub.trial_consumed is False
+    assert not OnboardingPlanSelection.objects.filter(application=application).exists()
     assert OrganizationSubscription.objects.filter(organization=org).count() == 1
 
 
 @pytest.mark.django_db
-def test_maneg_reactivation_reuses_existing_subscription_and_trial(v2_3_reference_rows):
+def test_maneg_reactivation_preserves_explicit_historical_manufacturer_trial(v2_3_reference_rows):
     from apps.platform_ops.maneg_services import reactivate_organization, suspend_organization
-    from apps.subscriptions.services import ensure_subscription_for_organization
+    from apps.subscriptions.services import _create_period, _period_end, get_effective_plan, plan_snapshot, price_snapshot
 
     owner = _user("v23-reactivation-owner")
     staff = _user("v23-reactivation-staff", staff=True)
     org = _org(owner, kind=Organization.Kind.MANUFACTURER)
-    application = OnboardingApplication.objects.create(
+    reviewed_at = timezone.now() - timedelta(days=1)
+    OnboardingApplication.objects.create(
         organization=org,
         status=OnboardingApplication.Status.APPROVED,
-        reviewed_at=staff.date_joined,
+        reviewed_at=reviewed_at,
     )
-    sub = ensure_subscription_for_organization(org, activation_at=application.reviewed_at)
-    original = (sub.pk, sub.trial_started_at, sub.trial_ends_at)
+    pro = get_effective_plan("manufacturer_pro", at=timezone.now())
+    trial_end = reviewed_at + relativedelta(months=6)
+    sub = OrganizationSubscription.objects.create(
+        organization=org,
+        current_plan=pro,
+        status=OrganizationSubscription.Status.TRIALING,
+        started_at=reviewed_at,
+        trial_started_at=reviewed_at,
+        trial_ends_at=trial_end,
+        trial_consumed=True,
+        current_period_start=reviewed_at,
+        current_period_end=_period_end(reviewed_at, hard_end=trial_end),
+        next_billing_at=trial_end,
+        policy_snapshot=plan_snapshot(pro),
+        price_snapshot=price_snapshot(pro),
+    )
+    _create_period(sub)
+    original = (sub.pk, sub.current_plan_id, sub.trial_started_at, sub.trial_ends_at)
 
     suspend_organization(organization=org, actor=staff)
     reactivate_organization(organization=org, actor=staff)
     reused = OrganizationSubscription.objects.get(organization=org)
-    assert (reused.pk, reused.trial_started_at, reused.trial_ends_at) == original
+    assert (reused.pk, reused.current_plan_id, reused.trial_started_at, reused.trial_ends_at) == original
+    assert reused.status == OrganizationSubscription.Status.TRIALING
     assert OrganizationSubscription.objects.filter(organization=org).count() == 1
 
 

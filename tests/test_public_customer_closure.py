@@ -118,14 +118,18 @@ def test_customer_home_uses_preferences_shortcut_and_dedicated_preferences_surfa
     assert home.status_code == 200
     body = home.content.decode()
     assert 'href="/app/settings/preferences/"' in body
-    assert 'id="preference-language"' not in body
+    assert 'id="id_language"' not in body
     assert "Save preferences" not in body
 
     preferences = client.get("/app/settings/preferences/")
     assert preferences.status_code == 200
     pref_body = preferences.content.decode()
-    assert 'id="preference-language"' in pref_body
-    assert 'id="preference-theme"' in pref_body
+    for control_id in ("id_first_name", "id_last_name", "id_language", "id_theme", "id_email", "id_current_password"):
+        assert f'id="{control_id}"' in pref_body
+    assert 'name="action" value="preferences"' in pref_body
+    assert 'name="action" value="email"' in pref_body
+    assert 'href="/account/password/change/"' in pref_body
+    assert "Secure email change" in pref_body
     assert '<meta name="robots" content="noindex,nofollow,noarchive">' in pref_body
 
     saved = client.post(

@@ -1,16 +1,14 @@
 from django.contrib import messages
 from django.contrib.auth import logout
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponseBadRequest
 from django.shortcuts import redirect, render
 from django.utils.translation import activate
 
-from apps.artwork.models import Artwork
 from apps.checkout.models import Cart, CustomerPurchase
 from apps.notifications.models import Notification
-from apps.storefront.models import StoreProduct, Storefront, StudioProject
-from .forms import PublicSignupForm
-from .models import User
+from apps.organizations.models import Membership, OnboardingApplication, Organization
+from apps.storefront.models import StudioProject
+from .forms import AccountEmailChangeForm, AccountPreferencesForm, PublicSignupForm
 
 
 def signup(request):
@@ -46,66 +44,135 @@ def sign_out(request):
     return render(request, "accounts/logout_confirm.html")
 
 
+def _business_memberships(user):
+    return list(
+        Membership.objects.filter(
+            user=user,
+            is_active=True,
+            organization__kind__in=[Organization.Kind.DESIGNER, Organization.Kind.MANUFACTURER],
+        )
+        .select_related("organization", "organization__onboarding_application")
+        .order_by("organization__kind", "joined_at", "id")
+    )
+
+
+def _application_for_membership(membership):
+    if not membership:
+        return None
+    try:
+        return membership.organization.onboarding_application
+    except OnboardingApplication.DoesNotExist:
+        return None
+
+
+def _business_cta_state(memberships):
+    if not memberships:
+        return "start", None
+    applications = [
+        application
+        for application in (_application_for_membership(membership) for membership in memberships)
+        if application is not None
+    ]
+    priority = (
+        (OnboardingApplication.Status.REVISION_REQUIRED, "update"),
+        (OnboardingApplication.Status.SUBMITTED, "under_review"),
+        (OnboardingApplication.Status.DRAFT, "continue"),
+        (OnboardingApplication.Status.APPROVED, "manage"),
+        (OnboardingApplication.Status.REJECTED, "reapply"),
+    )
+    for status, state in priority:
+        match = next((application for application in applications if application.status == status), None)
+        if match:
+            return state, match
+    return "manage", applications[0] if applications else None
+
+
 @login_required
 def app_home(request):
-    products = (
-        StoreProduct.objects.filter(
-            status=StoreProduct.Status.PUBLISHED,
-            storefront__status=Storefront.Status.PUBLISHED,
-        )
-        .select_related("storefront", "designed_product")
-        .prefetch_related("images__media_asset", "variants", "designed_product__placements")
-        .order_by("-featured", "-published_at", "-updated_at")[:6]
-    )
-    artworks = (
-        Artwork.objects.filter(status=Artwork.Status.APPROVED)
-        .select_related("organization")
-        .order_by("-updated_at")[:4]
-    )
-    purchases = (
-        CustomerPurchase.objects.filter(customer=request.user)
-        .prefetch_related("child_orders__item__store_product")
-        .order_by("-created_at")[:4]
-    )
-    studio_projects = (
-        StudioProject.objects.filter(customer=request.user)
-        .exclude(status=StudioProject.Status.ARCHIVED)
-        .select_related("product", "product__storefront", "variant")
-        .order_by("-updated_at")[:4]
-    )
-    active_cart = Cart.objects.filter(customer=request.user, status=Cart.Status.ACTIVE).prefetch_related("items").first()
+    purchases_qs = CustomerPurchase.objects.filter(customer=request.user)
+    recent_purchases = purchases_qs.prefetch_related("child_orders__item__store_product").order_by("-created_at")[:4]
+    active_studio_qs = StudioProject.objects.filter(customer=request.user).exclude(status=StudioProject.Status.ARCHIVED)
+    studio_projects = active_studio_qs.select_related("product", "product__storefront", "variant").order_by("-updated_at")[:4]
+    active_cart = Cart.objects.filter(customer=request.user, status=Cart.Status.ACTIVE).first()
+    cart_item_count = active_cart.items.count() if active_cart else 0
     unread_notifications = Notification.objects.filter(recipient=request.user, is_read=False).count()
+    business_memberships = _business_memberships(request.user)
+    business_cta_state, business_cta_application = _business_cta_state(business_memberships)
     return render(
         request,
         "accounts/app_home.html",
         {
-            "featured_products": products,
-            "featured_artworks": artworks,
-            "recent_purchases": purchases,
+            "recent_purchases": recent_purchases,
             "studio_projects": studio_projects,
             "active_cart": active_cart,
+            "cart_item_count": cart_item_count,
+            "active_studio_project_count": active_studio_qs.count(),
+            "purchase_count": purchases_qs.count(),
             "unread_notifications": unread_notifications,
+            "business_memberships": business_memberships,
+            "has_professional_business": bool(business_memberships),
+            "business_cta_state": business_cta_state,
+            "business_cta_application": business_cta_application,
+        },
+    )
+
+
+@login_required
+def business_start(request):
+    memberships = _business_memberships(request.user)
+    by_kind = {membership.organization.kind: membership for membership in memberships}
+    designer_membership = by_kind.get(Organization.Kind.DESIGNER)
+    manufacturer_membership = by_kind.get(Organization.Kind.MANUFACTURER)
+    return render(
+        request,
+        "accounts/business_start.html",
+        {
+            "designer_membership": designer_membership,
+            "manufacturer_membership": manufacturer_membership,
+            "designer_application": _application_for_membership(designer_membership),
+            "manufacturer_application": _application_for_membership(manufacturer_membership),
         },
     )
 
 
 @login_required
 def profile_preferences(request):
-    if request.method == "GET":
-        return render(request, "accounts/preferences.html")
+    preferences_form = AccountPreferencesForm(user=request.user)
+    email_form = AccountEmailChangeForm(user=request.user)
 
-    theme = request.POST.get("theme")
-    language = request.POST.get("language")
-    if theme not in User.Theme.values or language not in User.Language.values:
-        return HttpResponseBadRequest("Invalid preference")
+    if request.method == "POST":
+        action = request.POST.get("action", "preferences")
+        if action == "email":
+            email_form = AccountEmailChangeForm(request.POST, user=request.user)
+            if email_form.is_valid():
+                email_form.save()
+                messages.success(
+                    request,
+                    "تم تحديث البريد الإلكتروني."
+                    if getattr(request, "LANGUAGE_CODE", "en") == "ar"
+                    else "Email address updated.",
+                )
+                return redirect("profile-preferences")
+        else:
+            preferences_form = AccountPreferencesForm(request.POST, user=request.user)
+            if preferences_form.is_valid():
+                user = preferences_form.save()
+                activate(user.language_preference)
+                request.session["django_language"] = user.language_preference
+                messages.success(
+                    request,
+                    "تم حفظ تفضيلات الحساب."
+                    if user.language_preference == "ar"
+                    else "Account preferences saved.",
+                )
+                return redirect("profile-preferences")
 
-    request.user.theme_preference = theme
-    request.user.language_preference = language
-    request.user.save(update_fields=["theme_preference", "language_preference"])
-    activate(language)
-    request.session["django_language"] = language
-    messages.success(
+    return render(
         request,
-        "تم حفظ تفضيلات الحساب." if language == "ar" else "Account preferences saved.",
+        "accounts/preferences.html",
+        {
+            "form": preferences_form,
+            "preferences_form": preferences_form,
+            "email_form": email_form,
+        },
     )
-    return redirect("profile-preferences")

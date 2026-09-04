@@ -137,7 +137,11 @@ def test_private_customer_surfaces_are_noindex(client):
     body = response.content.decode()
     assert '<meta name="robots" content="noindex,nofollow,noarchive">' in body
     assert response.headers["X-Robots-Tag"] == "noindex, nofollow, noarchive"
-    assert "Live products to explore" in body
+    assert "Recent purchases" in body
+    assert "Customization projects" in body
+    assert "Account preferences" in body
+    assert "Live products to explore" not in body
+    assert "Approved artwork to discover" not in body
 
 
 @pytest.mark.django_db

@@ -8,7 +8,7 @@ from apps.design.models import GarmentDesign
 from apps.organizations.designer_context import designer_context
 from apps.organizations.manufacturer_context import manufacturer_context
 from apps.organizations.models import Membership, Organization
-from .models import TeamInvitation
+from .models import SubscriptionBillingConfirmation, TeamInvitation
 from .services import (
     ARTWORK_SLOT_STATUSES,
     DESIGN_SLOT_STATUSES,
@@ -17,6 +17,7 @@ from .services import (
     cancel_subscription,
     downgrade_to_starter,
     entitlement_summary,
+    onboarding_commercial_summary,
     require_owner,
 )
 
@@ -50,6 +51,26 @@ def _manufacturer(request):
     return context, organization
 
 
+def _commercial_context(organization):
+    commercial = onboarding_commercial_summary(organization)
+    history = [
+        {
+            "confirmed_at": row.confirmed_at,
+            "plan_code": row.plan_code,
+            "plan_version": row.plan_version,
+            "amount": row.amount,
+            "currency": row.currency,
+            "status": row.status,
+            "consumed": bool(row.consumed_period_id),
+        }
+        for row in SubscriptionBillingConfirmation.objects.filter(organization=organization).order_by("-confirmed_at", "-pk")[:50]
+    ]
+    return {
+        "onboarding_commercial": commercial,
+        "billing_history": history,
+    }
+
+
 def _subscription_action(request, organization, context, *, designer):
     if request.method != "POST":
         return None
@@ -61,7 +82,7 @@ def _subscription_action(request, organization, context, *, designer):
     subscription = summary["subscription"]
     if action == "upgrade":
         raise ValidationError(
-            "Professional recurring payment collection is not configured in the accepted repository. Pro activation requires explicit confirmed billing evidence through authorized operations; no client boolean can activate Pro."
+            "Pro activation requires explicit confirmed billing evidence through authorized operations; browser/client requests cannot activate paid entitlement."
         )
     if action == "cancel":
         cancel_subscription(subscription=subscription, actor=request.user, request=request)
@@ -111,6 +132,7 @@ def designer_subscription(request):
         "active_artworks_for_retention": active_artworks,
         "is_subscription_owner": context["designer_membership"].role == Membership.Role.OWNER,
     })
+    context.update(_commercial_context(organization))
     return render(request, "designer/subscription.html", context)
 
 
@@ -130,6 +152,7 @@ def manufacturer_subscription(request):
         "subscription_summary": summary,
         "is_subscription_owner": context["manufacturer_membership"].role == Membership.Role.OWNER,
     })
+    context.update(_commercial_context(organization))
     return render(request, "manufacturer/subscription.html", context)
 
 

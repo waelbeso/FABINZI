@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
+from django.utils import timezone
 
 from apps.organizations.models import Membership
 
@@ -64,6 +65,45 @@ class SubscriptionPlanPolicy(models.Model):
 
     def __str__(self):
         return f"{self.code} v{self.version} · {self.public_name_en}"
+
+
+class OnboardingPlanSelection(models.Model):
+    application = models.OneToOneField(
+        "organizations.OnboardingApplication",
+        on_delete=models.PROTECT,
+        related_name="plan_selection",
+    )
+    selected_plan_policy = models.ForeignKey(
+        SubscriptionPlanPolicy,
+        on_delete=models.PROTECT,
+        related_name="onboarding_selections",
+    )
+    plan_code = models.CharField(max_length=64, editable=False)
+    plan_version = models.PositiveIntegerField(editable=False)
+    policy_snapshot = models.JSONField(default=dict, editable=False)
+    price_snapshot = models.JSONField(default=dict, editable=False)
+    selected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="onboarding_plan_selections",
+    )
+    selected_at = models.DateTimeField(default=timezone.now, editable=False)
+    payment_due_at = models.DateTimeField(null=True, blank=True, editable=False, db_index=True)
+
+    class Meta:
+        ordering = ("-selected_at", "-id")
+
+    def clean(self):
+        if self.application_id and self.selected_plan_policy_id:
+            if self.selected_plan_policy.audience != self.application.organization.kind:
+                raise ValidationError("Selected plan audience must match the onboarding Organization.")
+        if self.selected_plan_policy_id and self.plan_code and self.plan_code != self.selected_plan_policy.code:
+            raise ValidationError({"plan_code": "Stored onboarding plan code must match the selected policy."})
+        if self.selected_plan_policy_id and self.plan_version and self.plan_version != self.selected_plan_policy.version:
+            raise ValidationError({"plan_version": "Stored onboarding plan version must match the selected policy."})
+
+    def __str__(self):
+        return f"{self.application} · {self.plan_code} v{self.plan_version}"
 
 
 class OrganizationSubscription(models.Model):
