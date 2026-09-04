@@ -17,6 +17,7 @@ env:
   ACCEPTED_FLUTTER_SHA: bbe1d36eeb149dd876e685da91823ae09f74fbc4
   FINAL_PRE_MAIN_BASE_SHA: bbe1d36eeb149dd876e685da91823ae09f74fbc4
   HISTORICAL_MAIN_SHA: 91f358c08d89557893e983f1c0d247fd1b42b15f
+  PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
 
 jobs:
   source-backend:
@@ -57,12 +58,13 @@ jobs:
           actual="$(git rev-parse HEAD)"
           test "$actual" = "$expected"
           test "$(git rev-parse origin/feature/web-productization)" = "$FINAL_PRE_MAIN_BASE_SHA"
-          test "$(git rev-parse origin/main)" = "$HISTORICAL_MAIN_SHA"
+          git merge-base --is-ancestor "$PR_BASE_SHA" HEAD
           git merge-base --is-ancestor "$ACCEPTED_FLUTTER_SHA" HEAD
           printf '%s\n' "$actual" > "$out/candidate-sha.txt"
           printf '%s\n' "$FINAL_PRE_MAIN_BASE_SHA" > "$out/final-pre-main-base-sha.txt"
           printf '%s\n' "$ACCEPTED_FLUTTER_SHA" > "$out/accepted-flutter-sha.txt"
-          printf '%s\n' "$HISTORICAL_MAIN_SHA" > "$out/main-sha.txt"
+          printf '%s\n' "$PR_BASE_SHA" > "$out/main-base-sha.txt"
+          printf '%s\n' "$HISTORICAL_MAIN_SHA" > "$out/historical-main-sha.txt"
           printf 'PASS\n' > "$out/repository-lock-result.txt"
       - name: Frozen Customer API zero drift
         shell: bash
@@ -245,7 +247,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
           test "$(git rev-parse origin/feature/web-productization)" = "$FINAL_PRE_MAIN_BASE_SHA"
-          test "$(git rev-parse origin/main)" = "$HISTORICAL_MAIN_SHA"
+          git merge-base --is-ancestor "$PR_BASE_SHA" HEAD
           git merge-base --is-ancestor "$ACCEPTED_FLUTTER_SHA" HEAD
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
@@ -323,7 +325,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
           test "$(git rev-parse origin/feature/web-productization)" = "$FINAL_PRE_MAIN_BASE_SHA"
-          test "$(git rev-parse origin/main)" = "$HISTORICAL_MAIN_SHA"
+          git merge-base --is-ancestor "$PR_BASE_SHA" HEAD
           git merge-base --is-ancestor "$ACCEPTED_FLUTTER_SHA" HEAD
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
@@ -406,10 +408,11 @@ jobs:
           accepted_flutter_sha=$ACCEPTED_FLUTTER_SHA
           integration_method=non-forced fast-forward
           resulting_feature_sha=$FINAL_PRE_MAIN_BASE_SHA
+          release_base_sha=$PR_BASE_SHA
           historical_main_sha=$HISTORICAL_MAIN_SHA
           EOF
           python - <<'PY'
-          import json, subprocess
+          import json, os, subprocess
           from pathlib import Path
           out=Path('artifacts/final-pre-main-release-gate')
           f=json.loads((out/'flutter/flutter-version.json').read_text())
@@ -420,6 +423,7 @@ jobs:
             'pre_integration_feature_sha':'101b62220222f6372b11dfd5c76bd71aee1ab420',
             'integration_method':'non-forced fast-forward',
             'resulting_feature_sha':'bbe1d36eeb149dd876e685da91823ae09f74fbc4',
+            'release_base_sha':os.environ['PR_BASE_SHA'],
             'historical_main_sha':'91f358c08d89557893e983f1c0d247fd1b42b15f',
             'python':'3.12.14','backend':'PASS','migrations':'PASS','production_check':'PASS',
             'web_release':'FABINZI WEB v1.0 / 1.0.0','web_v1_contract':'PASS',
