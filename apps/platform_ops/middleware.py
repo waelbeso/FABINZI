@@ -15,15 +15,18 @@ logger = logging.getLogger(__name__)
 
 
 class PublicLocaleMiddleware:
-    """Allow stable crawlable language alternates via ?lang=en|ar without mutating user preferences."""
+    """Apply explicit public language alternates or the user's saved session preference."""
 
     SUPPORTED = {"en", "ar"}
+    SESSION_KEY = "django_language"
 
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
         language = request.GET.get("lang") if request.method in {"GET", "HEAD"} else None
+        if language not in self.SUPPORTED:
+            language = request.session.get(self.SESSION_KEY)
         if language in self.SUPPORTED:
             activate(language)
             request.LANGUAGE_CODE = language
