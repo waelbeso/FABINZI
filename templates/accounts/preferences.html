@@ -1,5 +1,16 @@
 {% extends "base.html" %}
 {% block title %}{% if request.LANGUAGE_CODE == 'ar' %}تفضيلات الحساب | FABINZI{% else %}Account Preferences | FABINZI{% endif %}{% endblock %}
+{% block extra_head %}
+{{ block.super }}
+<script>
+(function(){
+  const saved="{{ user.theme_preference|escapejs }}";
+  if(!['system','light','dark'].includes(saved)) return;
+  document.documentElement.dataset.theme=saved;
+  try{localStorage.setItem('fabinzi-theme',saved)}catch(e){}
+})();
+</script>
+{% endblock %}
 {% block content %}
 <nav class="breadcrumbs" aria-label="{% if request.LANGUAGE_CODE == 'ar' %}مسار الصفحة{% else %}Breadcrumb{% endif %}">
   <a href="{% url 'app-home' %}">{% if request.LANGUAGE_CODE == 'ar' %}FABINZI الخاص بي{% else %}My FABINZI{% endif %}</a><span>/</span><span>{% if request.LANGUAGE_CODE == 'ar' %}التفضيلات{% else %}Preferences{% endif %}</span>
@@ -31,7 +42,7 @@
           <option value="light" {% if user.theme_preference == 'light' %}selected{% endif %}>{% if request.LANGUAGE_CODE == 'ar' %}فاتح{% else %}Light{% endif %}</option>
           <option value="dark" {% if user.theme_preference == 'dark' %}selected{% endif %}>{% if request.LANGUAGE_CODE == 'ar' %}داكن{% else %}Dark{% endif %}</option>
         </select>
-        <p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}يمكنك أيضًا تبديل المظهر مؤقتًا من زر المظهر في الترويسة.{% else %}You can also temporarily cycle appearance from the header control.{% endif %}</p>
+        <p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}يتم تطبيق المظهر المحفوظ فورًا على هذا المتصفح، ويمكنك أيضًا تبديله مؤقتًا من زر المظهر في الترويسة.{% else %}Your saved appearance is applied immediately on this browser, and you can still cycle it temporarily from the header control.{% endif %}</p>
       </div>
       <button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}حفظ التفضيلات{% else %}Save preferences{% endif %}</button>
     </form>

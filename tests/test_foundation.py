@@ -28,6 +28,28 @@ def test_theme_and_language_persist(client):
     assert user.language_preference == "ar"
 
 @pytest.mark.django_db
+def test_theme_and_language_apply_after_preferences_redirect(client):
+    user = User.objects.create_user(
+        username="preference-customer",
+        password="strong-pass-123",
+        theme_preference="light",
+        language_preference="en",
+    )
+    client.force_login(user)
+
+    response = client.post(
+        reverse("profile-preferences"),
+        {"theme": "dark", "language": "ar"},
+        follow=True,
+    )
+
+    assert response.status_code == 200
+    rendered = response.content.decode()
+    assert '<html lang="ar" dir="rtl" data-theme="dark">' in rendered
+    assert "حفظ التفضيلات" in rendered
+    assert "localStorage.setItem('fabinzi-theme',saved)" in rendered
+
+@pytest.mark.django_db
 def test_audit_event_is_append_only():
     event = AuditEvent.objects.create(action="test")
     event.action = "tampered"
