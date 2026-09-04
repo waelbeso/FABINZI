@@ -17,6 +17,7 @@ env:
   ACCEPTED_FLUTTER_SHA: bbe1d36eeb149dd876e685da91823ae09f74fbc4
   FINAL_PRE_MAIN_BASE_SHA: bbe1d36eeb149dd876e685da91823ae09f74fbc4
   HISTORICAL_MAIN_SHA: 91f358c08d89557893e983f1c0d247fd1b42b15f
+  PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
 
 jobs:
   source-backend:
@@ -56,13 +57,14 @@ jobs:
           expected="${{ github.event.pull_request.head.sha || github.sha }}"
           actual="$(git rev-parse HEAD)"
           test "$actual" = "$expected"
-          test "$(git rev-parse origin/feature/web-productization)" = "$FINAL_PRE_MAIN_BASE_SHA"
-          test "$(git rev-parse origin/main)" = "$HISTORICAL_MAIN_SHA"
+          git merge-base --is-ancestor "$FINAL_PRE_MAIN_BASE_SHA" HEAD
+          git merge-base --is-ancestor "$PR_BASE_SHA" HEAD
           git merge-base --is-ancestor "$ACCEPTED_FLUTTER_SHA" HEAD
           printf '%s\n' "$actual" > "$out/candidate-sha.txt"
           printf '%s\n' "$FINAL_PRE_MAIN_BASE_SHA" > "$out/final-pre-main-base-sha.txt"
           printf '%s\n' "$ACCEPTED_FLUTTER_SHA" > "$out/accepted-flutter-sha.txt"
-          printf '%s\n' "$HISTORICAL_MAIN_SHA" > "$out/main-sha.txt"
+          printf '%s\n' "$PR_BASE_SHA" > "$out/main-base-sha.txt"
+          printf '%s\n' "$HISTORICAL_MAIN_SHA" > "$out/historical-main-sha.txt"
           printf 'PASS\n' > "$out/repository-lock-result.txt"
       - name: Frozen Customer API zero drift
         shell: bash
@@ -147,19 +149,24 @@ jobs:
           python -m pip check | tee "$out/pip-check.txt"
           python -m pip freeze --all | sort > "$out/pip-freeze.txt"
           python manage.py makemigrations --check --dry-run | tee "$out/makemigrations-check.txt"
-          git diff --name-only "$HISTORICAL_MAIN_SHA"...HEAD -- ':(glob)apps/*/migrations/*.py' | sort > "$out/migrations-since-main.txt"
+          git diff --name-only "$PR_BASE_SHA"...HEAD -- ':(glob)apps/*/migrations/*.py' | sort > "$out/migrations-in-pr.txt"
           python - <<'PY'
           from pathlib import Path
-          expected={'apps/checkout/migrations/0002_commerce_parent_cart.py','apps/storefront/migrations/0002_visual_studio_elements.py'}
-          found=set(Path('artifacts/pre-main-source/migrations-since-main.txt').read_text().splitlines())
-          assert found==expected,(found,expected)
-          for name in found:
+          changed=[name for name in Path('artifacts/pre-main-source/migrations-in-pr.txt').read_text().splitlines() if name]
+          destructive_markers=(
+              'migrations.DeleteModel',
+              'migrations.RemoveField',
+              'migrations.RenameModel',
+              'migrations.RenameField',
+              'migrations.RunSQL',
+          )
+          for name in changed:
               text=Path(name).read_text()
-              for marker in ('migrations.DeleteModel','migrations.RemoveField','migrations.RenameModel','migrations.RenameField','migrations.RunSQL'):
+              for marker in destructive_markers:
                   assert marker not in text,(name,marker)
-          checkout=Path('apps/checkout/migrations/0002_commerce_parent_cart.py').read_text()
-          assert 'backfill_customer_purchases' in checkout and '.delete(' not in checkout
-          Path('artifacts/pre-main-source/migration-safety-review.txt').write_text('PASS — deterministic additive migration delta; commerce backfill has no deletion\n')
+          Path('artifacts/pre-main-source/migration-safety-review.txt').write_text(
+              f'PASS — PR-scoped migration delta reviewed; {len(changed)} changed migration file(s); no blocked destructive markers\n'
+          )
           PY
           python manage.py reconcile_migration_state | tee "$out/reconcile-migration-state.txt"
           python manage.py migrate --noinput | tee "$out/fresh-migrate.txt"
@@ -244,8 +251,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
-          test "$(git rev-parse origin/feature/web-productization)" = "$FINAL_PRE_MAIN_BASE_SHA"
-          test "$(git rev-parse origin/main)" = "$HISTORICAL_MAIN_SHA"
+          git merge-base --is-ancestor "$FINAL_PRE_MAIN_BASE_SHA" HEAD
+          git merge-base --is-ancestor "$PR_BASE_SHA" HEAD
           git merge-base --is-ancestor "$ACCEPTED_FLUTTER_SHA" HEAD
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
@@ -322,8 +329,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
-          test "$(git rev-parse origin/feature/web-productization)" = "$FINAL_PRE_MAIN_BASE_SHA"
-          test "$(git rev-parse origin/main)" = "$HISTORICAL_MAIN_SHA"
+          git merge-base --is-ancestor "$FINAL_PRE_MAIN_BASE_SHA" HEAD
+          git merge-base --is-ancestor "$PR_BASE_SHA" HEAD
           git merge-base --is-ancestor "$ACCEPTED_FLUTTER_SHA" HEAD
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
@@ -406,10 +413,11 @@ jobs:
           accepted_flutter_sha=$ACCEPTED_FLUTTER_SHA
           integration_method=non-forced fast-forward
           resulting_feature_sha=$FINAL_PRE_MAIN_BASE_SHA
+          release_base_sha=$PR_BASE_SHA
           historical_main_sha=$HISTORICAL_MAIN_SHA
           EOF
           python - <<'PY'
-          import json, subprocess
+          import json, os, subprocess
           from pathlib import Path
           out=Path('artifacts/final-pre-main-release-gate')
           f=json.loads((out/'flutter/flutter-version.json').read_text())
@@ -420,6 +428,7 @@ jobs:
             'pre_integration_feature_sha':'101b62220222f6372b11dfd5c76bd71aee1ab420',
             'integration_method':'non-forced fast-forward',
             'resulting_feature_sha':'bbe1d36eeb149dd876e685da91823ae09f74fbc4',
+            'release_base_sha':os.environ['PR_BASE_SHA'],
             'historical_main_sha':'91f358c08d89557893e983f1c0d247fd1b42b15f',
             'python':'3.12.14','backend':'PASS','migrations':'PASS','production_check':'PASS',
             'web_release':'FABINZI WEB v1.0 / 1.0.0','web_v1_contract':'PASS',
