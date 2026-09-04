@@ -1,1 +1,191 @@
-{% extends "manufacturer/base.html" %}{% block manufacturer_content %}<header class="mfr-page-head"><div><div class="eyebrow">V2-5 · {% if request.LANGUAGE_CODE == 'ar' %}الملف العام{% else %}PUBLIC PROFILE{% endif %}</div><h1>{% if request.LANGUAGE_CODE == 'ar' %}ملف شريك الإنتاج العام{% else %}Public production-partner profile{% endif %}</h1><p class="muted">{% if request.LANGUAGE_CODE == 'ar' %}بيانات الاتصال الخاصة والطاقة وMOQ والمهلة لا تنشر هنا.{% else %}Private contact data, capacity, MOQ and lead time are never published here.{% endif %}</p></div><span class="badge">{{ public_state.get_visibility_display }}</span></header>{% if public_revision %}<section class="mfr-section"><strong>{% if request.LANGUAGE_CODE == 'ar' %}آخر مراجعة:{% else %}Latest revision:{% endif %}</strong> {{ public_revision.get_status_display }}{% if public_revision.review_notes %}<p>{{ public_revision.review_notes }}</p>{% endif %}</section>{% endif %}<section class="mfr-section"><form method="post" class="mfr-form-grid">{% csrf_token %}<input type="hidden" name="organization" value="{{ manufacturer_organization.id }}"><label>Public name EN<input name="public_name_en" value="{{ edit_public_data.public_state.public_name_en }}"></label><label>الاسم العام AR<input name="public_name_ar" value="{{ edit_public_data.public_state.public_name_ar }}"></label><label>Headline EN<input name="headline_en" value="{{ edit_public_data.listing.headline_en }}"></label><label>العنوان AR<input name="headline_ar" value="{{ edit_public_data.listing.headline_ar }}"></label><label>Overview EN<textarea name="overview_en">{{ edit_public_data.listing.overview_en }}</textarea></label><label>نبذة AR<textarea name="overview_ar">{{ edit_public_data.listing.overview_ar }}</textarea></label><label>{% if request.LANGUAGE_CODE == 'ar' %}المدينة{% else %}City{% endif %}<input name="city" value="{{ edit_public_data.organization.city }}"></label><label>{% if request.LANGUAGE_CODE == 'ar' %}المنطقة{% else %}Region{% endif %}<input name="region" value="{{ edit_public_data.organization.region }}"></label><label>{% if request.LANGUAGE_CODE == 'ar' %}الدولة{% else %}Country{% endif %}<input name="country" value="{{ edit_public_data.organization.country }}"></label><label>Website<input name="website" value="{{ edit_public_data.organization.website }}"></label><label>{% if request.LANGUAGE_CODE == 'ar' %}رابط خرائط عام للمراجعة{% else %}Public Google Maps URL for review{% endif %}<input name="public_google_maps_url" value="{{ edit_public_data.public_state.public_google_maps_url }}"></label><label>{% if request.LANGUAGE_CODE == 'ar' %}فئات إنتاج عامة{% else %}Public production categories{% endif %}<input name="public_categories" value="{{ edit_public_data.public_state.public_categories|join:', ' }}"></label><label>{% if request.LANGUAGE_CODE == 'ar' %}شهادات عامة{% else %}Public certifications{% endif %}<input name="public_certifications" value="{{ edit_public_data.public_state.public_certifications|join:', ' }}"></label><label>{% if request.LANGUAGE_CODE == 'ar' %}صورة عامة{% else %}Public profile image{% endif %}<select name="profile_image_id"><option value="">—</option>{% for asset in public_images %}<option value="{{ asset.id }}" {% if edit_public_data.public_state.profile_image_id == asset.id %}selected{% endif %}>{{ asset.original_filename }}</option>{% endfor %}</select></label><label>{% if request.LANGUAGE_CODE == 'ar' %}غلاف عام{% else %}Public cover image{% endif %}<select name="cover_image_id"><option value="">—</option>{% for asset in public_images %}<option value="{{ asset.id }}" {% if edit_public_data.public_state.cover_image_id == asset.id %}selected{% endif %}>{{ asset.original_filename }}</option>{% endfor %}</select></label><div class="cluster"><button class="button button--ghost" name="action" value="save_revision">{% if request.LANGUAGE_CODE == 'ar' %}حفظ المسودة{% else %}Save draft{% endif %}</button><button class="button" name="action" value="submit_revision">{% if request.LANGUAGE_CODE == 'ar' %}إرسال للمراجعة{% else %}Submit for review{% endif %}</button></div></form></section><section class="mfr-section"><h2>{% if request.LANGUAGE_CODE == 'ar' %}قدرات عامة موثقة{% else %}Verified public capabilities{% endif %}</h2><div class="tag-row">{% for item in verified_capabilities %}<span class="badge badge--success">{{ item.get_canonical_code_display }}</span>{% empty %}<span class="muted">—</span>{% endfor %}</div><form method="post" class="cluster">{% csrf_token %}<input type="hidden" name="organization" value="{{ manufacturer_organization.id }}"><button class="button button--ghost" name="action" value="hide">{% if request.LANGUAGE_CODE == 'ar' %}إخفاء الملف فورًا{% else %}Hide profile immediately{% endif %}</button><button class="button" name="action" value="request_visibility">{% if request.LANGUAGE_CODE == 'ar' %}طلب إظهار الملف{% else %}Request public visibility{% endif %}</button></form></section>{% endblock %}
+{% extends "manufacturer/base.html" %}
+
+{% block manufacturer_content %}
+<header class="mfr-page-head">
+  <div>
+    <div class="eyebrow">V2-5 · {% if request.LANGUAGE_CODE == 'ar' %}الملف العام{% else %}PUBLIC PROFILE{% endif %}</div>
+    <h1>{% if request.LANGUAGE_CODE == 'ar' %}ملف شريك الإنتاج العام{% else %}Public production partner profile{% endif %}</h1>
+    <p class="muted">
+      {% if request.LANGUAGE_CODE == 'ar' %}
+        تحكم في المعلومات التي يمكن نشرها للعامة. بيانات الاتصال الخاصة والطاقة وMOQ والمهلة لا تنشر هنا.
+      {% else %}
+        Control the information that may appear publicly. Private contact data, capacity, MOQ and lead time are never published here.
+      {% endif %}
+    </p>
+  </div>
+  <span class="badge">{{ public_state.get_visibility_display }}</span>
+</header>
+
+{% if public_revision %}
+<section class="mfr-panel">
+  <div class="action-row">
+    <strong>{% if request.LANGUAGE_CODE == 'ar' %}آخر مراجعة{% else %}Latest revision{% endif %}</strong>
+    <span class="badge">{{ public_revision.get_status_display }}</span>
+  </div>
+  {% if public_revision.review_notes %}
+    <p class="muted">{{ public_revision.review_notes }}</p>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="mfr-panel">
+  <h2>{% if request.LANGUAGE_CODE == 'ar' %}معلومات الملف العام{% else %}Public profile information{% endif %}</h2>
+  <p class="muted">
+    {% if request.LANGUAGE_CODE == 'ar' %}
+      راجع البيانات العربية والإنجليزية قبل إرسالها للمراجعة.
+    {% else %}
+      Review both Arabic and English public information before submitting it for approval.
+    {% endif %}
+  </p>
+
+  <form method="post" class="form-grid">
+    {% csrf_token %}
+    <input type="hidden" name="organization" value="{{ manufacturer_organization.id }}">
+
+    <label>
+      Public name EN
+      <input name="public_name_en" dir="ltr" value="{{ edit_public_data.public_state.public_name_en }}">
+    </label>
+
+    <label dir="rtl">
+      الاسم العام AR
+      <input name="public_name_ar" dir="rtl" value="{{ edit_public_data.public_state.public_name_ar }}">
+    </label>
+
+    <label>
+      Headline EN
+      <input name="headline_en" dir="ltr" value="{{ edit_public_data.listing.headline_en }}">
+    </label>
+
+    <label dir="rtl">
+      العنوان AR
+      <input name="headline_ar" dir="rtl" value="{{ edit_public_data.listing.headline_ar }}">
+    </label>
+
+    <label>
+      Overview EN
+      <textarea name="overview_en" dir="ltr" rows="5">{{ edit_public_data.listing.overview_en }}</textarea>
+    </label>
+
+    <label dir="rtl">
+      نبذة AR
+      <textarea name="overview_ar" dir="rtl" rows="5">{{ edit_public_data.listing.overview_ar }}</textarea>
+    </label>
+
+    <div class="span-2">
+      <h3>{% if request.LANGUAGE_CODE == 'ar' %}الموقع والروابط العامة{% else %}Location & public links{% endif %}</h3>
+    </div>
+
+    <label>
+      {% if request.LANGUAGE_CODE == 'ar' %}المنطقة / المحافظة{% else %}Region{% endif %}
+      <input name="region" value="{{ edit_public_data.organization.region }}">
+    </label>
+
+    <label>
+      {% if request.LANGUAGE_CODE == 'ar' %}المدينة{% else %}City{% endif %}
+      <input name="city" value="{{ edit_public_data.organization.city }}">
+    </label>
+
+    <label>
+      {% if request.LANGUAGE_CODE == 'ar' %}الدولة{% else %}Country{% endif %}
+      <input name="country" value="{{ edit_public_data.organization.country }}">
+    </label>
+
+    <label>
+      Website
+      <input name="website" type="url" dir="ltr" value="{{ edit_public_data.organization.website }}" placeholder="https://">
+    </label>
+
+    <label class="span-2">
+      {% if request.LANGUAGE_CODE == 'ar' %}رابط خرائط Google العام للمراجعة{% else %}Public Google Maps URL for review{% endif %}
+      <input name="public_google_maps_url" type="url" dir="ltr" value="{{ edit_public_data.public_state.public_google_maps_url }}" placeholder="https://">
+    </label>
+
+    <div class="span-2">
+      <h3>{% if request.LANGUAGE_CODE == 'ar' %}معلومات الإنتاج العامة{% else %}Public production information{% endif %}</h3>
+    </div>
+
+    <label>
+      {% if request.LANGUAGE_CODE == 'ar' %}فئات الإنتاج العامة (افصل بينها بفواصل){% else %}Public production categories (comma separated){% endif %}
+      <input name="public_categories" value="{{ edit_public_data.public_state.public_categories|join:', ' }}">
+    </label>
+
+    <label>
+      {% if request.LANGUAGE_CODE == 'ar' %}الشهادات العامة (افصل بينها بفواصل){% else %}Public certifications (comma separated){% endif %}
+      <input name="public_certifications" value="{{ edit_public_data.public_state.public_certifications|join:', ' }}">
+    </label>
+
+    <div class="span-2">
+      <h3>{% if request.LANGUAGE_CODE == 'ar' %}الصور العامة{% else %}Public media{% endif %}</h3>
+    </div>
+
+    <label>
+      {% if request.LANGUAGE_CODE == 'ar' %}صورة الملف العامة{% else %}Public profile image{% endif %}
+      <select name="profile_image_id">
+        <option value="">{% if request.LANGUAGE_CODE == 'ar' %}بدون صورة{% else %}No image selected{% endif %}</option>
+        {% for asset in public_images %}
+          <option value="{{ asset.id }}" {% if edit_public_data.public_state.profile_image_id == asset.id %}selected{% endif %}>{{ asset.original_filename }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label>
+      {% if request.LANGUAGE_CODE == 'ar' %}صورة الغلاف العامة{% else %}Public cover image{% endif %}
+      <select name="cover_image_id">
+        <option value="">{% if request.LANGUAGE_CODE == 'ar' %}بدون غلاف{% else %}No cover selected{% endif %}</option>
+        {% for asset in public_images %}
+          <option value="{{ asset.id }}" {% if edit_public_data.public_state.cover_image_id == asset.id %}selected{% endif %}>{{ asset.original_filename }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <div class="action-row span-2">
+      <button class="button button--ghost" name="action" value="save_revision">
+        {% if request.LANGUAGE_CODE == 'ar' %}حفظ المسودة{% else %}Save draft{% endif %}
+      </button>
+      <button class="button" name="action" value="submit_revision">
+        {% if request.LANGUAGE_CODE == 'ar' %}إرسال للمراجعة{% else %}Submit for review{% endif %}
+      </button>
+    </div>
+  </form>
+</section>
+
+<section class="mfr-panel">
+  <h2>{% if request.LANGUAGE_CODE == 'ar' %}القدرات العامة الموثقة{% else %}Verified public capabilities{% endif %}</h2>
+  <p class="muted">
+    {% if request.LANGUAGE_CODE == 'ar' %}
+      تظهر هنا فقط القدرات التي تم توثيقها والموافقة على نشرها.
+    {% else %}
+      Only capabilities that are verified and approved for public display appear here.
+    {% endif %}
+  </p>
+  <div class="tag-row">
+    {% for item in verified_capabilities %}
+      <span class="badge badge--success">{{ item.get_canonical_code_display }}</span>
+    {% empty %}
+      <span class="muted">{% if request.LANGUAGE_CODE == 'ar' %}لا توجد قدرات عامة موثقة حتى الآن.{% else %}No verified public capabilities yet.{% endif %}</span>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="mfr-panel">
+  <h2>{% if request.LANGUAGE_CODE == 'ar' %}ظهور الملف العام{% else %}Public visibility{% endif %}</h2>
+  <p class="muted">
+    {% if request.LANGUAGE_CODE == 'ar' %}
+      الإخفاء فوري. طلب الإظهار يظل خاضعًا لمراجعة FABINZI.
+    {% else %}
+      Hiding is immediate. Public visibility remains subject to FABINZI approval.
+    {% endif %}
+  </p>
+  <form method="post" class="action-row">
+    {% csrf_token %}
+    <input type="hidden" name="organization" value="{{ manufacturer_organization.id }}">
+    <button class="button button--ghost" name="action" value="hide">
+      {% if request.LANGUAGE_CODE == 'ar' %}إخفاء الملف فورًا{% else %}Hide profile immediately{% endif %}
+    </button>
+    <button class="button" name="action" value="request_visibility">
+      {% if request.LANGUAGE_CODE == 'ar' %}طلب إظهار الملف{% else %}Request public visibility{% endif %}
+    </button>
+  </form>
+</section>
+{% endblock %}
