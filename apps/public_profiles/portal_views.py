@@ -79,10 +79,53 @@ def _profile_action(request, organization, *, manufacturer=False):
     return "Public profile draft saved."
 
 
-def _profile_context(organization):
+def _legacy_designer_profile_data(organization):
+    """Render legacy Designer data safely without weakening save-time validation."""
+
+    state = ensure_public_state(organization)
+    profile = organization.designer_profile
+    social_links = deepcopy(profile.social_links or {})
+    instagram = str(social_links.get("instagram") or "").strip()
+    if instagram.startswith("@") and len(instagram) > 1:
+        social_links["instagram"] = f"https://www.instagram.com/{instagram[1:].strip('/')}/"
+
+    return {
+        "organization": {
+            "display_name": organization.display_name,
+            "website": organization.website,
+            "city": organization.city,
+            "region": organization.region,
+            "country": organization.country,
+        },
+        "public_state": {
+            "public_name_en": state.public_name_en or organization.display_name,
+            "public_name_ar": state.public_name_ar,
+            "bio_en": state.bio_en,
+            "bio_ar": state.bio_ar,
+            "specializations": list(state.specializations or []),
+            "profile_image_id": state.profile_image_id,
+            "cover_image_id": state.cover_image_id,
+            "public_google_maps_url": state.public_google_maps_url,
+            "public_categories": list(state.public_categories or []),
+            "public_certifications": list(state.public_certifications or []),
+        },
+        "profile": {
+            "studio_name": profile.studio_name,
+            "portfolio_url": profile.portfolio_url,
+            "social_links": social_links,
+        },
+    }
+
+
+def _profile_context(organization, *, tolerate_legacy_designer_data=False):
     latest = organization.public_profile_revisions.order_by("-created_at").first()
     editable = organization.public_profile_revisions.filter(status__in=PublicProfileRevision.EDITABLE_STATUSES).first()
-    current = current_public_profile_data(organization)
+    try:
+        current = current_public_profile_data(organization)
+    except ValidationError:
+        if not tolerate_legacy_designer_data:
+            raise
+        current = _legacy_designer_profile_data(organization)
     return latest, deepcopy(editable.proposed_data if editable else current), current
 
 
@@ -97,7 +140,7 @@ def designer_public_profile(request):
         except (ValidationError, PermissionDenied) as exc:
             messages.error(request, _error(exc))
         return redirect(f"/designer/public-profile/?org={organization.pk}")
-    revision, edit_data, current = _profile_context(organization)
+    revision, edit_data, current = _profile_context(organization, tolerate_legacy_designer_data=True)
     context.update({"public_state": state, "current_public_data": current, "edit_public_data": edit_data, "public_revision": revision, "public_images": _public_images(organization)})
     return render(request, "public_profiles/designer_portal.html", context)
 
