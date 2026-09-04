@@ -68,25 +68,56 @@ def test_canonical_brand_master_files_are_exact_owner_authorized_payloads():
 
 
 def test_canonical_brand_palette_is_preserved_in_both_masters():
-    logo = CANONICAL_LOGO
-    icon = CANONICAL_ICON
     for color in PALETTE:
-        assert color in logo
-        assert color in icon
+        assert color in CANONICAL_LOGO
+        assert color in CANONICAL_ICON
 
 
-def test_v2_public_shell_uses_canonical_logo_and_svg_favicon_only():
+def test_existing_on_dark_logo_is_the_approved_transparent_contrast_asset():
+    dark = (ROOT / "static/brand/fabinzi-logo-on-dark.svg").read_text(encoding="utf-8")
+    assert 'viewBox="0 0 3260 1000"' in dark
+    assert 'fill="#F6F6FB">FABINZI</text>' in dark
+    assert "Approved FABINZI mark; only wordmark contrast adapts for dark surfaces." in dark
+    assert "<rect" in dark and "#111827" in dark
+    assert "background" not in dark.lower()
+
+
+def test_v2_public_shell_uses_theme_specific_approved_logos_without_white_plate_or_filters():
     base = (ROOT / "templates/base.html").read_text(encoding="utf-8")
-    css = (ROOT / "static/css/v2-public-shell.css").read_text(encoding="utf-8")
+    public_css = (ROOT / "static/css/public-site.css").read_text(encoding="utf-8")
+    shell_css = (ROOT / "static/css/v2-public-shell.css").read_text(encoding="utf-8")
+    css = public_css + shell_css
 
-    assert "{% static 'brand/fabinzi-logo.svg' %}" in base
+    assert base.count("{% static 'brand/fabinzi-logo.svg' %}") >= 2
+    assert base.count("{% static 'brand/fabinzi-logo-on-dark.svg' %}") >= 2
     assert "{% static 'brand/fabinzi-icon.svg' %}" in base
     assert 'type="image/svg+xml"' in base
-    assert "fabinzi-logo-on-dark.svg" not in base
     assert "{% url 'favicon' %}" not in base
-    assert "brand-master-surface" in base
-    assert ".brand-master-surface" in css
-    assert "background:#fff" in css
+    assert "brand-master-surface" not in base
+    assert ".brand-master-surface" not in shell_css
+    assert "brand-logo-pair" in base
+    assert '[data-theme="dark"] .brand-logo--light{display:none}' in public_css
+    assert '[data-theme="dark"] .brand-logo--dark{display:block}' in public_css
+    assert '[data-theme="system"] .brand-logo--dark{display:block}' in public_css
+    assert "height:auto" in shell_css
+    assert "filter:" not in css
+    assert "invert(" not in css
+
+
+def test_public_header_keeps_core_navigation_and_removes_directory_links_only_from_header():
+    base = (ROOT / "templates/base.html").read_text(encoding="utf-8")
+    header = base.split("</header>", 1)[0]
+    footer = base.split("<footer", 1)[1]
+
+    assert "{% url 'home' %}" in header
+    assert "{% url 'discover' %}" in header
+    assert "{% url 'how-it-works' %}" in header
+    assert "{% url 'artwork' %}" not in header
+    assert "{% url 'designer-directory' %}" not in header
+    assert "{% url 'manufacturer-marketplace' %}" not in header
+    assert "{% url 'artwork' %}" in footer
+    assert "{% url 'designer-directory' %}" in footer
+    assert "{% url 'manufacturer-marketplace' %}" in footer
 
 
 @pytest.mark.django_db
@@ -102,13 +133,13 @@ def test_web_app_manifest_uses_exact_canonical_svg_icon(client):
 
 
 @pytest.mark.django_db
-def test_public_shell_schema_logo_identity_is_exact_canonical_full_logo(client):
+def test_public_shell_schema_logo_identity_uses_approved_light_and_dark_assets(client):
     response = client.get("/")
     assert response.status_code == 200
     body = response.content.decode()
     assert "/static/brand/fabinzi-logo.svg" in body
+    assert "/static/brand/fabinzi-logo-on-dark.svg" in body
     assert "/static/brand/fabinzi-icon.svg" in body
-    assert "fabinzi-logo-on-dark.svg" not in body
 
 
 def test_generated_raster_assets_are_explicitly_legacy_noncanonical_compatibility():
