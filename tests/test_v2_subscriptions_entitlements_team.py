@@ -3,6 +3,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from dateutil.relativedelta import relativedelta
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import close_old_connections
@@ -29,6 +30,8 @@ from apps.subscriptions.services import (
     DESIGNER_PRO,
     DESIGNER_STARTER,
     MANUFACTURER_STARTER,
+    _create_period,
+    _period_end,
     accept_team_invitation,
     activate_paid_pro,
     confirm_subscription_billing,
@@ -37,6 +40,9 @@ from apps.subscriptions.services import (
     ensure_subscription_for_organization,
     entitlement_summary,
     generate_due_reminders,
+    get_effective_plan,
+    plan_snapshot,
+    price_snapshot,
     renew_paid_subscription,
     suspend_team_member,
 )
@@ -71,6 +77,37 @@ def active_org(owner, kind, name):
     )
     ensure_subscription_for_organization(org)
     return org
+
+
+def historical_manufacturer_trial(owner, name):
+    org = Organization.objects.create(
+        kind=Organization.Kind.MANUFACTURER,
+        display_name=name,
+        email=f"{name.lower().replace(' ', '-')}@example.test",
+        created_by=owner,
+        verification_status=Organization.VerificationStatus.ACTIVE,
+    )
+    Membership.objects.create(organization=org, user=owner, role=Membership.Role.OWNER)
+    now = timezone.now()
+    started = now - timedelta(days=1)
+    pro = get_effective_plan("manufacturer_pro", at=now)
+    trial_end = started + relativedelta(months=6)
+    sub = OrganizationSubscription.objects.create(
+        organization=org,
+        current_plan=pro,
+        status=OrganizationSubscription.Status.TRIALING,
+        started_at=started,
+        trial_started_at=started,
+        trial_ends_at=trial_end,
+        trial_consumed=True,
+        current_period_start=started,
+        current_period_end=_period_end(started, hard_end=trial_end),
+        next_billing_at=trial_end,
+        policy_snapshot=plan_snapshot(pro),
+        price_snapshot=price_snapshot(pro),
+    )
+    _create_period(sub)
+    return org, sub
 
 
 def billing_confirmation(org, ops, *, reference, key, amount="350.00", now=None):
@@ -471,11 +508,10 @@ def test_manager_cannot_invite_or_mutate_owner_only_team_capacity():
 
 
 @pytest.mark.django_db
-def test_manufacturer_trial_pre_expiry_notification_uses_trial_specific_semantics_and_is_idempotent():
+def test_historical_manufacturer_trial_pre_expiry_notification_uses_trial_specific_semantics_and_is_idempotent():
     owner = make_user("trial-reminder-owner")
-    org = active_org(owner, Organization.Kind.MANUFACTURER, "Trial Reminder Factory")
-    sub = org.professional_subscription
-    assert sub.status == OrganizationSubscription.Status.TRIALING
+    org, sub = historical_manufacturer_trial(owner, "Trial Reminder Factory")
+    original_trial = (sub.current_plan_id, sub.trial_started_at, sub.trial_ends_at)
     due = timezone.localtime(sub.trial_ends_at).date()
     when = timezone.make_aware(
         timezone.datetime.combine(due - timedelta(days=7), timezone.datetime.min.time()),
@@ -483,6 +519,8 @@ def test_manufacturer_trial_pre_expiry_notification_uses_trial_specific_semantic
     )
     generate_due_reminders(subscription=sub, now=when)
     generate_due_reminders(subscription=sub, now=when)
+    sub.refresh_from_db()
+    assert (sub.current_plan_id, sub.trial_started_at, sub.trial_ends_at) == original_trial
     events = SubscriptionReminderEvent.objects.filter(subscription=sub, due_date=due)
     assert events.count() == 1
     event = events.get()

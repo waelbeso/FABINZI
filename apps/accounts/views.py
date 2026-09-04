@@ -56,6 +56,37 @@ def _business_memberships(user):
     )
 
 
+def _application_for_membership(membership):
+    if not membership:
+        return None
+    try:
+        return membership.organization.onboarding_application
+    except OnboardingApplication.DoesNotExist:
+        return None
+
+
+def _business_cta_state(memberships):
+    if not memberships:
+        return "start", None
+    applications = [
+        application
+        for application in (_application_for_membership(membership) for membership in memberships)
+        if application is not None
+    ]
+    priority = (
+        (OnboardingApplication.Status.REVISION_REQUIRED, "update"),
+        (OnboardingApplication.Status.SUBMITTED, "under_review"),
+        (OnboardingApplication.Status.DRAFT, "continue"),
+        (OnboardingApplication.Status.APPROVED, "manage"),
+        (OnboardingApplication.Status.REJECTED, "reapply"),
+    )
+    for status, state in priority:
+        match = next((application for application in applications if application.status == status), None)
+        if match:
+            return state, match
+    return "manage", applications[0] if applications else None
+
+
 @login_required
 def app_home(request):
     purchases_qs = CustomerPurchase.objects.filter(customer=request.user)
@@ -66,6 +97,7 @@ def app_home(request):
     cart_item_count = active_cart.items.count() if active_cart else 0
     unread_notifications = Notification.objects.filter(recipient=request.user, is_read=False).count()
     business_memberships = _business_memberships(request.user)
+    business_cta_state, business_cta_application = _business_cta_state(business_memberships)
     return render(
         request,
         "accounts/app_home.html",
@@ -79,6 +111,8 @@ def app_home(request):
             "unread_notifications": unread_notifications,
             "business_memberships": business_memberships,
             "has_professional_business": bool(business_memberships),
+            "business_cta_state": business_cta_state,
+            "business_cta_application": business_cta_application,
         },
     )
 
@@ -87,12 +121,16 @@ def app_home(request):
 def business_start(request):
     memberships = _business_memberships(request.user)
     by_kind = {membership.organization.kind: membership for membership in memberships}
+    designer_membership = by_kind.get(Organization.Kind.DESIGNER)
+    manufacturer_membership = by_kind.get(Organization.Kind.MANUFACTURER)
     return render(
         request,
         "accounts/business_start.html",
         {
-            "designer_membership": by_kind.get(Organization.Kind.DESIGNER),
-            "manufacturer_membership": by_kind.get(Organization.Kind.MANUFACTURER),
+            "designer_membership": designer_membership,
+            "manufacturer_membership": manufacturer_membership,
+            "designer_application": _application_for_membership(designer_membership),
+            "manufacturer_application": _application_for_membership(manufacturer_membership),
         },
     )
 

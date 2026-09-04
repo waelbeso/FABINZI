@@ -24,8 +24,6 @@ MANUFACTURER_PRO = "manufacturer_pro"
 
 
 def _core():
-    # Lazy import avoids a module-import cycle while services.py re-exports these
-    # commercial/onboarding lifecycle authorities.
     from . import services
 
     return services
@@ -104,8 +102,7 @@ def set_onboarding_plan_selection(*, application, actor, selected_plan_policy, r
 
     policy = SubscriptionPlanPolicy.objects.get(pk=selected_plan_policy.pk)
     starter, pro = onboarding_plan_options(application.organization.kind, at=now)
-    valid_ids = {starter.pk, pro.pk}
-    if policy.pk not in valid_ids or policy.audience != application.organization.kind:
+    if policy.pk not in {starter.pk, pro.pk} or policy.audience != application.organization.kind:
         raise ValidationError("Choose a currently available Starter or Pro policy for this Organization type.")
 
     core = _core()
@@ -161,7 +158,7 @@ def ensure_onboarding_plan_selection(*, application, actor, request=None, now=No
         OnboardingApplication.Status.DRAFT,
         OnboardingApplication.Status.REVISION_REQUIRED,
     }:
-        # Legacy Submitted applications intentionally remain historically unselected.
+        # Legacy submitted applications intentionally remain historically unselected.
         return None
     starter, _ = onboarding_plan_options(application.organization.kind, at=now)
     return set_onboarding_plan_selection(
@@ -213,6 +210,25 @@ def apply_approved_onboarding_plan_selection(*, application, actor=None, request
     return selection
 
 
+def _confirmation_matches_selection(confirmation, selection):
+    price = dict(selection.price_snapshot or {})
+    try:
+        expected_amount = Decimal(str(price["monthly_price"]))
+    except (KeyError, TypeError, ValueError):
+        return False
+    return bool(
+        confirmation.organization_id == selection.application.organization_id
+        and confirmation.plan_policy_id == selection.selected_plan_policy_id
+        and confirmation.plan_code == selection.plan_code
+        and confirmation.plan_version == selection.plan_version
+        and Decimal(confirmation.amount) == expected_amount
+        and confirmation.currency == price.get("currency")
+        and confirmation.tax_inclusive == price.get("tax_inclusive")
+        and dict(confirmation.policy_snapshot or {}) == dict(selection.policy_snapshot or {})
+        and dict(confirmation.price_snapshot or {}) == price
+    )
+
+
 def onboarding_commercial_summary(organization, *, now=None):
     now = _now(now)
     selection = (
@@ -255,7 +271,7 @@ def onboarding_commercial_summary(organization, *, now=None):
 
 @transaction.atomic
 def ensure_subscription_for_organization(organization, *, activation_at=None, actor=None, request=None):
-    """Provision Starter for every new professional Organization; never create a new Manufacturer trial."""
+    """Provision Starter for new professional Organizations; never create a new Manufacturer trial."""
     core = _core()
     organization = Organization.objects.select_for_update().get(pk=organization.pk)
     existing = (
@@ -265,7 +281,7 @@ def ensure_subscription_for_organization(organization, *, activation_at=None, ac
         .first()
     )
     if existing:
-        # Historical Manufacturer trials are deliberately returned untouched.
+        # Existing historical Manufacturer trial records are deliberately untouched.
         return existing
     if organization.kind not in {Organization.Kind.DESIGNER, Organization.Kind.MANUFACTURER}:
         raise ValidationError("Professional subscriptions require a Designer or Manufacturer Organization.")
@@ -310,25 +326,6 @@ def _selection_confirmations_locked(selection):
     )
 
 
-def _confirmation_matches_selection(confirmation, selection):
-    price = dict(selection.price_snapshot or {})
-    try:
-        expected_amount = Decimal(str(price["monthly_price"]))
-    except (KeyError, TypeError, ValueError):
-        return False
-    return bool(
-        confirmation.organization_id == selection.application.organization_id
-        and confirmation.plan_policy_id == selection.selected_plan_policy_id
-        and confirmation.plan_code == selection.plan_code
-        and confirmation.plan_version == selection.plan_version
-        and Decimal(confirmation.amount) == expected_amount
-        and confirmation.currency == price.get("currency")
-        and confirmation.tax_inclusive == price.get("tax_inclusive")
-        and dict(confirmation.policy_snapshot or {}) == dict(selection.policy_snapshot or {})
-        and dict(confirmation.price_snapshot or {}) == price
-    )
-
-
 def _selection_has_been_consumed(selection):
     return any(
         row.consumed_period_id or row.consumed_at
@@ -337,7 +334,7 @@ def _selection_has_been_consumed(selection):
     )
 
 
-def _active_onboarding_selection_locked(organization, *, now):
+def _approved_paid_selection_locked(organization):
     selection = (
         OnboardingPlanSelection.objects.select_for_update()
         .select_related("selected_plan_policy", "application__organization")
@@ -350,7 +347,13 @@ def _active_onboarding_selection_locked(organization, *, now):
     )
     if not selection or not _selection_is_paid(selection):
         return None
-    _assert_selection_identity(selection)
+    return _assert_selection_identity(selection)
+
+
+def _active_onboarding_selection_locked(organization, *, now):
+    selection = _approved_paid_selection_locked(organization)
+    if not selection:
+        return None
     if _selection_has_been_consumed(selection):
         return None
     if now > selection.payment_due_at:
@@ -359,30 +362,34 @@ def _active_onboarding_selection_locked(organization, *, now):
 
 
 def _timely_selection_for_confirmation_locked(organization, confirmation):
-    selection = (
-        OnboardingPlanSelection.objects.select_for_update()
-        .select_related("selected_plan_policy", "application__organization")
-        .filter(
-            application__organization=organization,
-            application__status=OnboardingApplication.Status.APPROVED,
-            payment_due_at__isnull=False,
-        )
-        .first()
-    )
-    if not selection or not _selection_is_paid(selection):
+    selection = _approved_paid_selection_locked(organization)
+    if not selection:
         return None
-    _assert_selection_identity(selection)
     if not _confirmation_matches_selection(confirmation, selection):
         return None
     if confirmation.confirmed_at > selection.payment_due_at:
         return None
     for other in _selection_confirmations_locked(selection):
-        if other.pk != confirmation.pk and _confirmation_matches_selection(other, selection) and (other.consumed_period_id or other.consumed_at):
+        if (
+            other.pk != confirmation.pk
+            and _confirmation_matches_selection(other, selection)
+            and (other.consumed_period_id or other.consumed_at)
+        ):
             raise ValidationError("The approved onboarding paid agreement has already been consumed.")
     return selection
 
 
-def _retry_matches_inputs(confirmation, *, organization, plan_code, amount, currency, provider, provider_reference, idempotency_key):
+def _retry_matches_inputs(
+    confirmation,
+    *,
+    organization,
+    plan_code,
+    amount,
+    currency,
+    provider,
+    provider_reference,
+    idempotency_key,
+):
     return bool(
         confirmation.organization_id == organization.pk
         and confirmation.plan_code == plan_code
@@ -432,6 +439,15 @@ def confirm_subscription_billing(
         ):
             return existing
         raise ValidationError("Billing idempotency key is already bound to different immutable subscription evidence.")
+
+    approved_selection = _approved_paid_selection_locked(organization)
+    if (
+        approved_selection
+        and approved_selection.payment_due_at
+        and now <= approved_selection.payment_due_at
+        and _selection_has_been_consumed(approved_selection)
+    ):
+        raise ValidationError("The approved onboarding paid agreement has already been consumed and cannot accept a second initial confirmation.")
 
     selection = _active_onboarding_selection_locked(organization, now=now)
     if selection:
@@ -532,7 +548,7 @@ def activate_paid_pro(*, organization, actor, billing_confirmation, request=None
     confirmation = core._lock_confirmation(billing_confirmation.pk)
     subscription = core._subscription_locked_for_org(organization, now=now)
     if core._existing_consumed_period(confirmation, subscription):
-        # Exact replay is idempotent and can never reactivate after a later downgrade.
+        # Exact replay is idempotent and never reactivates after later downgrade/cancellation.
         return subscription
     if confirmation.status != SubscriptionBillingConfirmation.Status.CONFIRMED:
         raise ValidationError("Confirmed billing evidence is required.")
@@ -589,6 +605,30 @@ def activate_paid_pro(*, organization, actor, billing_confirmation, request=None
     return subscription
 
 
+def _is_historical_manufacturer_trial(subscription, *, now):
+    if not (
+        subscription.organization.kind == Organization.Kind.MANUFACTURER
+        and subscription.status == OrganizationSubscription.Status.TRIALING
+        and subscription.current_plan.code == MANUFACTURER_PRO
+        and subscription.trial_consumed
+        and subscription.trial_started_at
+        and subscription.trial_ends_at
+        and now < subscription.trial_ends_at
+    ):
+        return False
+    if OnboardingPlanSelection.objects.filter(application__organization=subscription.organization).exists():
+        return False
+    first_period = subscription.periods.order_by("sequence", "pk").first()
+    if not first_period:
+        return False
+    return bool(
+        first_period.sequence == 1
+        and first_period.status_snapshot == OrganizationSubscription.Status.TRIALING
+        and first_period.plan_code == MANUFACTURER_PRO
+        and first_period.period_start == subscription.trial_started_at
+    )
+
+
 @transaction.atomic
 def grant_manufacturer_trial_exception(
     *,
@@ -607,16 +647,8 @@ def grant_manufacturer_trial_exception(
         .select_related("organization", "current_plan")
         .get(pk=subscription.pk)
     )
-    if subscription.organization.kind != Organization.Kind.MANUFACTURER:
-        raise ValidationError("Trial exceptions apply only to Manufacturer Organizations.")
-    if not (
-        subscription.status == OrganizationSubscription.Status.TRIALING
-        and subscription.current_plan.code == MANUFACTURER_PRO
-        and subscription.trial_consumed
-        and subscription.trial_started_at
-        and subscription.trial_ends_at
-    ):
-        raise ValidationError("Trial exceptions are restricted to already-existing historical Manufacturer Pro trials.")
+    if not _is_historical_manufacturer_trial(subscription, now=now):
+        raise ValidationError("Trial exceptions are restricted to active, already-existing historical Manufacturer Pro trials.")
     reason = str(reason or "").strip()
     if not reason:
         raise ValidationError("A trial exception reason is required.")
@@ -630,8 +662,7 @@ def grant_manufacturer_trial_exception(
         "status": subscription.status,
         "plan_code": subscription.current_plan.code,
     }
-    extension_base = max(subscription.trial_ends_at, now)
-    subscription.trial_ends_at = extension_base + relativedelta(months=int(months))
+    subscription.trial_ends_at = subscription.trial_ends_at + relativedelta(months=int(months))
     subscription.next_billing_at = subscription.trial_ends_at
     subscription.save(update_fields=["trial_ends_at", "next_billing_at", "updated_at"])
     new_state = {
