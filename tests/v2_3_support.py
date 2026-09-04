@@ -120,7 +120,17 @@ def ensure_v2_3_reference_rows():
 
 
 @pytest.fixture
-def v2_3_reference_rows(django_db_setup, django_db_blocker):
-    """Explicit opt-in fixture; safe after TransactionTestCase database flushes."""
+def v2_3_reference_rows(request):
+    """Seed subscription reference rows only for tests that actually use Django DB state.
+
+    Some source-only regression modules request this fixture at module scope for
+    their database-backed tests. Do not initialize or touch subscription tables
+    for source-only nodes; this keeps them independent from migration test
+    lifecycle and schema state.
+    """
+    if request.node.get_closest_marker("django_db") is None:
+        return
+    request.getfixturevalue("django_db_setup")
+    django_db_blocker = request.getfixturevalue("django_db_blocker")
     with django_db_blocker.unblock():
         ensure_v2_3_reference_rows()

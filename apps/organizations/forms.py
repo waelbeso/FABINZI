@@ -41,7 +41,7 @@ class OrganizationForm(forms.ModelForm):
 
 class DesignerOnboardingForm(forms.ModelForm):
     accept_terms = forms.BooleanField(required=True)
-    plan_policy_id = forms.ChoiceField(required=True, label="Plan / الخطة")
+    plan_policy_id = forms.ChoiceField(required=False, label="Plan / الخطة")
 
     class Meta:
         model = DesignerProfile
@@ -66,7 +66,7 @@ class DesignerOnboardingForm(forms.ModelForm):
 
 class ManufacturerOnboardingForm(forms.ModelForm):
     accept_terms = forms.BooleanField(required=True)
-    plan_policy_id = forms.ChoiceField(required=True, label="Plan / الخطة")
+    plan_policy_id = forms.ChoiceField(required=False, label="Plan / الخطة")
 
     class Meta:
         model = ManufacturerProfile

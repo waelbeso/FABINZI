@@ -73,6 +73,7 @@ def test_visual_studio_migration_preserves_preexisting_projects_elements_and_tra
     original_ids = {project.pk, text.pk, image.pk}
 
     executor = MigrationExecutor(connection)
+    latest_targets = executor.loader.graph.leaf_nodes()
     try:
         executor.migrate([("storefront", "0001_initial")])
         old_apps = executor.loader.project_state([("storefront", "0001_initial")]).apps
@@ -93,10 +94,12 @@ def test_visual_studio_migration_preserves_preexisting_projects_elements_and_tra
         executor = MigrationExecutor(connection)
         executor.migrate([("storefront", "0002_visual_studio_elements")])
     finally:
-        # Leave the pytest database at the repository's latest storefront state
-        # even when an assertion above fails.
+        # Restore the entire repository migration graph, not only storefront.
+        # Backward migration of storefront can unapply dependent app migrations;
+        # leaving those unapplied makes later source-only/fixture tests observe a
+        # partially dismantled schema.
         executor = MigrationExecutor(connection)
-        executor.migrate([("storefront", "0002_visual_studio_elements")])
+        executor.migrate(latest_targets)
 
     project = StudioProject.objects.get(pk=project.pk)
     text = CustomizationElement.objects.get(pk=text.pk)

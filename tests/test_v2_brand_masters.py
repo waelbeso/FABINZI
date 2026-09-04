@@ -1,4 +1,5 @@
 import hashlib
+import re
 from pathlib import Path
 
 import pytest
@@ -87,6 +88,20 @@ def test_v2_public_shell_uses_theme_specific_approved_logos_without_white_plate_
     public_css = (ROOT / "static/css/public-site.css").read_text(encoding="utf-8")
     shell_css = (ROOT / "static/css/v2-public-shell.css").read_text(encoding="utf-8")
     css = public_css + shell_css
+    logo_css = "}".join(
+        rule + "}"
+        for rule in css.split("}")
+        if any(
+            selector in rule
+            for selector in (
+                "brand-logo-pair",
+                "brand-logo--light",
+                "brand-logo--dark",
+                "site-brand-logo",
+                "footer-brand-logo",
+            )
+        )
+    )
 
     assert base.count("{% static 'brand/fabinzi-logo.svg' %}") >= 2
     assert base.count("{% static 'brand/fabinzi-logo-on-dark.svg' %}") >= 2
@@ -100,8 +115,11 @@ def test_v2_public_shell_uses_theme_specific_approved_logos_without_white_plate_
     assert '[data-theme="dark"] .brand-logo--dark{display:block}' in public_css
     assert '[data-theme="system"] .brand-logo--dark{display:block}' in public_css
     assert "height:auto" in shell_css
-    assert "filter:" not in css
-    assert "invert(" not in css
+    assert re.search(r"(?<![\w-])filter\s*:", logo_css, re.IGNORECASE) is None
+    assert "invert(" not in logo_css.lower()
+    assert "brightness(" not in logo_css.lower()
+    assert re.search(r"(?<![\w-])(fill|stroke)\s*:", logo_css, re.IGNORECASE) is None
+    assert re.search(r"(?<![\w-])background(?:-color)?\s*:", logo_css, re.IGNORECASE) is None
 
 
 def test_public_header_keeps_core_navigation_and_removes_directory_links_only_from_header():

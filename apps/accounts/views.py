@@ -8,7 +8,7 @@ from apps.checkout.models import Cart, CustomerPurchase
 from apps.notifications.models import Notification
 from apps.organizations.models import Membership, OnboardingApplication, Organization
 from apps.storefront.models import StudioProject
-from .forms import AccountPreferencesForm, PublicSignupForm
+from .forms import AccountEmailChangeForm, AccountPreferencesForm, PublicSignupForm
 
 
 def signup(request):
@@ -137,19 +137,42 @@ def business_start(request):
 
 @login_required
 def profile_preferences(request):
+    preferences_form = AccountPreferencesForm(user=request.user)
+    email_form = AccountEmailChangeForm(user=request.user)
+
     if request.method == "POST":
-        form = AccountPreferencesForm(request.POST, user=request.user)
-        if form.is_valid():
-            user = form.save()
-            activate(user.language_preference)
-            request.session["django_language"] = user.language_preference
-            messages.success(
-                request,
-                "تم حفظ تفضيلات الحساب."
-                if user.language_preference == "ar"
-                else "Account preferences saved.",
-            )
-            return redirect("profile-preferences")
-    else:
-        form = AccountPreferencesForm(user=request.user)
-    return render(request, "accounts/preferences.html", {"form": form})
+        action = request.POST.get("action", "preferences")
+        if action == "email":
+            email_form = AccountEmailChangeForm(request.POST, user=request.user)
+            if email_form.is_valid():
+                email_form.save()
+                messages.success(
+                    request,
+                    "تم تحديث البريد الإلكتروني."
+                    if getattr(request, "LANGUAGE_CODE", "en") == "ar"
+                    else "Email address updated.",
+                )
+                return redirect("profile-preferences")
+        else:
+            preferences_form = AccountPreferencesForm(request.POST, user=request.user)
+            if preferences_form.is_valid():
+                user = preferences_form.save()
+                activate(user.language_preference)
+                request.session["django_language"] = user.language_preference
+                messages.success(
+                    request,
+                    "تم حفظ تفضيلات الحساب."
+                    if user.language_preference == "ar"
+                    else "Account preferences saved.",
+                )
+                return redirect("profile-preferences")
+
+    return render(
+        request,
+        "accounts/preferences.html",
+        {
+            "form": preferences_form,
+            "preferences_form": preferences_form,
+            "email_form": email_form,
+        },
+    )

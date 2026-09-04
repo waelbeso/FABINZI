@@ -19,7 +19,7 @@
   <div class="account-settings-intro">
     <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}الحساب{% else %}ACCOUNT{% endif %}</div>
     <h1 class="page-title">{% if request.LANGUAGE_CODE == 'ar' %}الملف الشخصي والتفضيلات{% else %}Profile & preferences{% endif %}</h1>
-    <p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}حدّث بيانات حسابك ولغة الواجهة والمظهر. تغيير البريد الإلكتروني يتطلب كلمة المرور الحالية لحماية الحساب.{% else %}Update your account details, interface language and appearance. Changing your email requires your current password for account security.{% endif %}</p>
+    <p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}حدّث بياناتك واللغة والمظهر بشكل مستقل. تغيير البريد الإلكتروني عملية منفصلة تتطلب كلمة المرور الحالية.{% else %}Update your profile, language and appearance independently. Email changes are a separate protected action that requires your current password.{% endif %}</p>
     <div class="account-settings-links">
       <a href="{% url 'app-home' %}">{% if request.LANGUAGE_CODE == 'ar' %}العودة إلى FABINZI الخاص بي{% else %}Back to My FABINZI{% endif %}</a>
       <a href="{% url 'notifications' %}">{% if request.LANGUAGE_CODE == 'ar' %}إعدادات الإشعارات{% else %}Notification settings{% endif %}</a>
@@ -28,20 +28,33 @@
   </div>
   <div class="panel account-settings-card">
     <form action="{% url 'profile-preferences' %}" method="post" class="stack">{% csrf_token %}
-      {% if form.non_field_errors %}<div class="flash flash--error">{{ form.non_field_errors }}</div>{% endif %}
+      <input type="hidden" name="action" value="preferences">
+      {% if preferences_form.non_field_errors %}<div class="flash flash--error">{{ preferences_form.non_field_errors }}</div>{% endif %}
       <h2>{% if request.LANGUAGE_CODE == 'ar' %}الملف الشخصي{% else %}Profile{% endif %}</h2>
       <div class="form-grid">
-        <div class="field"><label for="id_first_name">{% if request.LANGUAGE_CODE == 'ar' %}الاسم الأول{% else %}First name{% endif %}</label>{{ form.first_name }}{{ form.first_name.errors }}</div>
-        <div class="field"><label for="id_last_name">{% if request.LANGUAGE_CODE == 'ar' %}اسم العائلة{% else %}Last name{% endif %}</label>{{ form.last_name }}{{ form.last_name.errors }}</div>
-        <div class="field field--full"><label for="id_email">{% if request.LANGUAGE_CODE == 'ar' %}البريد الإلكتروني{% else %}Email{% endif %}</label>{{ form.email }}{{ form.email.errors }}<p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}إذا غيرت البريد، أدخل كلمة المرور الحالية أدناه.{% else %}If you change the email address, enter your current password below.{% endif %}</p></div>
-        <div class="field field--full"><label for="id_current_password">{% if request.LANGUAGE_CODE == 'ar' %}كلمة المرور الحالية لتغيير البريد{% else %}Current password for email change{% endif %}</label>{{ form.current_password }}{{ form.current_password.errors }}</div>
+        <div class="field"><label for="id_first_name">{% if request.LANGUAGE_CODE == 'ar' %}الاسم الأول{% else %}First name{% endif %}</label>{{ preferences_form.first_name }}{{ preferences_form.first_name.errors }}</div>
+        <div class="field"><label for="id_last_name">{% if request.LANGUAGE_CODE == 'ar' %}اسم العائلة{% else %}Last name{% endif %}</label>{{ preferences_form.last_name }}{{ preferences_form.last_name.errors }}</div>
       </div>
       <h2>{% if request.LANGUAGE_CODE == 'ar' %}اللغة والمظهر{% else %}Language & appearance{% endif %}</h2>
       <div class="form-grid">
-        <div class="field"><label for="id_language">{% if request.LANGUAGE_CODE == 'ar' %}اللغة{% else %}Language{% endif %}</label>{{ form.language }}{{ form.language.errors }}<p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}يتحول اتجاه الصفحة تلقائيًا بين RTL وLTR.{% else %}Page direction automatically follows the selected language.{% endif %}</p></div>
-        <div class="field"><label for="id_theme">{% if request.LANGUAGE_CODE == 'ar' %}المظهر{% else %}Appearance{% endif %}</label>{{ form.theme }}{{ form.theme.errors }}<p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}حسب النظام يتبع المظهر الفعلي للجهاز.{% else %}System follows the device's effective color scheme.{% endif %}</p></div>
+        <div class="field"><label for="id_language">{% if request.LANGUAGE_CODE == 'ar' %}اللغة{% else %}Language{% endif %}</label>{{ preferences_form.language }}{{ preferences_form.language.errors }}<p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}يتحول اتجاه الصفحة تلقائيًا بين RTL وLTR.{% else %}Page direction automatically follows the selected language.{% endif %}</p></div>
+        <div class="field"><label for="id_theme">{% if request.LANGUAGE_CODE == 'ar' %}المظهر{% else %}Appearance{% endif %}</label>{{ preferences_form.theme }}{{ preferences_form.theme.errors }}<p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}حسب النظام يتبع المظهر الفعلي للجهاز.{% else %}System follows the device's effective color scheme.{% endif %}</p></div>
       </div>
       <div class="cluster"><button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}حفظ التفضيلات{% else %}Save preferences{% endif %}</button><a class="button button--ghost" href="{% url 'password-change' %}">{% if request.LANGUAGE_CODE == 'ar' %}تغيير كلمة المرور{% else %}Change password{% endif %}</a></div>
+    </form>
+
+    <hr>
+
+    <form action="{% url 'profile-preferences' %}" method="post" class="stack">{% csrf_token %}
+      <input type="hidden" name="action" value="email">
+      {% if email_form.non_field_errors %}<div class="flash flash--error">{{ email_form.non_field_errors }}</div>{% endif %}
+      <h2>{% if request.LANGUAGE_CODE == 'ar' %}تغيير البريد الإلكتروني بأمان{% else %}Secure email change{% endif %}</h2>
+      <p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}لن يتغير البريد إلا بعد التحقق من كلمة المرور الحالية وعدم استخدام البريد في حساب آخر.{% else %}Your email changes only after the current password is verified and the address is confirmed unused by another account.{% endif %}</p>
+      <div class="form-grid">
+        <div class="field field--full"><label for="id_email">{% if request.LANGUAGE_CODE == 'ar' %}البريد الإلكتروني الجديد{% else %}New email{% endif %}</label>{{ email_form.email }}{{ email_form.email.errors }}</div>
+        <div class="field field--full"><label for="id_current_password">{% if request.LANGUAGE_CODE == 'ar' %}كلمة المرور الحالية{% else %}Current password{% endif %}</label>{{ email_form.current_password }}{{ email_form.current_password.errors }}</div>
+      </div>
+      <button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}تحديث البريد الإلكتروني{% else %}Update email{% endif %}</button>
     </form>
   </div>
 </section>
