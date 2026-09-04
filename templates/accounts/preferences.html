@@ -18,33 +18,30 @@
 <section class="account-settings-layout section--tight">
   <div class="account-settings-intro">
     <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}الحساب{% else %}ACCOUNT{% endif %}</div>
-    <h1 class="page-title">{% if request.LANGUAGE_CODE == 'ar' %}اللغة والمظهر{% else %}Language & appearance{% endif %}</h1>
-    <p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}اضبط لغة واجهة FABINZI والمظهر الذي تفضله. تبقى هذه الإعدادات منفصلة عن تجربة التسوق والطلبات.{% else %}Choose your FABINZI interface language and preferred appearance. These settings stay separate from shopping, Studio and order activity.{% endif %}</p>
+    <h1 class="page-title">{% if request.LANGUAGE_CODE == 'ar' %}الملف الشخصي والتفضيلات{% else %}Profile & preferences{% endif %}</h1>
+    <p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}حدّث بيانات حسابك ولغة الواجهة والمظهر. تغيير البريد الإلكتروني يتطلب كلمة المرور الحالية لحماية الحساب.{% else %}Update your account details, interface language and appearance. Changing your email requires your current password for account security.{% endif %}</p>
     <div class="account-settings-links">
       <a href="{% url 'app-home' %}">{% if request.LANGUAGE_CODE == 'ar' %}العودة إلى FABINZI الخاص بي{% else %}Back to My FABINZI{% endif %}</a>
       <a href="{% url 'notifications' %}">{% if request.LANGUAGE_CODE == 'ar' %}إعدادات الإشعارات{% else %}Notification settings{% endif %}</a>
+      <a href="{% url 'password-change' %}">{% if request.LANGUAGE_CODE == 'ar' %}تغيير كلمة المرور{% else %}Change password{% endif %}</a>
     </div>
   </div>
   <div class="panel account-settings-card">
     <form action="{% url 'profile-preferences' %}" method="post" class="stack">{% csrf_token %}
-      <div class="field">
-        <label for="preference-language">{% if request.LANGUAGE_CODE == 'ar' %}اللغة{% else %}Language{% endif %}</label>
-        <select id="preference-language" name="language">
-          <option value="en" {% if user.language_preference == 'en' %}selected{% endif %}>English</option>
-          <option value="ar" {% if user.language_preference == 'ar' %}selected{% endif %}>العربية</option>
-        </select>
-        <p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}تتحول اتجاهات الصفحات تلقائيًا بين RTL وLTR وفق اللغة المختارة.{% else %}Page direction automatically switches between LTR and RTL with your language choice.{% endif %}</p>
+      {% if form.non_field_errors %}<div class="flash flash--error">{{ form.non_field_errors }}</div>{% endif %}
+      <h2>{% if request.LANGUAGE_CODE == 'ar' %}الملف الشخصي{% else %}Profile{% endif %}</h2>
+      <div class="form-grid">
+        <div class="field"><label for="id_first_name">{% if request.LANGUAGE_CODE == 'ar' %}الاسم الأول{% else %}First name{% endif %}</label>{{ form.first_name }}{{ form.first_name.errors }}</div>
+        <div class="field"><label for="id_last_name">{% if request.LANGUAGE_CODE == 'ar' %}اسم العائلة{% else %}Last name{% endif %}</label>{{ form.last_name }}{{ form.last_name.errors }}</div>
+        <div class="field field--full"><label for="id_email">{% if request.LANGUAGE_CODE == 'ar' %}البريد الإلكتروني{% else %}Email{% endif %}</label>{{ form.email }}{{ form.email.errors }}<p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}إذا غيرت البريد، أدخل كلمة المرور الحالية أدناه.{% else %}If you change the email address, enter your current password below.{% endif %}</p></div>
+        <div class="field field--full"><label for="id_current_password">{% if request.LANGUAGE_CODE == 'ar' %}كلمة المرور الحالية لتغيير البريد{% else %}Current password for email change{% endif %}</label>{{ form.current_password }}{{ form.current_password.errors }}</div>
       </div>
-      <div class="field">
-        <label for="preference-theme">{% if request.LANGUAGE_CODE == 'ar' %}المظهر{% else %}Appearance{% endif %}</label>
-        <select id="preference-theme" name="theme">
-          <option value="system" {% if user.theme_preference == 'system' %}selected{% endif %}>{% if request.LANGUAGE_CODE == 'ar' %}حسب النظام{% else %}System{% endif %}</option>
-          <option value="light" {% if user.theme_preference == 'light' %}selected{% endif %}>{% if request.LANGUAGE_CODE == 'ar' %}فاتح{% else %}Light{% endif %}</option>
-          <option value="dark" {% if user.theme_preference == 'dark' %}selected{% endif %}>{% if request.LANGUAGE_CODE == 'ar' %}داكن{% else %}Dark{% endif %}</option>
-        </select>
-        <p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}يتم تطبيق المظهر المحفوظ فورًا على هذا المتصفح، ويمكنك أيضًا تبديله مؤقتًا من زر المظهر في الترويسة.{% else %}Your saved appearance is applied immediately on this browser, and you can still cycle it temporarily from the header control.{% endif %}</p>
+      <h2>{% if request.LANGUAGE_CODE == 'ar' %}اللغة والمظهر{% else %}Language & appearance{% endif %}</h2>
+      <div class="form-grid">
+        <div class="field"><label for="id_language">{% if request.LANGUAGE_CODE == 'ar' %}اللغة{% else %}Language{% endif %}</label>{{ form.language }}{{ form.language.errors }}<p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}يتحول اتجاه الصفحة تلقائيًا بين RTL وLTR.{% else %}Page direction automatically follows the selected language.{% endif %}</p></div>
+        <div class="field"><label for="id_theme">{% if request.LANGUAGE_CODE == 'ar' %}المظهر{% else %}Appearance{% endif %}</label>{{ form.theme }}{{ form.theme.errors }}<p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}حسب النظام يتبع المظهر الفعلي للجهاز.{% else %}System follows the device's effective color scheme.{% endif %}</p></div>
       </div>
-      <button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}حفظ التفضيلات{% else %}Save preferences{% endif %}</button>
+      <div class="cluster"><button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}حفظ التفضيلات{% else %}Save preferences{% endif %}</button><a class="button button--ghost" href="{% url 'password-change' %}">{% if request.LANGUAGE_CODE == 'ar' %}تغيير كلمة المرور{% else %}Change password{% endif %}</a></div>
     </form>
   </div>
 </section>

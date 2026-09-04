@@ -15,12 +15,12 @@
         <button type="submit">Move to Starter safely</button>
       </form>
     </li>
-    {% if original.organization.kind == "manufacturer" and request.user.is_superuser %}
+    {% if original.organization.kind == "manufacturer" and original.status == "trialing" and request.user.is_superuser %}
       <li>
         <form method="post" action="{% url 'fabinzi_admin:subscriptions_trial_exception' original.pk %}">
           {% csrf_token %}
-          <input type="text" name="reason" placeholder="Required trial exception reason" required>
-          <button type="submit">Superuser trial exception</button>
+          <input type="text" name="reason" placeholder="Required historical trial exception reason" required>
+          <button type="submit">Historical trial exception</button>
         </form>
       </li>
     {% endif %}
