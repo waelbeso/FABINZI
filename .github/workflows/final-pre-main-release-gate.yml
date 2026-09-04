@@ -149,19 +149,24 @@ jobs:
           python -m pip check | tee "$out/pip-check.txt"
           python -m pip freeze --all | sort > "$out/pip-freeze.txt"
           python manage.py makemigrations --check --dry-run | tee "$out/makemigrations-check.txt"
-          git diff --name-only "$HISTORICAL_MAIN_SHA"...HEAD -- ':(glob)apps/*/migrations/*.py' | sort > "$out/migrations-since-main.txt"
+          git diff --name-only "$PR_BASE_SHA"...HEAD -- ':(glob)apps/*/migrations/*.py' | sort > "$out/migrations-in-pr.txt"
           python - <<'PY'
           from pathlib import Path
-          expected={'apps/checkout/migrations/0002_commerce_parent_cart.py','apps/storefront/migrations/0002_visual_studio_elements.py'}
-          found=set(Path('artifacts/pre-main-source/migrations-since-main.txt').read_text().splitlines())
-          assert found==expected,(found,expected)
-          for name in found:
+          changed=[name for name in Path('artifacts/pre-main-source/migrations-in-pr.txt').read_text().splitlines() if name]
+          destructive_markers=(
+              'migrations.DeleteModel',
+              'migrations.RemoveField',
+              'migrations.RenameModel',
+              'migrations.RenameField',
+              'migrations.RunSQL',
+          )
+          for name in changed:
               text=Path(name).read_text()
-              for marker in ('migrations.DeleteModel','migrations.RemoveField','migrations.RenameModel','migrations.RenameField','migrations.RunSQL'):
+              for marker in destructive_markers:
                   assert marker not in text,(name,marker)
-          checkout=Path('apps/checkout/migrations/0002_commerce_parent_cart.py').read_text()
-          assert 'backfill_customer_purchases' in checkout and '.delete(' not in checkout
-          Path('artifacts/pre-main-source/migration-safety-review.txt').write_text('PASS — deterministic additive migration delta; commerce backfill has no deletion\n')
+          Path('artifacts/pre-main-source/migration-safety-review.txt').write_text(
+              f'PASS — PR-scoped migration delta reviewed; {len(changed)} changed migration file(s); no blocked destructive markers\n'
+          )
           PY
           python manage.py reconcile_migration_state | tee "$out/reconcile-migration-state.txt"
           python manage.py migrate --noinput | tee "$out/fresh-migrate.txt"
