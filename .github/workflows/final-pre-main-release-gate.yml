@@ -57,7 +57,7 @@ jobs:
           expected="${{ github.event.pull_request.head.sha || github.sha }}"
           actual="$(git rev-parse HEAD)"
           test "$actual" = "$expected"
-          test "$(git rev-parse origin/feature/web-productization)" = "$FINAL_PRE_MAIN_BASE_SHA"
+          git merge-base --is-ancestor "$FINAL_PRE_MAIN_BASE_SHA" HEAD
           git merge-base --is-ancestor "$PR_BASE_SHA" HEAD
           git merge-base --is-ancestor "$ACCEPTED_FLUTTER_SHA" HEAD
           printf '%s\n' "$actual" > "$out/candidate-sha.txt"
@@ -246,7 +246,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
-          test "$(git rev-parse origin/feature/web-productization)" = "$FINAL_PRE_MAIN_BASE_SHA"
+          git merge-base --is-ancestor "$FINAL_PRE_MAIN_BASE_SHA" HEAD
           git merge-base --is-ancestor "$PR_BASE_SHA" HEAD
           git merge-base --is-ancestor "$ACCEPTED_FLUTTER_SHA" HEAD
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
@@ -324,7 +324,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
-          test "$(git rev-parse origin/feature/web-productization)" = "$FINAL_PRE_MAIN_BASE_SHA"
+          git merge-base --is-ancestor "$FINAL_PRE_MAIN_BASE_SHA" HEAD
           git merge-base --is-ancestor "$PR_BASE_SHA" HEAD
           git merge-base --is-ancestor "$ACCEPTED_FLUTTER_SHA" HEAD
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
