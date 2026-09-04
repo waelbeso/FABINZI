@@ -174,6 +174,13 @@ def submit_application(*, application, actor, request=None):
     if application.status not in {OnboardingApplication.Status.DRAFT, OnboardingApplication.Status.REVISION_REQUIRED}:
         raise ValidationError("This application cannot be submitted from its current state.")
     _validate_submission(application)
+
+    # New and legacy editable applications enter the durable selection lifecycle
+    # before submission. Missing Submitted legacy records are intentionally not backfilled.
+    from apps.subscriptions.services import ensure_onboarding_plan_selection
+
+    ensure_onboarding_plan_selection(application=application, actor=actor, request=request)
+
     submitted_at = timezone.now()
     application.status = OnboardingApplication.Status.SUBMITTED
     application.submitted_at = submitted_at
@@ -245,16 +252,25 @@ def review_application(*, application, reviewer, decision, notes="", request=Non
     application.organization.save(update_fields=["verification_status", "updated_at"])
 
     subscription = None
+    selection = None
     if decision == OnboardingApplication.Status.APPROVED:
-        # V2-3 provisioning is an explicit professional-activation side effect,
-        # not a hidden Organization.save() command. Re-entry is idempotent and
-        # therefore cannot restart an already-consumed Manufacturer trial.
-        from apps.subscriptions.services import ensure_subscription_for_organization
+        # Approval always provisions actual Starter entitlement for a new professional
+        # Organization. A paid selection creates only a 27-day payment window; it
+        # never creates Pro entitlement or a Manufacturer trial by itself.
+        from apps.subscriptions.services import (
+            apply_approved_onboarding_plan_selection,
+            ensure_subscription_for_organization,
+        )
         from apps.subscriptions.team_services import reconcile_team_capacity_for_subscription
 
         subscription = ensure_subscription_for_organization(
             application.organization,
             activation_at=application.reviewed_at,
+            actor=reviewer,
+            request=request,
+        )
+        selection = apply_approved_onboarding_plan_selection(
+            application=application,
             actor=reviewer,
             request=request,
         )
@@ -277,6 +293,7 @@ def review_application(*, application, reviewer, decision, notes="", request=Non
             "notes_present": bool(notes),
             "activated_membership_id": applicant_membership.pk if applicant_membership else None,
             "subscription_id": subscription.pk if subscription else None,
+            "onboarding_plan_selection_id": selection.pk if selection else None,
         },
         request=request,
     )
