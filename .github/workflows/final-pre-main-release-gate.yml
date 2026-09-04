@@ -294,10 +294,10 @@ jobs:
           grep -F 'No issues found!' /tmp/analyze.log
           printf 'PASS — No issues found\n' > "$out/analyze-result.txt"
           flutter test --reporter expanded 2>&1 | tee /tmp/flutter-tests.log
-          grep -F 'checkout submission guard allows only one active placement per checkout' /tmp/flutter-tests.log
-          grep -F 'checkout placement sends the persisted Idempotency-Key unchanged' /tmp/flutter-tests.log
-          grep -F 'Studio quantity update uses the frozen PATCH quantity field' /tmp/flutter-tests.log
-          printf 'PASS — full Flutter tests including auth/session/refresh, idempotency and Studio quantity\n' > "$out/flutter-tests-result.txt"
+          flutter test test/checkout_submission_guard_test.dart --plain-name 'checkout submission guard allows only one active placement per checkout' --reporter expanded > "$out/checkout-guard-test.txt" 2>&1
+          flutter test test/api_client_test.dart --plain-name 'checkout placement sends the persisted Idempotency-Key unchanged' --reporter expanded > "$out/idempotency-test.txt" 2>&1
+          flutter test test/api_client_test.dart --plain-name 'Studio quantity update uses the frozen PATCH quantity field' --reporter expanded > "$out/studio-quantity-test.txt" 2>&1
+          printf 'PASS — full Flutter tests plus deterministic targeted checkout/idempotency/Studio quantity evidence\n' > "$out/flutter-tests-result.txt"
           flutter test test/localization_theme_test.dart --reporter expanded >/tmp/localization.log 2>&1
           printf 'PASS — English/LTR, Arabic/RTL, Light/Dark/System\n' > "$out/localization-theme-result.txt"
           dart run tool/verify_customer_contract.dart > "$out/customer-contract.txt"
