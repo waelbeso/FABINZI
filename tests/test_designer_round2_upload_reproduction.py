@@ -2,13 +2,14 @@ from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.core.files.storage import default_storage
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 
-from apps.artwork.models import ArtworkAsset
+from apps.artwork.models import ArtworkAsset, ArtworkVersion
 from apps.artwork.services import create_artwork
-from apps.design.models import DesignAsset
+from apps.design.models import DesignAsset, GarmentDesignVersion
 from apps.design.services import create_design
 from apps.media.models import MediaAsset
 from apps.media.services import ProductionStorageUnavailable
@@ -51,17 +52,24 @@ def _active_designer(owner, name):
 
 
 def _post_upload(client, route_name, object_id, organization, version_id, kind, upload, label):
+    data = {
+        "action": "upload_asset",
+        "version_id": str(version_id),
+        "kind": kind,
+        "label": label,
+    }
+    if upload is not None:
+        data["file"] = upload
     return client.post(
         f"{reverse(route_name, args=[object_id])}?org={organization.pk}",
-        data={
-            "action": "upload_asset",
-            "version_id": str(version_id),
-            "kind": kind,
-            "label": label,
-            "file": upload,
-        },
+        data=data,
         follow=False,
     )
+
+
+def _follow_message(client, response):
+    assert response.status_code == 302
+    return client.get(response["Location"]).content.decode("utf-8")
 
 
 @pytest.mark.django_db
@@ -185,7 +193,7 @@ def test_round2_artwork_actual_http_uploads_succeed_in_local_test_storage(client
 
 
 @pytest.mark.django_db
-def test_round2_design_storage_unavailable_currently_escapes_as_http_500(client, settings):
+def test_round2_design_storage_unavailable_is_safe_and_not_exposed(client, settings):
     settings.ENVIRONMENT = "test"
     settings.PRIVATE_MEDIA_STORAGE_MODE = "local"
     owner = User.objects.create_user(username="round2-design-failure", password="password123")
@@ -197,11 +205,10 @@ def test_round2_design_storage_unavailable_currently_escapes_as_http_500(client,
     )
     version = design.versions.get()
     client.force_login(owner)
-    client.raise_request_exception = False
 
     with patch(
         "apps.organizations.designer_views.create_private_designer_asset",
-        side_effect=ProductionStorageUnavailable("synthetic reproduction only"),
+        side_effect=ProductionStorageUnavailable("synthetic secret-like storage detail"),
     ):
         response = _post_upload(
             client,
@@ -218,13 +225,15 @@ def test_round2_design_storage_unavailable_currently_escapes_as_http_500(client,
             "Storage failure reproduction",
         )
 
-    assert response.status_code == 500
+    html = _follow_message(client, response)
+    assert "Private file storage is temporarily unavailable" in html
+    assert "synthetic secret-like storage detail" not in html
     assert MediaAsset.objects.count() == 0
     assert DesignAsset.objects.count() == 0
 
 
 @pytest.mark.django_db
-def test_round2_artwork_storage_unavailable_currently_escapes_as_http_500(client, settings):
+def test_round2_artwork_storage_unavailable_is_safe_and_not_exposed(client, settings):
     settings.ENVIRONMENT = "test"
     settings.PRIVATE_MEDIA_STORAGE_MODE = "local"
     owner = User.objects.create_user(username="round2-artwork-failure", password="password123")
@@ -236,11 +245,10 @@ def test_round2_artwork_storage_unavailable_currently_escapes_as_http_500(client
     )
     version = artwork.versions.get()
     client.force_login(owner)
-    client.raise_request_exception = False
 
     with patch(
         "apps.organizations.designer_views.create_private_designer_asset",
-        side_effect=ProductionStorageUnavailable("synthetic reproduction only"),
+        side_effect=ProductionStorageUnavailable("synthetic secret-like storage detail"),
     ):
         response = _post_upload(
             client,
@@ -257,6 +265,192 @@ def test_round2_artwork_storage_unavailable_currently_escapes_as_http_500(client
             "Storage failure reproduction",
         )
 
-    assert response.status_code == 500
+    html = _follow_message(client, response)
+    assert "Private file storage is temporarily unavailable" in html
+    assert "synthetic secret-like storage detail" not in html
     assert MediaAsset.objects.count() == 0
     assert ArtworkAsset.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_round2_design_preflight_rejects_invalid_kind_before_storage(client, settings):
+    settings.ENVIRONMENT = "test"
+    settings.PRIVATE_MEDIA_STORAGE_MODE = "local"
+    owner = User.objects.create_user(username="round2-invalid-design-kind", password="password123")
+    organization = _active_designer(owner, "Round2 Invalid Design Kind")
+    design = create_design(organization=organization, actor=owner, title="Invalid kind")
+    version = design.versions.get()
+    client.force_login(owner)
+
+    with patch("apps.organizations.designer_views.create_private_designer_asset") as create_media:
+        response = _post_upload(
+            client,
+            "designer-design-detail",
+            design.pk,
+            organization,
+            version.pk,
+            "not-a-real-kind",
+            SimpleUploadedFile("invalid.bin", b"payload", content_type="application/octet-stream"),
+            "Invalid",
+        )
+
+    assert response.status_code == 302
+    create_media.assert_not_called()
+    assert MediaAsset.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_round2_design_preflight_rejects_non_draft_before_storage(client, settings):
+    settings.ENVIRONMENT = "test"
+    settings.PRIVATE_MEDIA_STORAGE_MODE = "local"
+    owner = User.objects.create_user(username="round2-nondraft-design", password="password123")
+    organization = _active_designer(owner, "Round2 Non Draft Design")
+    design = create_design(organization=organization, actor=owner, title="Non draft")
+    version = design.versions.get()
+    version.status = GarmentDesignVersion.Status.SUBMITTED
+    version.save(update_fields=["status"])
+    client.force_login(owner)
+
+    with patch("apps.organizations.designer_views.create_private_designer_asset") as create_media:
+        response = _post_upload(
+            client,
+            "designer-design-detail",
+            design.pk,
+            organization,
+            version.pk,
+            DesignAsset.Kind.PATTERN,
+            SimpleUploadedFile("pattern.dxf", b"0\nEOF\n", content_type="application/dxf"),
+            "Pattern",
+        )
+
+    assert response.status_code == 302
+    create_media.assert_not_called()
+    assert MediaAsset.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_round2_artwork_preflight_rejects_non_image_preview_before_storage(client, settings):
+    settings.ENVIRONMENT = "test"
+    settings.PRIVATE_MEDIA_STORAGE_MODE = "local"
+    owner = User.objects.create_user(username="round2-art-preview-mime", password="password123")
+    organization = _active_designer(owner, "Round2 Artwork Preview MIME")
+    artwork = create_artwork(organization=organization, actor=owner, title="Preview MIME")
+    version = artwork.versions.get()
+    client.force_login(owner)
+
+    with patch("apps.organizations.designer_views.create_private_designer_asset") as create_media:
+        response = _post_upload(
+            client,
+            "designer-artwork-detail",
+            artwork.pk,
+            organization,
+            version.pk,
+            ArtworkAsset.Kind.PREVIEW,
+            SimpleUploadedFile("preview.pdf", b"%PDF-1.4", content_type="application/pdf"),
+            "Bad preview",
+        )
+
+    assert response.status_code == 302
+    create_media.assert_not_called()
+    assert MediaAsset.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_round2_artwork_preflight_rejects_non_draft_before_storage(client, settings):
+    settings.ENVIRONMENT = "test"
+    settings.PRIVATE_MEDIA_STORAGE_MODE = "local"
+    owner = User.objects.create_user(username="round2-nondraft-art", password="password123")
+    organization = _active_designer(owner, "Round2 Non Draft Artwork")
+    artwork = create_artwork(organization=organization, actor=owner, title="Non draft artwork")
+    version = artwork.versions.get()
+    version.status = ArtworkVersion.Status.SUBMITTED
+    version.save(update_fields=["status"])
+    client.force_login(owner)
+
+    with patch("apps.organizations.designer_views.create_private_designer_asset") as create_media:
+        response = _post_upload(
+            client,
+            "designer-artwork-detail",
+            artwork.pk,
+            organization,
+            version.pk,
+            ArtworkAsset.Kind.SOURCE,
+            SimpleUploadedFile("source.svg", b"<svg></svg>", content_type="image/svg+xml"),
+            "Source",
+        )
+
+    assert response.status_code == 302
+    create_media.assert_not_called()
+    assert MediaAsset.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_round2_design_expected_attachment_failure_cleans_new_private_media(client, settings):
+    settings.ENVIRONMENT = "test"
+    settings.PRIVATE_MEDIA_STORAGE_MODE = "local"
+    owner = User.objects.create_user(username="round2-design-cleanup", password="password123")
+    organization = _active_designer(owner, "Round2 Design Cleanup")
+    design = create_design(organization=organization, actor=owner, title="Cleanup design")
+    version = design.versions.get()
+    client.force_login(owner)
+
+    with patch(
+        "apps.organizations.designer_views.add_asset",
+        side_effect=ValidationError("synthetic expected attachment rejection"),
+    ), patch(
+        "apps.media.designer_services.default_storage.delete",
+        wraps=default_storage.delete,
+    ) as delete_storage:
+        response = _post_upload(
+            client,
+            "designer-design-detail",
+            design.pk,
+            organization,
+            version.pk,
+            DesignAsset.Kind.PATTERN,
+            SimpleUploadedFile("cleanup.dxf", b"0\nEOF\n", content_type="application/dxf"),
+            "Cleanup",
+        )
+
+    assert response.status_code == 302
+    assert MediaAsset.objects.count() == 0
+    assert DesignAsset.objects.count() == 0
+    delete_storage.assert_called_once()
+    deleted_key = delete_storage.call_args.args[0]
+    assert not default_storage.exists(deleted_key)
+
+
+@pytest.mark.django_db
+def test_round2_artwork_expected_attachment_failure_cleans_new_private_media(client, settings):
+    settings.ENVIRONMENT = "test"
+    settings.PRIVATE_MEDIA_STORAGE_MODE = "local"
+    owner = User.objects.create_user(username="round2-art-cleanup", password="password123")
+    organization = _active_designer(owner, "Round2 Artwork Cleanup")
+    artwork = create_artwork(organization=organization, actor=owner, title="Cleanup artwork")
+    version = artwork.versions.get()
+    client.force_login(owner)
+
+    with patch(
+        "apps.organizations.designer_views.add_artwork_asset",
+        side_effect=ValidationError("synthetic expected attachment rejection"),
+    ), patch(
+        "apps.media.designer_services.default_storage.delete",
+        wraps=default_storage.delete,
+    ) as delete_storage:
+        response = _post_upload(
+            client,
+            "designer-artwork-detail",
+            artwork.pk,
+            organization,
+            version.pk,
+            ArtworkAsset.Kind.SOURCE,
+            SimpleUploadedFile("cleanup.svg", b"<svg></svg>", content_type="image/svg+xml"),
+            "Cleanup",
+        )
+
+    assert response.status_code == 302
+    assert MediaAsset.objects.count() == 0
+    assert ArtworkAsset.objects.count() == 0
+    delete_storage.assert_called_once()
+    deleted_key = delete_storage.call_args.args[0]
+    assert not default_storage.exists(deleted_key)
