@@ -1104,6 +1104,59 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
             "final": final,
         }
 
+    def target_viewport_state(target):
+        return driver.execute_script(
+            """
+            const rect = arguments[0].getBoundingClientRect();
+            const centerY = rect.top + (rect.height / 2);
+            return {
+              scrollY: window.scrollY,
+              innerHeight: window.innerHeight,
+              rect: {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+                top: rect.top,
+                right: rect.right,
+                bottom: rect.bottom,
+                left: rect.left,
+                centerY,
+              },
+              fullyInsideViewport: rect.top >= 0 && rect.bottom <= window.innerHeight,
+              centerInsideViewport: centerY >= 0 && centerY <= window.innerHeight,
+            };
+            """,
+            target,
+        )
+
+    def settled_native_click(target, *, key, expect_initial_outside=False):
+        initial = target_viewport_state(target)
+        if expect_initial_outside:
+            assert initial["fullyInsideViewport"] is False
+
+        position_target(target)
+        settlement = wait_for_scroll_settlement(target)
+        settled = target_viewport_state(target)
+        assert settled["fullyInsideViewport"] is True
+
+        record = {
+            "initial": initial,
+            "settlement": settlement,
+            "settled": settled,
+            "native_click_success": False,
+            "native_click_exception_type": None,
+        }
+        try:
+            target.click()
+        except Exception as exc:
+            record["native_click_exception_type"] = type(exc).__name__
+            terms_diagnostics.setdefault("onboarding_submit_clicks", {})[key] = record
+            raise
+        record["native_click_success"] = True
+        terms_diagnostics.setdefault("onboarding_submit_clicks", {})[key] = record
+        return record
+
     def interaction_result(action):
         try:
             action()
@@ -1348,7 +1401,10 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
             key="designer-create-final",
             interaction=preferred_terms_interaction,
         )
-        driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]').click()
+        settled_native_click(
+            driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]'),
+            key="designer-create-submit",
+        )
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-application-mode="designer"]')))
         assert "APPLICATION MODE" in driver.page_source
         assert "designer-sidebar" not in driver.page_source
@@ -1359,16 +1415,30 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
         driver.get(live_server.url + "/designer/designs/")
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-application-mode="designer"]')))
         driver.get(live_server.url + reverse("edit-onboarding", args=[designer_org.onboarding_application.pk]))
-        website = replace("id_org-website", "not a url")
-        driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]').click()
+        replace("id_org-website", "not a url")
+        settled_native_click(
+            driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]'),
+            key="designer-update-invalid-submit",
+            expect_initial_outside=True,
+        )
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".errorlist")))
         assert "Enter a valid URL" in driver.page_source
-        assert website.get_attribute("value") == "not a url"
+        assert driver.find_element(By.ID, "id_org-website").get_attribute("value") == "not a url"
         replace("id_org-website", "example.com")
-        driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]').click()
+        settled_native_click(
+            driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]'),
+            key="designer-update-corrected-submit",
+        )
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-application-mode="designer"]')))
         designer_org.refresh_from_db()
         assert designer_org.website == "https://example.com"
+        terms_diagnostics.setdefault("flow_completion", {})["designer"] = {
+            "create": "pass",
+            "application_mode": "pass",
+            "protected_route": "pass",
+            "invalid_url_validation": "pass",
+            "corrected_save": "pass",
+        }
 
         manufacturer = _user("browser-pre-manufacturer")
         login_as(manufacturer)
@@ -1387,7 +1457,10 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
             key="manufacturer-create",
             interaction=preferred_terms_interaction,
         )
-        driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]').click()
+        settled_native_click(
+            driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]'),
+            key="manufacturer-create-submit",
+        )
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-application-mode="manufacturer"]')))
         assert "manufacturer-sidebar" not in driver.page_source
         manufacturer_org = Organization.objects.get(created_by=manufacturer, kind=Organization.Kind.MANUFACTURER)
@@ -1398,16 +1471,29 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-application-mode="manufacturer"]')))
 
         driver.get(live_server.url + reverse("edit-onboarding", args=[manufacturer_org.onboarding_application.pk]))
-        maps_url = replace("id_profile-google_maps_url", "not a url")
-        driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]').click()
+        replace("id_profile-google_maps_url", "not a url")
+        settled_native_click(
+            driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]'),
+            key="manufacturer-update-invalid-submit",
+        )
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".errorlist")))
         assert "Enter a valid URL" in driver.page_source
-        assert maps_url.get_attribute("value") == "not a url"
+        assert driver.find_element(By.ID, "id_profile-google_maps_url").get_attribute("value") == "not a url"
         replace("id_profile-google_maps_url", "maps.app.goo.gl/updated-example")
-        driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]').click()
+        settled_native_click(
+            driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]'),
+            key="manufacturer-update-corrected-submit",
+        )
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-application-mode="manufacturer"]')))
         manufacturer_org.manufacturer_profile.refresh_from_db()
         assert manufacturer_org.manufacturer_profile.google_maps_url == "https://maps.app.goo.gl/updated-example"
+        terms_diagnostics.setdefault("flow_completion", {})["manufacturer"] = {
+            "create": "pass",
+            "application_mode": "pass",
+            "protected_route": "pass",
+            "invalid_url_validation": "pass",
+            "corrected_save": "pass",
+        }
 
         write_evidence("verified")
         assert driver.save_screenshot(str(evidence_dir / "application-mode-manufacturer-rtl.png"))
