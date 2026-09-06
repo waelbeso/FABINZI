@@ -41,15 +41,6 @@ def _upload_form(container):
     )
 
 
-def _set_upload(form, *, kind, label, path):
-    Select(form.find_element(By.NAME, "kind")).select_by_value(kind)
-    label_input = form.find_element(By.NAME, "label")
-    label_input.clear()
-    label_input.send_keys(label)
-    form.find_element(By.CSS_SELECTOR, 'input[type="file"][name="file"]').send_keys(str(path))
-    _click_element(form.parent, form.find_element(By.CSS_SELECTOR, 'button[type="submit"]'))
-
-
 @pytest.mark.django_db(transaction=True)
 def test_designer_round2_real_chrome_owner_surfaces_and_upload_inputs(client, live_server, tmp_path, settings):
     if os.getenv("CI") != "true":
@@ -116,14 +107,16 @@ def test_designer_round2_real_chrome_owner_surfaces_and_upload_inputs(client, li
         # Owner public-profile management: real rendered controls and draft lifecycle.
         _login(driver, live_server, client, owner)
         driver.get(f"{live_server.url}/designer/public-profile/?org={organization.pk}&lang=en")
-        wait.until(EC.visibility_of_element_located((By.ID, "public-identity-title")))
-        assert "Public Identity" in driver.page_source
-        assert "Location & Studio" in driver.page_source
-        assert "Web & Professional Presence" in driver.page_source
-        assert "Public Media" in driver.page_source
-        assert "Revision State" in driver.page_source
-        assert "Revision Actions" in driver.page_source
-        assert "Visibility Actions" in driver.page_source
+        for element_id in (
+            "revision-state-title",
+            "public-identity-title",
+            "location-studio-title",
+            "professional-presence-title",
+            "public-media-title",
+            "revision-actions-title",
+            "visibility-actions-title",
+        ):
+            wait.until(EC.visibility_of_element_located((By.ID, element_id)))
         profile_name = driver.find_element(By.ID, "public-name-en")
         _replace(driver, profile_name, "Round 2 Studio Draft")
         _shot(driver, "round2-01-public-profile-editor-desktop-en.png")
@@ -212,7 +205,7 @@ def test_designer_round2_real_chrome_owner_surfaces_and_upload_inputs(client, li
         # Create Store surface: route guidance is real and creation remains Draft until separate Publish.
         driver.get(f"{live_server.url}/designer/store/?org={organization.pk}&lang=en")
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Store setup"))
-        assert "/store/&lt;slug&gt;/" in driver.page_source
+        assert driver.find_element(By.CSS_SELECTOR, ".round2-url-preview code").text == "/store/<slug>/"
         assert "Create does not mean Publish" in driver.page_source
         create_form = driver.find_element(By.XPATH, '//form[.//input[@name="action" and @value="create"]]')
         create_form.find_element(By.NAME, "slug").send_keys("round2-browser-store")
