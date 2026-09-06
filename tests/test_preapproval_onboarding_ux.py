@@ -10,6 +10,7 @@ from django.core.files.storage import default_storage
 from django.test import override_settings
 from django.urls import reverse
 from selenium import webdriver
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
@@ -515,6 +516,65 @@ def test_manufacturer_unauthorized_resource_preserves_404_privacy(client):
 
 
 @pytest.mark.django_db
+def test_resource_role_privacy_distinguishes_outsider_wrong_role_and_inactive_member(client):
+    owner = _user("role-active-owner")
+    active = _manufacturer_org(
+        owner,
+        "Role Active Factory",
+        Organization.VerificationStatus.ACTIVE,
+        OnboardingApplication.Status.APPROVED,
+    )
+    active_job = _production_job(active, "role-active-job")
+    active_invitation = _manufacturer_invitation(active, prefix="role-active-invite")
+
+    wrong_role = _user("role-active-accountant")
+    Membership.objects.create(
+        organization=active,
+        user=wrong_role,
+        role=Membership.Role.ACCOUNTANT,
+    )
+    client.force_login(wrong_role)
+    assert client.get(reverse("manufacturer-production-detail", args=[active_job.pk])).status_code == 403
+    assert client.get(reverse("manufacturer-rfq-detail", args=[active_invitation.pk])).status_code == 403
+
+    client.force_login(owner)
+    assert client.get(reverse("manufacturer-production-detail", args=[active_job.pk])).status_code == 200
+    assert client.get(reverse("manufacturer-rfq-detail", args=[active_invitation.pk])).status_code == 200
+
+    outsider = _user("role-resource-outsider")
+    client.force_login(outsider)
+    assert client.get(reverse("manufacturer-production-detail", args=[active_job.pk])).status_code == 404
+    assert client.get(reverse("manufacturer-rfq-detail", args=[active_invitation.pk])).status_code == 404
+
+    inactive_owner = _user("role-inactive-owner")
+    inactive = _manufacturer_org(
+        inactive_owner,
+        "Role Draft Factory",
+        Organization.VerificationStatus.DRAFT,
+        OnboardingApplication.Status.DRAFT,
+    )
+    inactive_job = _production_job(inactive, "role-inactive-job")
+    inactive_wrong_role = _user("role-inactive-accountant")
+    Membership.objects.create(
+        organization=inactive,
+        user=inactive_wrong_role,
+        role=Membership.Role.ACCOUNTANT,
+    )
+    client.force_login(inactive_wrong_role)
+    response = client.get(reverse("manufacturer-production-detail", args=[inactive_job.pk]))
+    assert response.status_code == 302
+    assert response.url == f"/manufacturer/?org={inactive.pk}"
+    before_status = inactive_job.status
+    blocked = client.post(
+        reverse("manufacturer-production-detail", args=[inactive_job.pk]),
+        {"action": "start"},
+    )
+    assert blocked.status_code == 403
+    inactive_job.refresh_from_db()
+    assert inactive_job.status == before_status
+
+
+@pytest.mark.django_db
 def test_inactive_manufacturer_production_media_returns_no_bytes_and_active_still_works(client):
     user = _user("media-mfr")
     active = _manufacturer_org(
@@ -867,6 +927,16 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
         element.send_keys(value)
         return element
 
+    def accept_terms(field_id="id_profile-accept_terms"):
+        checkbox = wait.until(EC.presence_of_element_located((By.ID, field_id)))
+        if not checkbox.is_selected():
+            label = wait.until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, f'label[for="{field_id}"]'))
+            )
+            ActionChains(driver).scroll_to_element(label).move_to_element(label).pause(0.08).click().perform()
+            wait.until(lambda _driver: checkbox.is_selected())
+        return checkbox
+
     try:
         designer = _user("browser-pre-designer")
         login_as(designer)
@@ -879,21 +949,23 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
         replace("id_org-country", "EG")
         replace("id_org-website", "www.example.com")
         replace("id_profile-studio_name", "Browser Draft Studio")
-        checkbox = driver.find_element(By.ID, "id_profile-accept_terms")
-        if not checkbox.is_selected():
-            checkbox.click()
+        replace("id_profile-portfolio_url", "portfolio.example.com/work")
+        accept_terms()
         driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]').click()
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-application-mode="designer"]')))
         assert "APPLICATION MODE" in driver.page_source
         assert "designer-sidebar" not in driver.page_source
         designer_org = Organization.objects.get(created_by=designer, kind=Organization.Kind.DESIGNER)
         assert designer_org.website == "https://www.example.com"
+        designer_org.designer_profile.refresh_from_db()
+        assert designer_org.designer_profile.portfolio_url == "https://portfolio.example.com/work"
         driver.get(live_server.url + "/designer/designs/")
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-application-mode="designer"]')))
         driver.get(live_server.url + reverse("edit-onboarding", args=[designer_org.onboarding_application.pk]))
         website = replace("id_org-website", "not a url")
         driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]').click()
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".errorlist")))
+        assert "Enter a valid URL" in driver.page_source
         assert website.get_attribute("value") == "not a url"
         replace("id_org-website", "example.com")
         driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]').click()
@@ -914,9 +986,7 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
         replace("id_org-website", "example.com")
         replace("id_profile-commercial_registration", "CR-BROWSER")
         replace("id_profile-google_maps_url", "maps.app.goo.gl/example")
-        checkbox = driver.find_element(By.ID, "id_profile-accept_terms")
-        if not checkbox.is_selected():
-            checkbox.click()
+        accept_terms()
         driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]').click()
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-application-mode="manufacturer"]')))
         assert "manufacturer-sidebar" not in driver.page_source
@@ -926,6 +996,18 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
         assert manufacturer_org.manufacturer_profile.google_maps_url == "https://maps.app.goo.gl/example"
         driver.get(live_server.url + "/manufacturer/production/")
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-application-mode="manufacturer"]')))
+
+        driver.get(live_server.url + reverse("edit-onboarding", args=[manufacturer_org.onboarding_application.pk]))
+        maps_url = replace("id_profile-google_maps_url", "not a url")
+        driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]').click()
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".errorlist")))
+        assert "Enter a valid URL" in driver.page_source
+        assert maps_url.get_attribute("value") == "not a url"
+        replace("id_profile-google_maps_url", "maps.app.goo.gl/updated-example")
+        driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]').click()
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-application-mode="manufacturer"]')))
+        manufacturer_org.manufacturer_profile.refresh_from_db()
+        assert manufacturer_org.manufacturer_profile.google_maps_url == "https://maps.app.goo.gl/updated-example"
 
         ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
         assert driver.save_screenshot(str(ARTIFACT_DIR / "application-mode-manufacturer-rtl.png"))

@@ -102,18 +102,43 @@ def _authorized_resource_guard(
         if not organization or organization.kind != kind:
             raise Http404
 
-        try:
-            authorizer(request, resource, organization)
-        except PermissionDenied as exc:
-            if privacy == "404":
-                raise Http404 from exc
-            raise
-
+        base_membership = Membership.objects.filter(
+            user=request.user,
+            organization=organization,
+            is_active=True,
+        ).first()
         privileged = bool(
             privileged_active_bypass and privileged_active_bypass(request.user)
         )
+
+        # A legitimate member of the resource Organization reaches Application
+        # Mode before any role-specific operational authorization can execute.
+        # This keeps inactive GET/HEAD requests safe and mutation requests blocked
+        # before the wrapped professional view can produce business side effects.
         if (
-            not privileged
+            base_membership
+            and not privileged
+            and organization.verification_status
+            != Organization.VerificationStatus.ACTIVE
+        ):
+            return _inactive_response(request, organization, media=media)
+
+        try:
+            authorizer(request, resource, organization)
+        except PermissionDenied as exc:
+            # Preserve route privacy for foreign tenants, while retaining the
+            # historical 403 semantic for a legitimate same-tenant member whose
+            # role is insufficient for the requested professional operation.
+            if privacy == "404" and base_membership is None:
+                raise Http404 from exc
+            raise
+
+        # Authorizers may legitimately grant staff/superuser access without a
+        # professional membership. Apply the inactive-state rule only after that
+        # authorization succeeds, and preserve explicit privileged bypasses.
+        if (
+            base_membership is None
+            and not privileged
             and organization.verification_status
             != Organization.VerificationStatus.ACTIVE
         ):

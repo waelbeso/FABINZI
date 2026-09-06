@@ -241,7 +241,10 @@ def test_onboarding_states_are_truthful_and_production_is_not_bypassed(client):
         response = client.get(reverse("manufacturer"))
         assert response.status_code == 200
         assert org.get_verification_status_display().encode() in response.content
-        assert client.get(reverse("manufacturer-production")).status_code == 403
+        blocked = client.get(reverse("manufacturer-production"))
+        assert blocked.status_code == 302
+        assert blocked.url == f"/manufacturer/?org={org.pk}"
+        assert client.post(reverse("manufacturer-production"), {}).status_code == 403
 
 
 @pytest.mark.django_db
