@@ -42,7 +42,10 @@
 
     <section class="onboarding-section onboarding-section--compact" aria-labelledby="update-terms-heading">
       <div class="onboarding-section__head"><span class="onboarding-step">4</span><div><h2 id="update-terms-heading">{% if request.LANGUAGE_CODE == 'ar' %}الشروط{% else %}Terms{% endif %}</h2></div></div>
-      <label class="onboarding-check" for="{{ profile_form.accept_terms.id_for_label }}">{{ profile_form.accept_terms }} <span>{% if request.LANGUAGE_CODE == 'ar' %}أؤكد استمرار الموافقة على شروط الانضمام{% else %}I confirm continued acceptance of the onboarding terms{% endif %}</span></label>
+      <div class="onboarding-check">
+        {{ profile_form.accept_terms }}
+        <label for="{{ profile_form.accept_terms.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}أؤكد استمرار الموافقة على شروط الانضمام{% else %}I confirm continued acceptance of the onboarding terms{% endif %}</label>
+      </div>
       {{ profile_form.accept_terms.errors }}
     </section>
 
