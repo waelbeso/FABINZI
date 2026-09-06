@@ -78,7 +78,7 @@ def complete_private_artwork(owner, org, *, title="Private Wave"):
     [
         (OnboardingApplication.Status.DRAFT, Organization.VerificationStatus.DRAFT, "Your draft has not been submitted yet", True),
         (OnboardingApplication.Status.REVISION_REQUIRED, Organization.VerificationStatus.DRAFT, "Revision required", True),
-        (OnboardingApplication.Status.SUBMITTED, Organization.VerificationStatus.PENDING, "Under review", False),
+        (OnboardingApplication.Status.SUBMITTED, Organization.VerificationStatus.PENDING, "Application under review", False),
         (OnboardingApplication.Status.APPROVED, Organization.VerificationStatus.ACTIVE, "Designer workspace", False),
         (OnboardingApplication.Status.REJECTED, Organization.VerificationStatus.REJECTED, "Application rejected", False),
         (OnboardingApplication.Status.APPROVED, Organization.VerificationStatus.SUSPENDED, "Organization suspended", False),
@@ -101,9 +101,25 @@ def test_designer_onboarding_states_render_without_crossing_access(client, app_s
         assert "Edit application" not in text
         assert "Submit for review" not in text
     else:
-        assert "Full Designer workspace access follows" in text
+        assert 'data-application-mode="designer"' in text
+        assert "APPLICATION MODE" in text
+        assert "Professional workspace tools unlock only after approval." in text
+        assert "designer-sidebar" not in text
+        for operational_label in (
+            "Garment Designs",
+            "Manufacturing RFQs",
+            "Store / Catalog",
+            "Fulfillment",
+            "Finance / Payouts",
+        ):
+            assert operational_label not in text
+        assert "Full Designer workspace access follows" not in text
         assert ("Edit application" in text) is can_edit
         assert ("Submit for review" in text) is can_edit
+        if app_status == OnboardingApplication.Status.REJECTED:
+            assert "Start a new application" in text
+        else:
+            assert "Start a new application" not in text
 
 
 @pytest.mark.django_db

@@ -1,0 +1,74 @@
+<div class="application-mode-header">
+  <div>
+    <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}وضع تقديم الطلب{% else %}APPLICATION MODE{% endif %}</div>
+    <h1 class="page-title">{{ organization.display_name }}</h1>
+    <p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}قبل اعتماد FABINZI يمكنك متابعة طلبك وتحديثه عندما تسمح حالته بذلك. أدوات العمل المهني تفتح بعد الاعتماد فقط.{% else %}Before FABINZI approval you can track your application and update it when its state allows. Professional workspace tools unlock only after approval.{% endif %}</p>
+  </div>
+  <span class="application-status-badge" data-application-status="{{ application_status|default:organization.verification_status }}">
+    {% if organization.verification_status == 'suspended' %}
+      {% if request.LANGUAGE_CODE == 'ar' %}موقوف{% else %}Suspended{% endif %}
+    {% elif organization.verification_status == 'rejected' or application_status == 'rejected' %}
+      {% if request.LANGUAGE_CODE == 'ar' %}مرفوض{% else %}Rejected{% endif %}
+    {% elif application_status == 'revision_required' %}
+      {% if request.LANGUAGE_CODE == 'ar' %}مطلوب تعديل{% else %}Revision required{% endif %}
+    {% elif application_status == 'submitted' or organization.verification_status == 'pending' %}
+      {% if request.LANGUAGE_CODE == 'ar' %}قيد المراجعة{% else %}Under review{% endif %}
+    {% elif application_status == 'draft' %}
+      {% if request.LANGUAGE_CODE == 'ar' %}مسودة{% else %}Draft{% endif %}
+    {% else %}
+      {{ organization.get_verification_status_display }}
+    {% endif %}
+  </span>
+</div>
+
+<ol class="application-progress" aria-label="{% if request.LANGUAGE_CODE == 'ar' %}مراحل الطلب{% else %}Application progress{% endif %}">
+  <li class="application-progress__step application-progress__step--current"><span>1</span>{% if request.LANGUAGE_CODE == 'ar' %}الطلب{% else %}Application{% endif %}</li>
+  <li class="application-progress__step{% if application_status == 'submitted' or application_status == 'revision_required' %} application-progress__step--current{% endif %}"><span>2</span>{% if request.LANGUAGE_CODE == 'ar' %}مراجعة FABINZI{% else %}FABINZI review{% endif %}</li>
+  <li class="application-progress__step"><span>3</span>{% if request.LANGUAGE_CODE == 'ar' %}الاعتماد{% else %}Approval{% endif %}</li>
+</ol>
+
+<section class="application-status-card" role="status" aria-live="polite">
+  {% if organization.verification_status == 'suspended' %}
+    <h2>{% if request.LANGUAGE_CODE == 'ar' %}الجهة موقوفة{% else %}Organization suspended{% endif %}</h2>
+    <p>{% if request.LANGUAGE_CODE == 'ar' %}الوصول التشغيلي والنشر غير متاحين أثناء الإيقاف. يبقى سجل الطلب محفوظًا.{% else %}Operational and publishing access is unavailable while the Organization is suspended. Application history remains preserved.{% endif %}</p>
+  {% elif organization.verification_status == 'rejected' or application_status == 'rejected' %}
+    <h2>{% if request.LANGUAGE_CODE == 'ar' %}تم رفض الطلب{% else %}Application rejected{% endif %}</h2>
+    <p>{% if request.LANGUAGE_CODE == 'ar' %}يبقى القرار السابق محفوظًا في السجل. يمكن لمالك الطلب بدء طلب جديد مستقل عندما يكون ذلك متاحًا.{% else %}The previous decision remains preserved in history. The original owner may start a separate new application when available.{% endif %}</p>
+  {% elif application_status == 'revision_required' %}
+    <h2>{% if request.LANGUAGE_CODE == 'ar' %}مطلوب تعديل{% else %}Revision required{% endif %}</h2>
+    <p>{% if request.LANGUAGE_CODE == 'ar' %}راجع ملاحظات FABINZI، حدّث البيانات المطلوبة، ثم أعد إرسال الطلب للمراجعة.{% else %}Review FABINZI feedback, update the requested information, then resubmit the application for review.{% endif %}</p>
+  {% elif application_status == 'submitted' or organization.verification_status == 'pending' %}
+    <h2>{% if request.LANGUAGE_CODE == 'ar' %}الطلب قيد المراجعة{% else %}Application under review{% endif %}</h2>
+    <p>{% if request.LANGUAGE_CODE == 'ar' %}تم استلام الطلب. يظل مقفلاً حتى يصدر قرار أو يطلب FABINZI تعديلات. لا يتم عرض موعد اعتماد تقديري.{% else %}The application has been received. It stays locked until FABINZI issues a decision or requests revisions. No approval date is estimated.{% endif %}</p>
+  {% else %}
+    <h2>{% if request.LANGUAGE_CODE == 'ar' %}المسودة لم تُرسل بعد{% else %}Your draft has not been submitted yet{% endif %}</h2>
+    <p>{% if request.LANGUAGE_CODE == 'ar' %}راجع البيانات ثم أرسل الطلب عندما يصبح جاهزًا لمراجعة FABINZI.{% else %}Review the information and submit when it is ready for FABINZI review.{% endif %}</p>
+  {% endif %}
+</section>
+
+{% if application and application.review_notes %}
+  <section class="application-review-note" aria-labelledby="fabinzi-review-feedback">
+    <h2 id="fabinzi-review-feedback">{% if request.LANGUAGE_CODE == 'ar' %}ملاحظات مراجعة FABINZI{% else %}FABINZI review feedback{% endif %}</h2>
+    <p>{{ application.review_notes }}</p>
+  </section>
+{% endif %}
+
+{% if can_edit_application %}
+  <div class="application-actions">
+    <a class="button button--ghost" href="{% url 'edit-onboarding' application.pk %}">{% if request.LANGUAGE_CODE == 'ar' %}تعديل الطلب{% else %}Edit application{% endif %}</a>
+    {% if can_submit_application %}
+      <form method="post" action="{% url 'submit-onboarding' application.pk %}">
+        {% csrf_token %}
+        <button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}إرسال للمراجعة{% else %}Submit for review{% endif %}</button>
+      </form>
+    {% endif %}
+  </div>
+{% elif application_status == 'rejected' and request.user.pk == organization.created_by_id %}
+  <div class="application-actions">
+    <form method="post" action="{% url 'submit-onboarding' application.pk %}">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="reapply">
+      <button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}بدء طلب جديد{% else %}Start a new application{% endif %}</button>
+    </form>
+  </div>
+{% endif %}

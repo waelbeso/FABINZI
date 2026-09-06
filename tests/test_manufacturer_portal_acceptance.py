@@ -229,19 +229,80 @@ def test_onboarding_states_are_truthful_and_production_is_not_bypassed(client):
     assert response.status_code == 200
     assert b"Create your Manufacturer organization" in response.content
 
-    for index, (verification, application) in enumerate([
-        (Organization.VerificationStatus.DRAFT, OnboardingApplication.Status.DRAFT),
-        (Organization.VerificationStatus.DRAFT, OnboardingApplication.Status.REVISION_REQUIRED),
-        (Organization.VerificationStatus.PENDING, OnboardingApplication.Status.SUBMITTED),
-        (Organization.VerificationStatus.REJECTED, OnboardingApplication.Status.REJECTED),
-        (Organization.VerificationStatus.SUSPENDED, OnboardingApplication.Status.APPROVED),
-    ]):
-        u, org, _, _ = manufacturer(f"state-{index}", status=verification, app_status=application)
+    states = [
+        (
+            Organization.VerificationStatus.DRAFT,
+            OnboardingApplication.Status.DRAFT,
+            "Your draft has not been submitted yet",
+            True,
+            False,
+        ),
+        (
+            Organization.VerificationStatus.DRAFT,
+            OnboardingApplication.Status.REVISION_REQUIRED,
+            "Revision required",
+            True,
+            False,
+        ),
+        (
+            Organization.VerificationStatus.PENDING,
+            OnboardingApplication.Status.SUBMITTED,
+            "Application under review",
+            False,
+            False,
+        ),
+        (
+            Organization.VerificationStatus.REJECTED,
+            OnboardingApplication.Status.REJECTED,
+            "Application rejected",
+            False,
+            True,
+        ),
+        (
+            Organization.VerificationStatus.SUSPENDED,
+            OnboardingApplication.Status.APPROVED,
+            "Organization suspended",
+            False,
+            False,
+        ),
+    ]
+    for index, (verification, application_status, heading, can_edit, can_reapply) in enumerate(states):
+        u, org, _, application = manufacturer(
+            f"state-{index}", status=verification, app_status=application_status
+        )
+        if application_status == OnboardingApplication.Status.REVISION_REQUIRED:
+            application.review_notes = "Please correct the registration details."
+            application.save(update_fields=["review_notes"])
+
         client.force_login(u)
         response = client.get(reverse("manufacturer"))
         assert response.status_code == 200
-        assert org.get_verification_status_display().encode() in response.content
-        assert client.get(reverse("manufacturer-production")).status_code == 403
+        text = response.content.decode()
+        assert 'data-application-mode="manufacturer"' in text
+        assert "APPLICATION MODE" in text
+        assert heading in text
+        assert "manufacturer-sidebar" not in text
+        assert "Professional workspace tools unlock only after approval." in text
+        for operational_label in (
+            "Production / Fulfillment",
+            "RFQ Opportunities",
+            "Finance / Settlements",
+        ):
+            assert operational_label not in text
+        assert ("Edit application" in text) is can_edit
+        assert ("Submit for review" in text) is can_edit
+        assert ("Start a new application" in text) is can_reapply
+        if application_status == OnboardingApplication.Status.REVISION_REQUIRED:
+            assert "Please correct the registration details." in text
+            assert "Review FABINZI feedback" in text
+
+        blocked = client.get(reverse("manufacturer-production"))
+        assert blocked.status_code == 302
+        assert blocked.url == f"/manufacturer/?org={org.pk}"
+        blocked_head = client.head(reverse("manufacturer-production"))
+        assert blocked_head.status_code == 302
+        assert blocked_head.url == f"/manufacturer/?org={org.pk}"
+        assert client.post(reverse("manufacturer-production"), {}).status_code == 403
 
 
 @pytest.mark.django_db

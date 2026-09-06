@@ -1,0 +1,305 @@
+.onboarding-shell,
+.application-mode-shell{
+  width:min(1080px,100%);
+  margin-inline:auto;
+  display:grid;
+  gap:1.25rem
+}
+.onboarding-hero,
+.application-mode-header{
+  display:grid;
+  grid-template-columns:minmax(0,1.45fr) minmax(260px,.65fr);
+  gap:1.25rem;
+  align-items:start
+}
+.onboarding-hero--edit{
+  grid-template-columns:minmax(0,1fr)
+}
+.onboarding-note,
+.onboarding-section,
+.application-status-card,
+.application-review-note{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow-sm)
+}
+.onboarding-note{
+  padding:1.15rem
+}
+.onboarding-note p{
+  margin:.45rem 0 0;
+  color:var(--muted)
+}
+.onboarding-form{
+  display:grid;
+  gap:1rem
+}
+.onboarding-section{
+  padding:clamp(1rem,3vw,1.5rem)
+}
+.onboarding-section--compact{
+  padding-bottom:1.1rem
+}
+.onboarding-section__head{
+  display:flex;
+  align-items:flex-start;
+  gap:.8rem;
+  margin-bottom:1rem
+}
+.onboarding-section__head h2{
+  margin-bottom:.2rem
+}
+.onboarding-section__head p{
+  margin:0;
+  color:var(--muted)
+}
+.onboarding-step{
+  inline-size:2rem;
+  block-size:2rem;
+  flex:0 0 2rem;
+  display:grid;
+  place-items:center;
+  border-radius:999px;
+  background:var(--surface-2);
+  border:1px solid var(--border);
+  color:var(--brand);
+  font-weight:850
+}
+.onboarding-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:1rem
+}
+.onboarding-field{
+  min-width:0;
+  display:grid;
+  gap:.4rem
+}
+.onboarding-field--full{
+  grid-column:1/-1
+}
+.onboarding-field label{
+  font-size:.88rem;
+  font-weight:750
+}
+.onboarding-field input,
+.onboarding-field select,
+.onboarding-field textarea{
+  width:100%;
+  min-height:44px;
+  padding:.75rem .8rem;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:var(--surface);
+  color:var(--text)
+}
+.onboarding-field textarea{
+  min-height:120px;
+  resize:vertical
+}
+.onboarding-field input:focus,
+.onboarding-field select:focus,
+.onboarding-field textarea:focus,
+.onboarding-plan-card:focus-within,
+.onboarding-check:focus-within{
+  border-color:var(--focus);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--focus) 20%,transparent);
+  outline:none
+}
+.onboarding-url-input{
+  direction:ltr!important;
+  text-align:left
+}
+.onboarding-help{
+  margin:0;
+  color:var(--muted);
+  font-size:.82rem
+}
+.onboarding-help--strong{
+  margin-top:.8rem
+}
+.onboarding-errors,
+.onboarding-field .errorlist,
+.onboarding-plan-fieldset .errorlist,
+.onboarding-section>.errorlist{
+  margin:.25rem 0 0;
+  color:var(--danger);
+  font-size:.88rem
+}
+.onboarding-field .errorlist,
+.onboarding-plan-fieldset .errorlist,
+.onboarding-section>.errorlist{
+  padding-inline-start:1.15rem
+}
+.onboarding-plan-fieldset{
+  border:0;
+  margin:0;
+  padding:0
+}
+.onboarding-plan-fieldset legend{
+  font-weight:800;
+  margin-bottom:.75rem
+}
+.onboarding-plan-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:.8rem
+}
+.onboarding-plan-card{
+  position:relative;
+  display:grid;
+  grid-template-columns:auto 1fr;
+  align-items:start;
+  gap:.7rem;
+  min-height:100%;
+  padding:1rem;
+  border:1px solid var(--border);
+  border-radius:14px;
+  background:var(--surface-2);
+  cursor:pointer
+}
+.onboarding-plan-card:hover{
+  border-color:var(--focus)
+}
+.onboarding-plan-card:has(input:checked){
+  border-color:var(--brand);
+  background:color-mix(in srgb,var(--brand) 8%,var(--surface))
+}
+.onboarding-plan-card__radio input{
+  inline-size:1.1rem;
+  block-size:1.1rem;
+  margin:.15rem 0 0;
+  accent-color:var(--brand)
+}
+.onboarding-plan-card__label{
+  line-height:1.45;
+  font-weight:700
+}
+.onboarding-check{
+  display:flex;
+  align-items:flex-start;
+  gap:.7rem;
+  padding:.85rem 1rem;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:var(--surface-2);
+  cursor:pointer
+}
+.onboarding-check input{
+  inline-size:1.15rem;
+  block-size:1.15rem;
+  margin:.18rem 0 0;
+  accent-color:var(--brand)
+}
+.onboarding-actions,
+.application-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:.75rem;
+  align-items:center
+}
+.application-mode-header{
+  align-items:center
+}
+.application-status-badge{
+  justify-self:end;
+  display:inline-flex;
+  align-items:center;
+  min-height:40px;
+  padding:.55rem .85rem;
+  border:1px solid var(--border);
+  border-radius:999px;
+  background:var(--surface);
+  color:var(--text);
+  font-weight:800
+}
+.application-progress{
+  list-style:none;
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:.75rem;
+  margin:0;
+  padding:0
+}
+.application-progress__step{
+  display:flex;
+  align-items:center;
+  gap:.55rem;
+  min-width:0;
+  padding:.75rem;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:var(--surface);
+  color:var(--muted);
+  font-weight:700
+}
+.application-progress__step span{
+  inline-size:1.8rem;
+  block-size:1.8rem;
+  flex:0 0 1.8rem;
+  display:grid;
+  place-items:center;
+  border-radius:999px;
+  background:var(--surface-2);
+  color:var(--muted)
+}
+.application-progress__step--current{
+  color:var(--text);
+  border-color:var(--focus)
+}
+.application-progress__step--current span{
+  background:var(--brand);
+  color:#fff
+}
+.application-status-card,
+.application-review-note{
+  padding:clamp(1rem,3vw,1.5rem)
+}
+.application-status-card h2,
+.application-review-note h2{
+  margin-bottom:.45rem
+}
+.application-status-card p,
+.application-review-note p{
+  margin-bottom:0;
+  color:var(--muted)
+}
+.application-review-note{
+  border-inline-start:4px solid var(--warning)
+}
+.application-review-note--prominent{
+  border-inline-start-color:var(--brand)
+}
+[dir="rtl"] .onboarding-url-input{
+  direction:ltr!important;
+  text-align:left!important
+}
+@media(max-width:800px){
+  .onboarding-hero,
+  .application-mode-header{
+    grid-template-columns:1fr
+  }
+  .application-status-badge{
+    justify-self:start
+  }
+}
+@media(max-width:640px){
+  .onboarding-grid,
+  .onboarding-plan-grid,
+  .application-progress{
+    grid-template-columns:1fr
+  }
+  .onboarding-actions .button,
+  .application-actions .button{
+    width:100%
+  }
+  .application-actions form{
+    width:100%
+  }
+}
+@media(prefers-reduced-motion:reduce){
+  .onboarding-plan-card{
+    transition:none
+  }
+}

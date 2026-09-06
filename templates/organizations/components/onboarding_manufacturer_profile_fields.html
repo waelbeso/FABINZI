@@ -1,0 +1,50 @@
+{% if profile_form.non_field_errors %}<div class="onboarding-errors" role="alert">{{ profile_form.non_field_errors }}</div>{% endif %}
+<div class="onboarding-grid">
+  <div class="onboarding-field">
+    <label for="{{ profile_form.commercial_registration.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}السجل التجاري{% else %}Commercial registration{% endif %}</label>
+    {{ profile_form.commercial_registration }}
+    {{ profile_form.commercial_registration.errors }}
+  </div>
+  <div class="onboarding-field">
+    <label for="{{ profile_form.tax_number.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}الرقم الضريبي{% else %}Tax number{% endif %}</label>
+    {{ profile_form.tax_number }}
+    {{ profile_form.tax_number.errors }}
+  </div>
+  <div class="onboarding-field onboarding-field--full">
+    <label for="{{ profile_form.google_maps_url.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}رابط خرائط Google{% else %}Google Maps URL{% endif %}</label>
+    {{ profile_form.google_maps_url }}
+    <p class="onboarding-help">{% if request.LANGUAGE_CODE == 'ar' %}يُقبل رابط Google Maps الكامل أو المختصر، ويمكن إدخاله بدون https:// إذا كان صالحًا.{% else %}Full and short Google Maps links are accepted. A valid scheme-less address is normalized to HTTPS.{% endif %}</p>
+    {{ profile_form.google_maps_url.errors }}
+  </div>
+  <div class="onboarding-field">
+    <label for="{{ profile_form.primary_contact_person.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}مسؤول التواصل الرئيسي{% else %}Primary contact person{% endif %}</label>
+    {{ profile_form.primary_contact_person }}
+    {{ profile_form.primary_contact_person.errors }}
+  </div>
+  <div class="onboarding-field">
+    <label for="{{ profile_form.contact_job_title.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}المسمى الوظيفي{% else %}Contact job title{% endif %}</label>
+    {{ profile_form.contact_job_title }}
+    {{ profile_form.contact_job_title.errors }}
+  </div>
+  <div class="onboarding-field">
+    <label for="{{ profile_form.whatsapp.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}واتساب{% else %}WhatsApp{% endif %}</label>
+    {{ profile_form.whatsapp }}
+    {{ profile_form.whatsapp.errors }}
+  </div>
+  <div class="onboarding-field">
+    <label for="{{ profile_form.daily_capacity.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}الطاقة اليومية{% else %}Daily capacity{% endif %}</label>
+    {{ profile_form.daily_capacity }}
+    {{ profile_form.daily_capacity.errors }}
+  </div>
+  <div class="onboarding-field">
+    <label for="{{ profile_form.monthly_capacity.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}الطاقة الشهرية{% else %}Monthly capacity{% endif %}</label>
+    {{ profile_form.monthly_capacity }}
+    {{ profile_form.monthly_capacity.errors }}
+  </div>
+  <div class="onboarding-field onboarding-field--full">
+    <label for="{{ profile_form.payout_information.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}معلومات أولية للتحويلات{% else %}Initial payout information{% endif %}</label>
+    {{ profile_form.payout_information }}
+    <p class="onboarding-help">{% if request.LANGUAGE_CODE == 'ar' %}هذه بيانات انضمام أولية فقط. إعداد التحويل التشغيلي يتم لاحقًا بعد الاعتماد.{% else %}This is onboarding information only. Operational payout setup is handled later after approval.{% endif %}</p>
+    {{ profile_form.payout_information.errors }}
+  </div>
+</div>

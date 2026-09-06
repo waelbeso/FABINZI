@@ -1,0 +1,19 @@
+<fieldset class="onboarding-plan-fieldset">
+  <legend>{% if request.LANGUAGE_CODE == 'ar' %}اختر الخطة{% else %}Choose a plan{% endif %}</legend>
+  <div class="onboarding-plan-grid" role="radiogroup" aria-label="{% if request.LANGUAGE_CODE == 'ar' %}خطة الانضمام{% else %}Onboarding plan{% endif %}">
+    {% for radio in profile_form.plan_policy_id %}
+      <label class="onboarding-plan-card" for="{{ radio.id_for_label }}">
+        <span class="onboarding-plan-card__radio">{{ radio.tag }}</span>
+        <span class="onboarding-plan-card__label">{{ radio.choice_label }}</span>
+      </label>
+    {% endfor %}
+  </div>
+  {{ profile_form.plan_policy_id.errors }}
+  <p class="onboarding-help onboarding-help--strong">
+    {% if request.LANGUAGE_CODE == 'ar' %}
+      Starter هي الافتراضية. اختيار Pro يسجل نيتك التجارية والسياسة/الإصدار/السعر الفعليين فقط. بعد الاعتماد تظل الصلاحية Starter حتى يؤكد FABINZI دليل فوترة مخول خلال نافذة الدفع البالغة 27 يومًا. هذه ليست فترة تجربة Pro.
+    {% else %}
+      Starter is the default. Choosing Pro records commercial intent and the exact effective policy/version/price only. After approval entitlement remains Starter until FABINZI receives authoritative billing evidence within the 27-day payment window. This is not a Pro trial.
+    {% endif %}
+  </p>
+</fieldset>

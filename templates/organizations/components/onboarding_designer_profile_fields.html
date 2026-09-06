@@ -1,0 +1,30 @@
+{% if profile_form.non_field_errors %}<div class="onboarding-errors" role="alert">{{ profile_form.non_field_errors }}</div>{% endif %}
+<div class="onboarding-grid">
+  <div class="onboarding-field">
+    <label for="{{ profile_form.studio_name.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}اسم الاستوديو{% else %}Studio name{% endif %}</label>
+    {{ profile_form.studio_name }}
+    {{ profile_form.studio_name.errors }}
+  </div>
+  <div class="onboarding-field">
+    <label for="{{ profile_form.portfolio_url.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}رابط معرض الأعمال{% else %}Portfolio URL{% endif %}</label>
+    {{ profile_form.portfolio_url }}
+    <p class="onboarding-help">{% if request.LANGUAGE_CODE == 'ar' %}يمكن إدخال الرابط بدون https:// وسيقوم FABINZI بتطبيعه إلى HTTPS إذا كان صالحًا.{% else %}You may omit https://; FABINZI normalizes a valid scheme-less portfolio address to HTTPS.{% endif %}</p>
+    {{ profile_form.portfolio_url.errors }}
+  </div>
+  <div class="onboarding-field">
+    <label for="{{ profile_form.legal_registration_number.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}رقم التسجيل القانوني{% else %}Registration number{% endif %}</label>
+    {{ profile_form.legal_registration_number }}
+    {{ profile_form.legal_registration_number.errors }}
+  </div>
+  <div class="onboarding-field">
+    <label for="{{ profile_form.tax_number.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}الرقم الضريبي{% else %}Tax number{% endif %}</label>
+    {{ profile_form.tax_number }}
+    {{ profile_form.tax_number.errors }}
+  </div>
+  <div class="onboarding-field onboarding-field--full">
+    <label for="{{ profile_form.payout_information.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}معلومات أولية للتحويلات{% else %}Initial payout information{% endif %}</label>
+    {{ profile_form.payout_information }}
+    <p class="onboarding-help">{% if request.LANGUAGE_CODE == 'ar' %}هذه بيانات انضمام أولية فقط. ملف التحويل الفعلي يُدار لاحقًا من قسم المالية بعد الاعتماد.{% else %}This is onboarding information only. The operational payout profile is managed later in Finance after approval.{% endif %}</p>
+    {{ profile_form.payout_information.errors }}
+  </div>
+</div>

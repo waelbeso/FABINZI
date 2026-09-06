@@ -1,16 +1,58 @@
 {% extends "base.html" %}
-{% block title %}{% if request.LANGUAGE_CODE == 'ar' %}FABINZI · انضمام {% if portal_kind == 'manufacturer' %}المصنع{% else %}المصمم{% endif %}{% else %}FABINZI · {{ portal_kind|title }} onboarding{% endif %}{% endblock %}
-{% block extra_head %}{{ block.super }}<meta name="robots" content="noindex, nofollow, noarchive">{% endblock %}
+{% load static %}
+{% block title %}{% if request.LANGUAGE_CODE == 'ar' %}تحديث طلب {% if portal_kind == 'manufacturer' %}المصنع{% else %}المصمم{% endif %}{% else %}Update {{ portal_kind|title }} application{% endif %} · FABINZI{% endblock %}
+{% block extra_head %}{{ block.super }}<meta name="robots" content="noindex, nofollow, noarchive"><link rel="stylesheet" href="{% static 'css/business-onboarding.css' %}">{% endblock %}
 {% block content %}
-<section class="surface shell portal-onboarding">
-  <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}انضمام شركاء FABINZI{% else %}FABINZI BUSINESS ONBOARDING{% endif %}</div>
-  <h1>{% if request.LANGUAGE_CODE == 'ar' %}{% if portal_kind == 'manufacturer' %}انضمام شريك التصنيع{% else %}انضمام المصمم{% endif %}{% else %}{{ portal_kind|title }} onboarding{% endif %}</h1>
-  <p>{% if editing %}{% if request.LANGUAGE_CODE == 'ar' %}حدّث البيانات المطلوبة قبل إرسال الطلب أو إعادة إرساله للمراجعة.{% else %}Update the application before submitting or resubmitting it.{% endif %}{% else %}{% if request.LANGUAGE_CODE == 'ar' %}أنشئ ملف الجهة، وافق على شروط المنصة، ثم أرسل الطلب لمراجعة FABINZI.{% else %}Create your business profile, accept the platform terms, then submit it for FABINZI review.{% endif %}{% endif %}</p>
-  <form method="post" class="stack onboarding-form">
+<section class="onboarding-shell" data-onboarding-role="{{ portal_kind }}" data-onboarding-edit="true">
+  <header class="onboarding-hero onboarding-hero--edit">
+    <div>
+      <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}وضع تقديم الطلب{% else %}APPLICATION MODE{% endif %}</div>
+      <h1 class="page-title">{% if request.LANGUAGE_CODE == 'ar' %}تحديث طلب {% if portal_kind == 'manufacturer' %}شريك التصنيع{% else %}المصمم{% endif %}{% else %}Update {{ portal_kind|title }} application{% endif %}</h1>
+      <p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}حفظ التعديلات لا يعيد إرسال الطلب تلقائيًا. بعد الحفظ عد إلى حالة الطلب لإرساله أو إعادة إرساله عندما تكون الحالة تسمح بذلك.{% else %}Saving changes does not submit or resubmit automatically. After saving, return to Application Status to submit when the lifecycle allows it.{% endif %}</p>
+    </div>
+  </header>
+
+  {% if application and application.status == 'revision_required' and application.review_notes %}
+    <section class="application-review-note application-review-note--prominent" aria-labelledby="revision-feedback">
+      <h2 id="revision-feedback">{% if request.LANGUAGE_CODE == 'ar' %}ملاحظات FABINZI المطلوب معالجتها{% else %}FABINZI revision feedback{% endif %}</h2>
+      <p>{{ application.review_notes }}</p>
+    </section>
+  {% endif %}
+
+  <form method="post" class="onboarding-form" novalidate>
     {% csrf_token %}
-    <div class="card"><h2>{% if request.LANGUAGE_CODE == 'ar' %}بيانات الجهة{% else %}Business information{% endif %}</h2>{{ org_form.as_p }}</div>
-    <div class="card"><h2>{% if request.LANGUAGE_CODE == 'ar' %}{% if portal_kind == 'manufacturer' %}ملف التصنيع{% else %}ملف المصمم{% endif %}{% else %}{{ portal_kind|title }} profile{% endif %}</h2>{{ profile_form.as_p }}</div>
-    <button class="button" type="submit">{% if editing %}{% if request.LANGUAGE_CODE == 'ar' %}حفظ التعديلات{% else %}Save changes{% endif %}{% else %}{% if request.LANGUAGE_CODE == 'ar' %}حفظ مسودة الانضمام{% else %}Save onboarding draft{% endif %}{% endif %}</button>
+    <section class="onboarding-section" aria-labelledby="update-business-heading">
+      <div class="onboarding-section__head"><span class="onboarding-step">1</span><div><h2 id="update-business-heading">{% if request.LANGUAGE_CODE == 'ar' %}بيانات الجهة{% else %}Business information{% endif %}</h2></div></div>
+      {% include "organizations/components/onboarding_business_fields.html" %}
+    </section>
+
+    <section class="onboarding-section" aria-labelledby="update-profile-heading">
+      <div class="onboarding-section__head"><span class="onboarding-step">2</span><div><h2 id="update-profile-heading">{% if request.LANGUAGE_CODE == 'ar' %}{% if portal_kind == 'manufacturer' %}ملف التصنيع{% else %}ملف المصمم{% endif %}{% else %}{{ portal_kind|title }} profile{% endif %}</h2></div></div>
+      {% if portal_kind == 'manufacturer' %}
+        {% include "organizations/components/onboarding_manufacturer_profile_fields.html" %}
+      {% else %}
+        {% include "organizations/components/onboarding_designer_profile_fields.html" %}
+      {% endif %}
+    </section>
+
+    <section class="onboarding-section" aria-labelledby="update-plan-heading">
+      <div class="onboarding-section__head"><span class="onboarding-step">3</span><div><h2 id="update-plan-heading">{% if request.LANGUAGE_CODE == 'ar' %}الخطة المطلوبة{% else %}Requested plan{% endif %}</h2></div></div>
+      {% include "organizations/components/onboarding_plan_selector.html" %}
+    </section>
+
+    <section class="onboarding-section onboarding-section--compact" aria-labelledby="update-terms-heading">
+      <div class="onboarding-section__head"><span class="onboarding-step">4</span><div><h2 id="update-terms-heading">{% if request.LANGUAGE_CODE == 'ar' %}الشروط{% else %}Terms{% endif %}</h2></div></div>
+      <div class="onboarding-check">
+        {{ profile_form.accept_terms }}
+        <label for="{{ profile_form.accept_terms.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}أؤكد استمرار الموافقة على شروط الانضمام{% else %}I confirm continued acceptance of the onboarding terms{% endif %}</label>
+      </div>
+      {{ profile_form.accept_terms.errors }}
+    </section>
+
+    <div class="onboarding-actions">
+      <button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}حفظ التعديلات{% else %}Save changes{% endif %}</button>
+      <a class="button button--ghost" href="/{{ portal_kind }}/">{% if request.LANGUAGE_CODE == 'ar' %}العودة إلى حالة الطلب{% else %}Back to Application Status{% endif %}</a>
+    </div>
   </form>
 </section>
 {% endblock %}
