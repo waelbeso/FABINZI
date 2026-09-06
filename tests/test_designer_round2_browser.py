@@ -29,6 +29,7 @@ from .test_designer_portal_browser import (
     _shot,
     _wait,
 )
+from .v2_3_support import v2_3_reference_rows
 
 
 User = get_user_model()
