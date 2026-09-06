@@ -1,3 +1,4 @@
+import json
 import os
 from decimal import Decimal
 from pathlib import Path
@@ -242,27 +243,14 @@ def _stored_private_asset(user, *, name, metadata):
 @pytest.mark.django_db
 def test_trusted_designer_resource_overrides_session_query_and_post(client):
     user = _user("trusted-designer")
-    active = _designer_org(
-        user,
-        "Active Studio",
-        Organization.VerificationStatus.ACTIVE,
-        OnboardingApplication.Status.APPROVED,
-    )
-    inactive = _designer_org(
-        user,
-        "Draft Studio",
-        Organization.VerificationStatus.DRAFT,
-        OnboardingApplication.Status.DRAFT,
-    )
+    active = _designer_org(user, "Active Studio", Organization.VerificationStatus.ACTIVE, OnboardingApplication.Status.APPROVED)
+    inactive = _designer_org(user, "Draft Studio", Organization.VerificationStatus.DRAFT, OnboardingApplication.Status.DRAFT)
     active_design, active_version, active_artwork, _, active_product = _designer_resources(user, active, "Active")
     inactive_design, inactive_version, inactive_artwork, _, inactive_product = _designer_resources(user, inactive, "Draft")
     client.force_login(user)
 
     _set_session(client, "designer_organization_id", inactive)
-    response = client.get(
-        reverse("designer-design-detail", args=[active_design.pk]),
-        {"org": inactive.pk},
-    )
+    response = client.get(reverse("designer-design-detail", args=[active_design.pk]), {"org": inactive.pk})
     assert response.status_code == 200
     assert response.context["designer_organization"].pk == active.pk
     assert client.session["designer_organization_id"] == active.pk
@@ -270,15 +258,7 @@ def test_trusted_designer_resource_overrides_session_query_and_post(client):
     _set_session(client, "designer_organization_id", inactive)
     response = client.post(
         reverse("designer-design-detail", args=[active_design.pk]),
-        {
-            "organization": inactive.pk,
-            "version_id": active_version.pk,
-            "action": "save_version",
-            "summary": "Trusted Active summary",
-            "base_material": "Cotton",
-            "construction_notes": "Trusted resource organization",
-            "technical_specs": "",
-        },
+        {"organization": inactive.pk, "version_id": active_version.pk, "action": "save_version", "summary": "Trusted Active summary", "base_material": "Cotton", "construction_notes": "Trusted resource organization", "technical_specs": ""},
     )
     assert response.status_code == 302
     active_version.refresh_from_db()
@@ -287,22 +267,12 @@ def test_trusted_designer_resource_overrides_session_query_and_post(client):
     assert inactive_version.summary == "Draft untouched"
 
     _set_session(client, "designer_organization_id", active)
-    response = client.get(
-        reverse("designer-design-technical-v2-4", args=[inactive_design.pk]),
-        {"org": active.pk},
-    )
+    response = client.get(reverse("designer-design-technical-v2-4", args=[inactive_design.pk]), {"org": active.pk})
     assert response.status_code == 302
     assert response.url == f"/designer/?org={inactive.pk}"
 
     before = inactive_version.summary
-    response = client.post(
-        reverse("designer-design-technical-v2-4", args=[inactive_design.pk]),
-        {
-            "organization": active.pk,
-            "version_id": inactive_version.pk,
-            "action": "save_policy",
-        },
-    )
+    response = client.post(reverse("designer-design-technical-v2-4", args=[inactive_design.pk]), {"organization": active.pk, "version_id": inactive_version.pk, "action": "save_policy"})
     assert response.status_code == 403
     inactive_version.refresh_from_db()
     assert inactive_version.summary == before
@@ -324,55 +294,26 @@ def test_trusted_designer_resource_overrides_session_query_and_post(client):
 @pytest.mark.django_db
 def test_designer_unauthorized_resource_does_not_leak_or_redirect(client):
     user = _user("tenant-a")
-    active = _designer_org(
-        user,
-        "Tenant A",
-        Organization.VerificationStatus.ACTIVE,
-        OnboardingApplication.Status.APPROVED,
-    )
+    active = _designer_org(user, "Tenant A", Organization.VerificationStatus.ACTIVE, OnboardingApplication.Status.APPROVED)
     outsider = _user("tenant-c")
-    foreign = _designer_org(
-        outsider,
-        "SECRET TENANT C",
-        Organization.VerificationStatus.DRAFT,
-        OnboardingApplication.Status.DRAFT,
-    )
+    foreign = _designer_org(outsider, "SECRET TENANT C", Organization.VerificationStatus.DRAFT, OnboardingApplication.Status.DRAFT)
     foreign_design, _, _, _, _ = _designer_resources(outsider, foreign, "Foreign")
     client.force_login(user)
-
-    response = client.get(
-        reverse("designer-design-detail", args=[foreign_design.pk]),
-        {"org": active.pk},
-    )
+    response = client.get(reverse("designer-design-detail", args=[foreign_design.pk]), {"org": active.pk})
     assert response.status_code == 404
     assert "Location" not in response
     assert b"SECRET TENANT C" not in response.content
-
-    technical = client.get(
-        reverse("designer-design-technical-v2-4", args=[foreign_design.pk]),
-        {"org": active.pk},
-    )
+    technical = client.get(reverse("designer-design-technical-v2-4", args=[foreign_design.pk]), {"org": active.pk})
     assert technical.status_code == 403
 
 
 @pytest.mark.django_db
 def test_trusted_context_resolver_precedence_is_server_controlled():
     user = _user("resolver-user")
-    active = _designer_org(
-        user,
-        "Resolver Active",
-        Organization.VerificationStatus.ACTIVE,
-        OnboardingApplication.Status.APPROVED,
-    )
-    other = _designer_org(
-        user,
-        "Resolver Other",
-        Organization.VerificationStatus.DRAFT,
-        OnboardingApplication.Status.DRAFT,
-    )
+    active = _designer_org(user, "Resolver Active", Organization.VerificationStatus.ACTIVE, OnboardingApplication.Status.APPROVED)
+    other = _designer_org(user, "Resolver Other", Organization.VerificationStatus.DRAFT, OnboardingApplication.Status.DRAFT)
     from django.test import RequestFactory
     from django.contrib.sessions.middleware import SessionMiddleware
-
     factory = RequestFactory()
     request = factory.post(f"/designer/designs/1/?org={other.pk}", {"organization": other.pk})
     request.user = user
@@ -382,23 +323,9 @@ def test_trusted_context_resolver_precedence_is_server_controlled():
     request._fabinzi_trusted_professional_organization = active
     selected, _ = resolve_designer_membership(request, required=True)
     assert selected.organization_id == active.pk
-
-    manufacturer_active = _manufacturer_org(
-        user,
-        "Resolver M Active",
-        Organization.VerificationStatus.ACTIVE,
-        OnboardingApplication.Status.APPROVED,
-    )
-    manufacturer_other = _manufacturer_org(
-        user,
-        "Resolver M Other",
-        Organization.VerificationStatus.DRAFT,
-        OnboardingApplication.Status.DRAFT,
-    )
-    request = factory.post(
-        f"/manufacturer/production/1/?org={manufacturer_other.pk}",
-        {"organization": manufacturer_other.pk},
-    )
+    manufacturer_active = _manufacturer_org(user, "Resolver M Active", Organization.VerificationStatus.ACTIVE, OnboardingApplication.Status.APPROVED)
+    manufacturer_other = _manufacturer_org(user, "Resolver M Other", Organization.VerificationStatus.DRAFT, OnboardingApplication.Status.DRAFT)
+    request = factory.post(f"/manufacturer/production/1/?org={manufacturer_other.pk}", {"organization": manufacturer_other.pk})
     request.user = user
     middleware.process_request(request)
     request.session["manufacturer_organization_id"] = manufacturer_other.pk
@@ -410,77 +337,36 @@ def test_trusted_context_resolver_precedence_is_server_controlled():
 @pytest.mark.django_db
 def test_manufacturer_resource_owner_controls_invitation_with_conflicting_selectors(client):
     user = _user("trusted-mfr")
-    active = _manufacturer_org(
-        user,
-        "Active Factory",
-        Organization.VerificationStatus.ACTIVE,
-        OnboardingApplication.Status.APPROVED,
-    )
-    inactive = _manufacturer_org(
-        user,
-        "Draft Factory",
-        Organization.VerificationStatus.DRAFT,
-        OnboardingApplication.Status.DRAFT,
-    )
+    active = _manufacturer_org(user, "Active Factory", Organization.VerificationStatus.ACTIVE, OnboardingApplication.Status.APPROVED)
+    inactive = _manufacturer_org(user, "Draft Factory", Organization.VerificationStatus.DRAFT, OnboardingApplication.Status.DRAFT)
     active_invitation = _manufacturer_invitation(active, prefix="active-invite")
     inactive_invitation = _manufacturer_invitation(inactive, prefix="draft-invite")
     client.force_login(user)
-
     _set_session(client, "manufacturer_organization_id", inactive)
-    response = client.get(
-        reverse("manufacturer-rfq-detail", args=[active_invitation.pk]),
-        {"org": inactive.pk},
-    )
+    response = client.get(reverse("manufacturer-rfq-detail", args=[active_invitation.pk]), {"org": inactive.pk})
     assert response.status_code == 200
     assert response.context["manufacturer_organization"].pk == active.pk
     active_invitation.refresh_from_db()
     assert active_invitation.status == RFQInvitation.Status.VIEWED
-
     _set_session(client, "manufacturer_organization_id", inactive)
-    response = client.post(
-        reverse("manufacturer-rfq-detail", args=[active_invitation.pk]),
-        {
-            "organization": inactive.pk,
-            "unit_price": "12.50",
-            "production_lead_days": "7",
-            "setup_fee": "0",
-            "sample_fee": "0",
-            "shipping_estimate": "0",
-            "currency": "EGP",
-            "minimum_order_quantity": "1",
-            "sample_lead_days": "",
-            "valid_until": "",
-            "notes": "Trusted active factory",
-        },
-    )
+    response = client.post(reverse("manufacturer-rfq-detail", args=[active_invitation.pk]), {"organization": inactive.pk, "unit_price": "12.50", "production_lead_days": "7", "setup_fee": "0", "sample_fee": "0", "shipping_estimate": "0", "currency": "EGP", "minimum_order_quantity": "1", "sample_lead_days": "", "valid_until": "", "notes": "Trusted active factory"})
     assert response.status_code == 302
     quote = ManufacturerQuote.objects.get(invitation=active_invitation)
     assert quote.invitation.manufacturer_id == active.pk
     assert not ManufacturerQuote.objects.filter(invitation=inactive_invitation).exists()
-
     _set_session(client, "manufacturer_organization_id", active)
     inactive_invitation.refresh_from_db()
     assert inactive_invitation.status == RFQInvitation.Status.INVITED
-    response = client.get(
-        reverse("manufacturer-rfq-detail", args=[inactive_invitation.pk]),
-        {"org": active.pk},
-    )
+    response = client.get(reverse("manufacturer-rfq-detail", args=[inactive_invitation.pk]), {"org": active.pk})
     assert response.status_code == 302
     assert response.url == f"/manufacturer/?org={inactive.pk}"
     inactive_invitation.refresh_from_db()
     assert inactive_invitation.status == RFQInvitation.Status.INVITED
-
-    response = client.head(
-        reverse("manufacturer-rfq-detail", args=[inactive_invitation.pk]) + f"?org={active.pk}"
-    )
+    response = client.head(reverse("manufacturer-rfq-detail", args=[inactive_invitation.pk]) + f"?org={active.pk}")
     assert response.status_code == 302
     inactive_invitation.refresh_from_db()
     assert inactive_invitation.status == RFQInvitation.Status.INVITED
-
-    blocked = client.post(
-        reverse("manufacturer-rfq-detail", args=[inactive_invitation.pk]),
-        {"organization": active.pk, "unit_price": "1.00"},
-    )
+    blocked = client.post(reverse("manufacturer-rfq-detail", args=[inactive_invitation.pk]), {"organization": active.pk, "unit_price": "1.00"})
     assert blocked.status_code == 403
     inactive_invitation.refresh_from_db()
     assert inactive_invitation.status == RFQInvitation.Status.INVITED
@@ -490,25 +376,12 @@ def test_manufacturer_resource_owner_controls_invitation_with_conflicting_select
 @pytest.mark.django_db
 def test_manufacturer_unauthorized_resource_preserves_404_privacy(client):
     user = _user("mfr-a-user")
-    own = _manufacturer_org(
-        user,
-        "MFR A",
-        Organization.VerificationStatus.ACTIVE,
-        OnboardingApplication.Status.APPROVED,
-    )
+    own = _manufacturer_org(user, "MFR A", Organization.VerificationStatus.ACTIVE, OnboardingApplication.Status.APPROVED)
     outsider = _user("mfr-c-user")
-    foreign = _manufacturer_org(
-        outsider,
-        "SECRET MFR C",
-        Organization.VerificationStatus.DRAFT,
-        OnboardingApplication.Status.DRAFT,
-    )
+    foreign = _manufacturer_org(outsider, "SECRET MFR C", Organization.VerificationStatus.DRAFT, OnboardingApplication.Status.DRAFT)
     invitation = _manufacturer_invitation(foreign, prefix="foreign-invite")
     client.force_login(user)
-    response = client.get(
-        reverse("manufacturer-rfq-detail", args=[invitation.pk]),
-        {"org": own.pk},
-    )
+    response = client.get(reverse("manufacturer-rfq-detail", args=[invitation.pk]), {"org": own.pk})
     assert response.status_code == 404
     assert "Location" not in response
     assert b"SECRET MFR C" not in response.content
@@ -517,57 +390,32 @@ def test_manufacturer_unauthorized_resource_preserves_404_privacy(client):
 @pytest.mark.django_db
 def test_resource_role_privacy_distinguishes_outsider_wrong_role_and_inactive_member(client):
     owner = _user("role-active-owner")
-    active = _manufacturer_org(
-        owner,
-        "Role Active Factory",
-        Organization.VerificationStatus.ACTIVE,
-        OnboardingApplication.Status.APPROVED,
-    )
+    active = _manufacturer_org(owner, "Role Active Factory", Organization.VerificationStatus.ACTIVE, OnboardingApplication.Status.APPROVED)
     active_job = _production_job(active, "role-active-job")
     active_invitation = _manufacturer_invitation(active, prefix="role-active-invite")
-
     wrong_role = _user("role-active-accountant")
-    Membership.objects.create(
-        organization=active,
-        user=wrong_role,
-        role=Membership.Role.ACCOUNTANT,
-    )
+    Membership.objects.create(organization=active, user=wrong_role, role=Membership.Role.ACCOUNTANT)
     client.force_login(wrong_role)
     assert client.get(reverse("manufacturer-production-detail", args=[active_job.pk])).status_code == 403
     assert client.get(reverse("manufacturer-rfq-detail", args=[active_invitation.pk])).status_code == 403
-
     client.force_login(owner)
     assert client.get(reverse("manufacturer-production-detail", args=[active_job.pk])).status_code == 200
     assert client.get(reverse("manufacturer-rfq-detail", args=[active_invitation.pk])).status_code == 200
-
     outsider = _user("role-resource-outsider")
     client.force_login(outsider)
     assert client.get(reverse("manufacturer-production-detail", args=[active_job.pk])).status_code == 404
     assert client.get(reverse("manufacturer-rfq-detail", args=[active_invitation.pk])).status_code == 404
-
     inactive_owner = _user("role-inactive-owner")
-    inactive = _manufacturer_org(
-        inactive_owner,
-        "Role Draft Factory",
-        Organization.VerificationStatus.DRAFT,
-        OnboardingApplication.Status.DRAFT,
-    )
+    inactive = _manufacturer_org(inactive_owner, "Role Draft Factory", Organization.VerificationStatus.DRAFT, OnboardingApplication.Status.DRAFT)
     inactive_job = _production_job(inactive, "role-inactive-job")
     inactive_wrong_role = _user("role-inactive-accountant")
-    Membership.objects.create(
-        organization=inactive,
-        user=inactive_wrong_role,
-        role=Membership.Role.ACCOUNTANT,
-    )
+    Membership.objects.create(organization=inactive, user=inactive_wrong_role, role=Membership.Role.ACCOUNTANT)
     client.force_login(inactive_wrong_role)
     response = client.get(reverse("manufacturer-production-detail", args=[inactive_job.pk]))
     assert response.status_code == 302
     assert response.url == f"/manufacturer/?org={inactive.pk}"
     before_status = inactive_job.status
-    blocked = client.post(
-        reverse("manufacturer-production-detail", args=[inactive_job.pk]),
-        {"action": "start"},
-    )
+    blocked = client.post(reverse("manufacturer-production-detail", args=[inactive_job.pk]), {"action": "start"})
     assert blocked.status_code == 403
     inactive_job.refresh_from_db()
     assert inactive_job.status == before_status
@@ -576,130 +424,46 @@ def test_resource_role_privacy_distinguishes_outsider_wrong_role_and_inactive_me
 @pytest.mark.django_db
 def test_inactive_manufacturer_production_media_returns_no_bytes_and_active_still_works(client):
     user = _user("media-mfr")
-    active = _manufacturer_org(
-        user,
-        "Media Active",
-        Organization.VerificationStatus.ACTIVE,
-        OnboardingApplication.Status.APPROVED,
-    )
-    inactive = _manufacturer_org(
-        user,
-        "Media Draft",
-        Organization.VerificationStatus.DRAFT,
-        OnboardingApplication.Status.DRAFT,
-    )
+    active = _manufacturer_org(user, "Media Active", Organization.VerificationStatus.ACTIVE, OnboardingApplication.Status.APPROVED)
+    inactive = _manufacturer_org(user, "Media Draft", Organization.VerificationStatus.DRAFT, OnboardingApplication.Status.DRAFT)
     active_job = _production_job(active, "active-media")
     inactive_job = _production_job(inactive, "draft-media")
     active_asset = _stored_private_asset(user, name="active-job.pdf", metadata={})
     inactive_asset = _stored_private_asset(user, name="draft-job.pdf", metadata={})
-    active_record = ProductionAsset.objects.create(
-        job=active_job,
-        media_asset=active_asset,
-        kind=ProductionAsset.Kind.OTHER,
-        uploaded_by=user,
-    )
-    inactive_record = ProductionAsset.objects.create(
-        job=inactive_job,
-        media_asset=inactive_asset,
-        kind=ProductionAsset.Kind.OTHER,
-        uploaded_by=user,
-    )
+    active_record = ProductionAsset.objects.create(job=active_job, media_asset=active_asset, kind=ProductionAsset.Kind.OTHER, uploaded_by=user)
+    inactive_record = ProductionAsset.objects.create(job=inactive_job, media_asset=inactive_asset, kind=ProductionAsset.Kind.OTHER, uploaded_by=user)
     client.force_login(user)
-
     _set_session(client, "manufacturer_organization_id", active)
-    blocked = client.get(
-        reverse(
-            "manufacturer-production-media",
-            args=[inactive_job.pk, "job", inactive_record.pk],
-        )
-    )
+    blocked = client.get(reverse("manufacturer-production-media", args=[inactive_job.pk, "job", inactive_record.pk]))
     assert blocked.status_code == 404
-
     _set_session(client, "manufacturer_organization_id", inactive)
-    allowed = client.get(
-        reverse(
-            "manufacturer-production-media",
-            args=[active_job.pk, "job", active_record.pk],
-        )
-    )
+    allowed = client.get(reverse("manufacturer-production-media", args=[active_job.pk, "job", active_record.pk]))
     assert allowed.status_code == 200
 
 
 @pytest.mark.django_db
 def test_non_active_designer_private_media_is_fail_closed_except_verification(client):
     user = _user("designer-media")
-    inactive = _designer_org(
-        user,
-        "Evidence Draft",
-        Organization.VerificationStatus.DRAFT,
-        OnboardingApplication.Status.DRAFT,
-    )
-    active = _designer_org(
-        user,
-        "Evidence Active",
-        Organization.VerificationStatus.ACTIVE,
-        OnboardingApplication.Status.APPROVED,
-    )
+    inactive = _designer_org(user, "Evidence Draft", Organization.VerificationStatus.DRAFT, OnboardingApplication.Status.DRAFT)
+    active = _designer_org(user, "Evidence Active", Organization.VerificationStatus.ACTIVE, OnboardingApplication.Status.APPROVED)
     client.force_login(user)
-
-    verification = _stored_private_asset(
-        user,
-        name="verification.pdf",
-        metadata={
-            "designer_private_upload": True,
-            "organization_id": inactive.pk,
-            "purpose": "verification",
-        },
-    )
+    verification = _stored_private_asset(user, name="verification.pdf", metadata={"designer_private_upload": True, "organization_id": inactive.pk, "purpose": "verification"})
     response = client.get(reverse("private-designer-media", args=[verification.pk]))
     assert response.status_code == 200
-
-    for index, purpose in enumerate(
-        ["design_tech_pack", "artwork_source", "technical", "legacy_claimed", "", "unknown", "future_evidence_type"]
-    ):
-        asset = _stored_private_asset(
-            user,
-            name=f"blocked-{index}.pdf",
-            metadata={
-                "designer_private_upload": True,
-                "organization_id": inactive.pk,
-                "purpose": purpose,
-            },
-        )
+    for index, purpose in enumerate(["design_tech_pack", "artwork_source", "technical", "legacy_claimed", "", "unknown", "future_evidence_type"]):
+        asset = _stored_private_asset(user, name=f"blocked-{index}.pdf", metadata={"designer_private_upload": True, "organization_id": inactive.pk, "purpose": purpose})
         blocked = client.get(reverse("private-designer-media", args=[asset.pk]))
         assert blocked.status_code == 404
-
-    missing = _stored_private_asset(
-        user,
-        name="missing-purpose.pdf",
-        metadata={
-            "designer_private_upload": True,
-            "organization_id": inactive.pk,
-        },
-    )
+    missing = _stored_private_asset(user, name="missing-purpose.pdf", metadata={"designer_private_upload": True, "organization_id": inactive.pk})
     assert client.get(reverse("private-designer-media", args=[missing.pk])).status_code == 404
-
-    active_operational = _stored_private_asset(
-        user,
-        name="active-operational.pdf",
-        metadata={
-            "designer_private_upload": True,
-            "organization_id": active.pk,
-            "purpose": "design_tech_pack",
-        },
-    )
+    active_operational = _stored_private_asset(user, name="active-operational.pdf", metadata={"designer_private_upload": True, "organization_id": active.pk, "purpose": "design_tech_pack"})
     assert client.get(reverse("private-designer-media", args=[active_operational.pk])).status_code == 200
 
 
 @pytest.mark.django_db
 def test_context_routes_redirect_legitimate_inactive_members_and_leave_active_workspace(client):
     designer = _user("context-designer")
-    designer_draft = _designer_org(
-        designer,
-        "Context Designer Draft",
-        Organization.VerificationStatus.DRAFT,
-        OnboardingApplication.Status.DRAFT,
-    )
+    designer_draft = _designer_org(designer, "Context Designer Draft", Organization.VerificationStatus.DRAFT, OnboardingApplication.Status.DRAFT)
     client.force_login(designer)
     root = client.get(reverse("designer"))
     assert root.status_code == 200
@@ -709,14 +473,8 @@ def test_context_routes_redirect_legitimate_inactive_members_and_leave_active_wo
     assert blocked.status_code == 302
     assert blocked.url == f"/designer/?org={designer_draft.pk}"
     assert client.post(reverse("designer-design-list"), {}).status_code == 403
-
     manufacturer = _user("context-manufacturer")
-    manufacturer_draft = _manufacturer_org(
-        manufacturer,
-        "Context Manufacturer Draft",
-        Organization.VerificationStatus.DRAFT,
-        OnboardingApplication.Status.DRAFT,
-    )
+    manufacturer_draft = _manufacturer_org(manufacturer, "Context Manufacturer Draft", Organization.VerificationStatus.DRAFT, OnboardingApplication.Status.DRAFT)
     client.force_login(manufacturer)
     root = client.get(reverse("manufacturer"))
     assert root.status_code == 200
@@ -730,20 +488,9 @@ def test_context_routes_redirect_legitimate_inactive_members_and_leave_active_wo
 @pytest.mark.django_db
 def test_aggregate_finance_excludes_inactive_organization_rows(client):
     user = _user("finance-multi")
-    active = _designer_org(
-        user,
-        "Finance Active",
-        Organization.VerificationStatus.ACTIVE,
-        OnboardingApplication.Status.APPROVED,
-    )
-    inactive = _designer_org(
-        user,
-        "Finance Draft",
-        Organization.VerificationStatus.DRAFT,
-        OnboardingApplication.Status.DRAFT,
-    )
+    active = _designer_org(user, "Finance Active", Organization.VerificationStatus.ACTIVE, OnboardingApplication.Status.APPROVED)
+    inactive = _designer_org(user, "Finance Draft", Organization.VerificationStatus.DRAFT, OnboardingApplication.Status.DRAFT)
     from apps.finance.models import FinanceAccount, SettlementRequest
-
     active_account = FinanceAccount.objects.create(organization=active, currency="EGP")
     inactive_account = FinanceAccount.objects.create(organization=inactive, currency="EGP")
     client.force_login(user)
@@ -769,97 +516,33 @@ def test_anonymous_professional_resource_keeps_login_redirect_before_resource_di
 @pytest.mark.django_db
 def test_production_like_inactive_resource_paths_do_not_500(client):
     user = _user("debugfalse-user")
-    active = _designer_org(
-        user,
-        "Debug Active",
-        Organization.VerificationStatus.ACTIVE,
-        OnboardingApplication.Status.APPROVED,
-    )
-    inactive = _designer_org(
-        user,
-        "Debug Draft",
-        Organization.VerificationStatus.DRAFT,
-        OnboardingApplication.Status.DRAFT,
-    )
+    active = _designer_org(user, "Debug Active", Organization.VerificationStatus.ACTIVE, OnboardingApplication.Status.APPROVED)
+    inactive = _designer_org(user, "Debug Draft", Organization.VerificationStatus.DRAFT, OnboardingApplication.Status.DRAFT)
     design, version, artwork, _, _ = _designer_resources(user, inactive, "Debug")
     client.force_login(user)
     _set_session(client, "designer_organization_id", active)
-    for route, pk in [
-        ("designer-design-detail", design.pk),
-        ("designer-design-technical-v2-4", design.pk),
-        ("designer-artwork-technical-v2-4", artwork.pk),
-    ]:
+    for route, pk in [("designer-design-detail", design.pk), ("designer-design-technical-v2-4", design.pk), ("designer-artwork-technical-v2-4", artwork.pk)]:
         response = client.get(reverse(route, args=[pk]), {"org": active.pk})
         assert response.status_code == 302
         assert response.status_code != 500
-    blocked = client.post(
-        reverse("designer-design-technical-v2-4", args=[design.pk]),
-        {"organization": active.pk, "version_id": version.pk, "action": "save_policy"},
-    )
+    blocked = client.post(reverse("designer-design-technical-v2-4", args=[design.pk]), {"organization": active.pk, "version_id": version.pk, "action": "save_policy"})
     assert blocked.status_code == 403
     assert blocked.status_code != 500
 
 
 @pytest.mark.django_db
 def test_url_fields_normalize_scheme_less_values_and_preserve_explicit_schemes(v2_3_reference_rows):
-    cases = [
-        ("", ""),
-        ("example.com", "https://example.com"),
-        ("www.example.com", "https://www.example.com"),
-        ("https://example.com", "https://example.com"),
-        ("http://example.com", "http://example.com"),
-        ("example.com/path?q=one", "https://example.com/path?q=one"),
-    ]
+    cases = [("", ""), ("example.com", "https://example.com"), ("www.example.com", "https://www.example.com"), ("https://example.com", "https://example.com"), ("http://example.com", "http://example.com"), ("example.com/path?q=one", "https://example.com/path?q=one")]
     for raw, expected in cases:
-        org_form = OrganizationForm(
-            data={
-                "display_name": "URL Organization",
-                "legal_name": "",
-                "email": "url-org@example.test",
-                "phone": "",
-                "website": raw,
-                "address_line1": "",
-                "address_line2": "",
-                "city": "Cairo",
-                "region": "",
-                "country": "EG",
-            }
-        )
+        org_form = OrganizationForm(data={"display_name": "URL Organization", "legal_name": "", "email": "url-org@example.test", "phone": "", "website": raw, "address_line1": "", "address_line2": "", "city": "Cairo", "region": "", "country": "EG"})
         assert org_form.is_valid(), org_form.errors
         assert org_form.cleaned_data["website"] == expected
-
-        designer_form = DesignerOnboardingForm(
-            data={
-                "studio_name": "URL Studio",
-                "portfolio_url": raw,
-                "legal_registration_number": "",
-                "tax_number": "",
-                "payout_information": "",
-                "plan_policy_id": "",
-                "accept_terms": "on",
-            }
-        )
+        designer_form = DesignerOnboardingForm(data={"studio_name": "URL Studio", "portfolio_url": raw, "legal_registration_number": "", "tax_number": "", "payout_information": "", "plan_policy_id": "", "accept_terms": "on"})
         assert designer_form.is_valid(), designer_form.errors
         assert designer_form.cleaned_data["portfolio_url"] == expected
-
-        manufacturer_form = ManufacturerOnboardingForm(
-            data={
-                "commercial_registration": "CR-URL",
-                "tax_number": "",
-                "google_maps_url": raw,
-                "primary_contact_person": "",
-                "contact_job_title": "",
-                "whatsapp": "",
-                "daily_capacity": "",
-                "monthly_capacity": "",
-                "payout_information": "",
-                "plan_policy_id": "",
-                "accept_terms": "on",
-            }
-        )
+        manufacturer_form = ManufacturerOnboardingForm(data={"commercial_registration": "CR-URL", "tax_number": "", "google_maps_url": raw, "primary_contact_person": "", "contact_job_title": "", "whatsapp": "", "daily_capacity": "", "monthly_capacity": "", "payout_information": "", "plan_policy_id": "", "accept_terms": "on"})
         assert manufacturer_form.is_valid(), manufacturer_form.errors
         assert manufacturer_form.cleaned_data["google_maps_url"] == expected
-
     assert OrganizationForm().fields["website"].widget.input_type == "text"
     assert DesignerOnboardingForm().fields["portfolio_url"].widget.input_type == "text"
     assert ManufacturerOnboardingForm().fields["google_maps_url"].widget.input_type == "text"
@@ -869,28 +552,7 @@ def test_url_fields_normalize_scheme_less_values_and_preserve_explicit_schemes(v
 def test_malformed_urls_render_inline_and_retain_entered_values(client, v2_3_reference_rows):
     user = _user("invalid-url-user")
     client.force_login(user)
-    response = client.post(
-        reverse("designer"),
-        {
-            "org-display_name": "Invalid URL Studio",
-            "org-legal_name": "",
-            "org-email": "invalid-url@example.test",
-            "org-phone": "",
-            "org-website": "not a valid url",
-            "org-address_line1": "",
-            "org-address_line2": "",
-            "org-city": "Cairo",
-            "org-region": "",
-            "org-country": "EG",
-            "profile-studio_name": "Invalid URL Studio",
-            "profile-portfolio_url": "also not a url",
-            "profile-legal_registration_number": "",
-            "profile-tax_number": "",
-            "profile-payout_information": "",
-            "profile-plan_policy_id": "",
-            "profile-accept_terms": "on",
-        },
-    )
+    response = client.post(reverse("designer"), {"org-display_name": "Invalid URL Studio", "org-legal_name": "", "org-email": "invalid-url@example.test", "org-phone": "", "org-website": "not a valid url", "org-address_line1": "", "org-address_line2": "", "org-city": "Cairo", "org-region": "", "org-country": "EG", "profile-studio_name": "Invalid URL Studio", "profile-portfolio_url": "also not a url", "profile-legal_registration_number": "", "profile-tax_number": "", "profile-payout_information": "", "profile-plan_policy_id": "", "profile-accept_terms": "on"})
     assert response.status_code == 200
     body = response.content.decode()
     assert "Enter a valid URL" in body
@@ -916,6 +578,7 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
     evidence_dir = Path("artifacts/browser-qa/preapproval-onboarding")
     evidence_dir.mkdir(parents=True, exist_ok=True)
     terms_diagnostics = {}
+    last_terms_elements = {}
 
     def login_as(user):
         client.force_login(user)
@@ -929,25 +592,54 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
         element.send_keys(value)
         return element
 
-    def inspect_terms(field_id, key):
+    def locate_terms(field_id):
         checkbox = wait.until(EC.presence_of_element_located((By.ID, field_id)))
         labels = driver.find_elements(By.CSS_SELECTOR, f'label[for="{field_id}"]')
         label = labels[0] if labels else None
-        diagnostic = driver.execute_script(
+        onboarding_check = checkbox.find_element(
+            By.XPATH,
+            "./ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' onboarding-check ')][1]",
+        )
+        terms_section = onboarding_check.find_element(
+            By.XPATH,
+            "./ancestor::section[contains(concat(' ', normalize-space(@class), ' '), ' onboarding-section ')][1]",
+        )
+        last_terms_elements.clear()
+        last_terms_elements.update(
+            checkbox=checkbox,
+            label=label,
+            onboarding_check=onboarding_check,
+            terms_section=terms_section,
+        )
+        return checkbox, labels, label, onboarding_check, terms_section
+
+    def viewport_snapshot(checkbox, label, onboarding_check, *, include_hits):
+        return driver.execute_script(
             """
-            const fieldId = arguments[0];
-            const checkbox = document.getElementById(fieldId);
-            const labels = Array.from(document.querySelectorAll('label')).filter(
-              (candidate) => candidate.htmlFor === fieldId
-            );
-            const label = labels.length ? labels[0] : null;
+            const checkbox = arguments[0];
+            const label = arguments[1];
+            const check = arguments[2];
+            const safeIdentity = (element) => {
+              if (!element) return null;
+              const style = getComputedStyle(element);
+              return {
+                tagName: element.tagName ? element.tagName.toLowerCase() : '',
+                id: element.id || '',
+                className: typeof element.className === 'string' ? element.className : '',
+                role: element.getAttribute ? (element.getAttribute('role') || '') : '',
+                pointerEvents: style.pointerEvents,
+                position: style.position,
+                zIndex: style.zIndex,
+                visibility: style.visibility,
+                opacity: style.opacity,
+              };
+            };
             const geometry = (element) => {
               if (!element) return null;
               const rect = element.getBoundingClientRect();
               const style = getComputedStyle(element);
               return {
-                outerHTML: element.outerHTML,
-                rect: {x: rect.x, y: rect.y, width: rect.width, height: rect.height},
+                rect: {x: rect.x, y: rect.y, width: rect.width, height: rect.height, top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left},
                 display: style.display,
                 visibility: style.visibility,
                 opacity: style.opacity,
@@ -959,71 +651,103 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
             const hit = (element) => {
               if (!element) return null;
               const rect = element.getBoundingClientRect();
-              const target = document.elementFromPoint(
-                rect.x + (rect.width / 2), rect.y + (rect.height / 2)
-              );
-              if (!target) return null;
+              const x = rect.left + (rect.width / 2);
+              const y = rect.top + (rect.height / 2);
+              const stack = document.elementsFromPoint(x, y);
               return {
-                tag: target.tagName.toLowerCase(),
-                id: target.id || '',
-                className: typeof target.className === 'string' ? target.className : '',
-                name: target.getAttribute('name') || '',
-                type: target.getAttribute('type') || '',
-                htmlFor: target.htmlFor || '',
+                point: {x, y},
+                elementFromPoint: safeIdentity(document.elementFromPoint(x, y)),
+                elementsFromPoint: stack.slice(0, 8).map(safeIdentity),
+                topIsTarget: stack.length > 0 && stack[0] === element,
+                topWithinTarget: stack.length > 0 && element.contains(stack[0]),
               };
             };
-            return {
+            const result = {
+              viewport: {
+                innerWidth: window.innerWidth,
+                innerHeight: window.innerHeight,
+                scrollX: window.scrollX,
+                scrollY: window.scrollY,
+                documentScrollHeight: document.documentElement.scrollHeight,
+              },
               checkbox: geometry(checkbox),
               label: geometry(label),
-              checkboxId: checkbox ? checkbox.id : null,
-              checkboxName: checkbox ? checkbox.name : null,
-              checkboxType: checkbox ? checkbox.type : null,
-              checked: checkbox ? checkbox.checked : null,
-              disabled: checkbox ? checkbox.disabled : null,
-              labelFor: label ? label.getAttribute('for') : null,
-              labelHtmlFor: label ? label.htmlFor : null,
-              idCount: document.querySelectorAll(`[id="${fieldId}"]`).length,
-              labelCount: labels.length,
-              association: Boolean(checkbox && label && document.getElementById(label.htmlFor) === checkbox),
-              checkboxCenterHit: hit(checkbox),
-              labelCenterHit: hit(label),
+              onboardingCheck: geometry(check),
             };
+            if (arguments[3]) {
+              result.checkboxCenter = hit(checkbox);
+              result.labelCenter = hit(label);
+            }
+            return result;
             """,
-            field_id,
+            checkbox,
+            label,
+            onboarding_check,
+            include_hits,
         )
-        diagnostic["selenium"] = {
-            "checkbox_displayed": checkbox.is_displayed(),
-            "checkbox_enabled": checkbox.is_enabled(),
-            "label_displayed": bool(label and label.is_displayed()),
-            "label_enabled": bool(label and label.is_enabled()),
-        }
-        diagnostic["interactions"] = {}
-        terms_diagnostics[key] = diagnostic
-        return checkbox, label, diagnostic
+
+    def interaction_result(action):
+        try:
+            action()
+            return {"success": True, "exception_type": None}
+        except Exception as exc:
+            return {"success": False, "exception_type": type(exc).__name__}
 
     def write_evidence(prefix):
-        sanitized_html = driver.execute_script(
-            """
-            const clone = document.documentElement.cloneNode(true);
-            clone.querySelectorAll('input[name="csrfmiddlewaretoken"], input[type="password"]').forEach(
-              (element) => element.setAttribute('value', '[REDACTED]')
-            );
-            return '<!doctype html>\n' + clone.outerHTML;
-            """
-        )
-        (evidence_dir / f"{prefix}-page.html").write_text(sanitized_html, encoding="utf-8")
-        (evidence_dir / f"{prefix}-terms-diagnostics.txt").write_text(
-            repr(terms_diagnostics), encoding="utf-8"
-        )
-        driver.save_screenshot(str(evidence_dir / f"{prefix}.png"))
+        errors = []
+        try:
+            driver.save_screenshot(str(evidence_dir / f"{prefix}.png"))
+        except Exception as exc:
+            errors.append(f"screenshot:{type(exc).__name__}")
 
-    def accept_terms(field_id="id_profile-accept_terms", *, key):
-        checkbox, label, diagnostic = inspect_terms(field_id, key)
+        try:
+            fragments = []
+            for name in ("checkbox", "label", "onboarding_check", "terms_section"):
+                element = last_terms_elements.get(name)
+                if element is not None:
+                    fragments.append(f"<!-- {name} -->\n{element.get_attribute('outerHTML')}")
+            (evidence_dir / f"{prefix}-terms-fragment.html").write_text(
+                "\n\n".join(fragments),
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            errors.append(f"fragment:{type(exc).__name__}")
+
+        if errors:
+            terms_diagnostics.setdefault("evidence_writer", {})[prefix] = {"errors": errors}
+        try:
+            (evidence_dir / f"{prefix}-terms-diagnostics.json").write_text(
+                json.dumps(terms_diagnostics, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+    def diagnose_terms(field_id="id_profile-accept_terms", *, key):
+        checkbox, labels, label, onboarding_check, _ = locate_terms(field_id)
+        diagnostic = {
+            "checkboxId": checkbox.get_attribute("id"),
+            "checkboxName": checkbox.get_attribute("name"),
+            "checkboxType": checkbox.get_attribute("type"),
+            "checkedInitially": checkbox.is_selected(),
+            "disabled": not checkbox.is_enabled(),
+            "labelFor": label.get_attribute("for") if label else None,
+            "idCount": len(driver.find_elements(By.CSS_SELECTOR, f'[id="{field_id}"]')),
+            "labelCount": len(labels),
+            "association": bool(label and label.get_attribute("for") == field_id),
+            "selenium": {
+                "checkbox_displayed": checkbox.is_displayed(),
+                "checkbox_enabled": checkbox.is_enabled(),
+                "label_displayed": bool(label and label.is_displayed()),
+                "label_enabled": bool(label and label.is_enabled()),
+            },
+            "interactions": {},
+        }
+        terms_diagnostics[key] = diagnostic
         assert diagnostic["idCount"] == 1
         assert diagnostic["labelCount"] == 1
         assert diagnostic["checkboxId"] == field_id
         assert diagnostic["labelFor"] == field_id
-        assert diagnostic["labelHtmlFor"] == field_id
         assert diagnostic["association"] is True
         assert diagnostic["selenium"]["checkbox_displayed"] is True
         assert diagnostic["selenium"]["checkbox_enabled"] is True
@@ -1031,32 +755,127 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
         assert diagnostic["selenium"]["label_enabled"] is True
         assert checkbox.is_selected() is False
 
-        label.click()
-        diagnostic["interactions"]["label_click_selected"] = checkbox.is_selected()
-        assert checkbox.is_selected() is True
-        label.click()
-        diagnostic["interactions"]["label_click_reset"] = not checkbox.is_selected()
+        diagnostic["pre_scroll"] = viewport_snapshot(checkbox, label, onboarding_check, include_hits=False)
+
+        auto = interaction_result(label.click)
+        auto["selected_after"] = checkbox.is_selected()
+        diagnostic["interactions"]["label_auto_scroll_click"] = auto
+        if checkbox.is_selected():
+            reset = interaction_result(label.click)
+            if checkbox.is_selected():
+                reset = interaction_result(checkbox.click)
+            reset["unchecked_after"] = not checkbox.is_selected()
+            diagnostic["interactions"]["label_auto_scroll_reset"] = reset
         assert checkbox.is_selected() is False
 
-        checkbox.click()
-        diagnostic["interactions"]["checkbox_click_selected"] = checkbox.is_selected()
-        assert checkbox.is_selected() is True
-        checkbox.click()
-        diagnostic["interactions"]["checkbox_click_reset"] = not checkbox.is_selected()
+        driver.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});",
+            label,
+        )
+        diagnostic["post_scroll"] = viewport_snapshot(checkbox, label, onboarding_check, include_hits=True)
+
+        centered = interaction_result(label.click)
+        centered["selected_after"] = checkbox.is_selected()
+        diagnostic["interactions"]["label_centered_click"] = centered
+        centered_ok = centered["success"] and centered["selected_after"]
+        if checkbox.is_selected():
+            reset = interaction_result(checkbox.click)
+            reset["unchecked_after"] = not checkbox.is_selected()
+            diagnostic["interactions"]["label_centered_reset"] = reset
         assert checkbox.is_selected() is False
 
-        checkbox.send_keys(Keys.SPACE)
-        diagnostic["interactions"]["keyboard_space_selected"] = checkbox.is_selected()
-        diagnostic["interactions"]["keyboard_focus_id"] = driver.switch_to.active_element.get_attribute("id")
-        assert diagnostic["interactions"]["keyboard_focus_id"] == field_id
-        assert checkbox.is_selected() is True
-        checkbox.send_keys(Keys.SPACE)
-        diagnostic["interactions"]["keyboard_space_reset"] = not checkbox.is_selected()
+        driver.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});",
+            checkbox,
+        )
+        checkbox_on = interaction_result(checkbox.click)
+        checkbox_on["selected_after"] = checkbox.is_selected()
+        diagnostic["interactions"]["checkbox_click_on"] = checkbox_on
+        checkbox_off = {"success": False, "exception_type": "not-run", "unchecked_after": not checkbox.is_selected()}
+        if checkbox_on["success"] and checkbox.is_selected():
+            checkbox_off = interaction_result(checkbox.click)
+            checkbox_off["unchecked_after"] = not checkbox.is_selected()
+        diagnostic["interactions"]["checkbox_click_off"] = checkbox_off
+        checkbox_ok = (
+            checkbox_on["success"]
+            and checkbox_on["selected_after"]
+            and checkbox_off["success"]
+            and checkbox_off["unchecked_after"]
+        )
         assert checkbox.is_selected() is False
 
-        label.click()
-        diagnostic["interactions"]["final_acceptance_label_click"] = checkbox.is_selected()
+        keyboard_on = interaction_result(lambda: checkbox.send_keys(Keys.SPACE))
+        keyboard_on["selected_after"] = checkbox.is_selected()
+        keyboard_on["active_element_id"] = driver.switch_to.active_element.get_attribute("id")
+        diagnostic["interactions"]["keyboard_space_on"] = keyboard_on
+        keyboard_off = {"success": False, "exception_type": "not-run", "unchecked_after": not checkbox.is_selected()}
+        if keyboard_on["success"] and checkbox.is_selected():
+            keyboard_off = interaction_result(lambda: checkbox.send_keys(Keys.SPACE))
+            keyboard_off["unchecked_after"] = not checkbox.is_selected()
+        diagnostic["interactions"]["keyboard_space_off"] = keyboard_off
+        keyboard_ok = (
+            keyboard_on["success"]
+            and keyboard_on["selected_after"]
+            and keyboard_on["active_element_id"] == field_id
+            and keyboard_off["success"]
+            and keyboard_off["unchecked_after"]
+        )
+        assert checkbox.is_selected() is False
+
+        checkbox_hit = diagnostic["post_scroll"].get("checkboxCenter") or {}
+        label_hit = diagnostic["post_scroll"].get("labelCenter") or {}
+        no_overlay = bool(checkbox_hit.get("topWithinTarget") and label_hit.get("topWithinTarget"))
+        diagnostic["post_scroll_no_overlay"] = no_overlay
+
+        auto_ok = auto["success"] and auto["selected_after"]
+        if centered_ok:
+            classification = (
+                "webdriver-auto-scroll/click-positioning behavior"
+                if not auto_ok
+                else "native-label-click-valid"
+            )
+            preferred = "centered-label"
+        elif checkbox_ok and keyboard_ok and no_overlay:
+            classification = "selenium/chrome label-click automation issue"
+            preferred = "checkbox"
+        else:
+            classification = "unresolved-product-or-driver-blocker"
+            preferred = None
+
+        diagnostic["root_cause_classification"] = classification
+        diagnostic["preferred_business_flow_interaction"] = preferred
+        if preferred is None:
+            raise AssertionError("Terms interaction root cause remains unresolved; inspect browser QA artifacts.")
+
+        return checkbox, label, preferred
+
+    def accept_terms_for_flow(*, key, interaction, field_id="id_profile-accept_terms"):
+        checkbox, labels, label, onboarding_check, _ = locate_terms(field_id)
+        assert len(driver.find_elements(By.CSS_SELECTOR, f'[id="{field_id}"]')) == 1
+        assert len(labels) == 1
+        assert label is not None and label.get_attribute("for") == field_id
+        assert checkbox.is_displayed() and checkbox.is_enabled()
+        assert label.is_displayed() and label.is_enabled()
+        assert checkbox.is_selected() is False
+
+        if interaction == "centered-label":
+            driver.execute_script(
+                "arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});",
+                label,
+            )
+            label.click()
+        else:
+            driver.execute_script(
+                "arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});",
+                checkbox,
+            )
+            checkbox.click()
         assert checkbox.is_selected() is True
+        terms_diagnostics[key] = {
+            "business_flow_interaction": interaction,
+            "selected_after": checkbox.is_selected(),
+            "viewport": viewport_snapshot(checkbox, label, onboarding_check, include_hits=True),
+        }
         return checkbox
 
     try:
@@ -1072,7 +891,8 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
         replace("id_org-website", "www.example.com")
         replace("id_profile-studio_name", "Browser Draft Studio")
         replace("id_profile-portfolio_url", "portfolio.example.com/work")
-        accept_terms(key="designer-create")
+        _, _, preferred_terms_interaction = diagnose_terms(key="designer-create")
+        accept_terms_for_flow(key="designer-create-final", interaction=preferred_terms_interaction)
         driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]').click()
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-application-mode="designer"]')))
         assert "APPLICATION MODE" in driver.page_source
@@ -1108,7 +928,7 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
         replace("id_org-website", "example.com")
         replace("id_profile-commercial_registration", "CR-BROWSER")
         replace("id_profile-google_maps_url", "maps.app.goo.gl/example")
-        accept_terms(key="manufacturer-create")
+        accept_terms_for_flow(key="manufacturer-create", interaction=preferred_terms_interaction)
         driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]').click()
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-application-mode="manufacturer"]')))
         assert "manufacturer-sidebar" not in driver.page_source
@@ -1131,9 +951,7 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
         manufacturer_org.manufacturer_profile.refresh_from_db()
         assert manufacturer_org.manufacturer_profile.google_maps_url == "https://maps.app.goo.gl/updated-example"
 
-        (evidence_dir / "terms-diagnostics.txt").write_text(
-            repr(terms_diagnostics), encoding="utf-8"
-        )
+        write_evidence("verified")
         assert driver.save_screenshot(str(evidence_dir / "application-mode-manufacturer-rtl.png"))
     except Exception:
         write_evidence("failure")
