@@ -1,0 +1,54 @@
+{% if org_form.non_field_errors %}<div class="onboarding-errors" role="alert">{{ org_form.non_field_errors }}</div>{% endif %}
+<div class="onboarding-grid">
+  <div class="onboarding-field">
+    <label for="{{ org_form.display_name.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}اسم العرض{% else %}Display name{% endif %}</label>
+    {{ org_form.display_name }}
+    {{ org_form.display_name.errors }}
+  </div>
+  <div class="onboarding-field">
+    <label for="{{ org_form.legal_name.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}الاسم القانوني{% else %}Legal name{% endif %}</label>
+    {{ org_form.legal_name }}
+    {{ org_form.legal_name.errors }}
+  </div>
+  <div class="onboarding-field">
+    <label for="{{ org_form.email.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}البريد الإلكتروني{% else %}Email{% endif %}</label>
+    {{ org_form.email }}
+    {{ org_form.email.errors }}
+  </div>
+  <div class="onboarding-field">
+    <label for="{{ org_form.phone.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}الهاتف{% else %}Phone{% endif %}</label>
+    {{ org_form.phone }}
+    {{ org_form.phone.errors }}
+  </div>
+  <div class="onboarding-field">
+    <label for="{{ org_form.website.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}الموقع الإلكتروني{% else %}Website{% endif %}</label>
+    {{ org_form.website }}
+    <p class="onboarding-help">{% if request.LANGUAGE_CODE == 'ar' %}يمكنك إدخال example.com أو www.example.com؛ سيُحفظ الرابط الصحيح بدون مخطط على HTTPS.{% else %}You may enter example.com or www.example.com; valid scheme-less addresses are normalized to HTTPS.{% endif %}</p>
+    {{ org_form.website.errors }}
+  </div>
+  <div class="onboarding-field">
+    <label for="{{ org_form.country.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}الدولة{% else %}Country{% endif %}</label>
+    {{ org_form.country }}
+    {{ org_form.country.errors }}
+  </div>
+  <div class="onboarding-field">
+    <label for="{{ org_form.city.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}المدينة{% else %}City{% endif %}</label>
+    {{ org_form.city }}
+    {{ org_form.city.errors }}
+  </div>
+  <div class="onboarding-field">
+    <label for="{{ org_form.region.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}المنطقة / المحافظة{% else %}Region{% endif %}</label>
+    {{ org_form.region }}
+    {{ org_form.region.errors }}
+  </div>
+  <div class="onboarding-field onboarding-field--full">
+    <label for="{{ org_form.address_line1.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}العنوان{% else %}Address{% endif %}</label>
+    {{ org_form.address_line1 }}
+    {{ org_form.address_line1.errors }}
+  </div>
+  <div class="onboarding-field onboarding-field--full">
+    <label for="{{ org_form.address_line2.id_for_label }}">{% if request.LANGUAGE_CODE == 'ar' %}تفاصيل عنوان إضافية{% else %}Address line 2{% endif %}</label>
+    {{ org_form.address_line2 }}
+    {{ org_form.address_line2.errors }}
+  </div>
+</div>

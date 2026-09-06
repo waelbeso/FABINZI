@@ -1,7 +1,24 @@
 from django import forms
+from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
 
 from .models import DesignerProfile, ManufacturerProfile, Organization
+
+
+def _url_field(*, label):
+    return forms.URLField(
+        required=False,
+        label=label,
+        assume_scheme="https",
+        widget=forms.TextInput(
+            attrs={
+                "inputmode": "url",
+                "autocomplete": "url",
+                "dir": "ltr",
+                "class": "onboarding-url-input",
+            }
+        ),
+    )
 
 
 def _plan_choices(kind):
@@ -10,12 +27,29 @@ def _plan_choices(kind):
     starter, pro = onboarding_plan_options(kind)
     rows = []
     for plan in (starter, pro):
-        price = f"{plan.monthly_price} {plan.currency}/month" if plan.monthly_price else "Free"
+        price = (
+            f"{plan.monthly_price} {plan.currency}/month"
+            if plan.monthly_price
+            else "Free"
+        )
         if kind == Organization.Kind.DESIGNER:
-            capacity = f"Designs {plan.designer_active_design_limit} · Artworks {plan.designer_active_artwork_limit} · Team {plan.team_subaccount_limit}"
+            capacity = (
+                f"Designs {plan.designer_active_design_limit} · "
+                f"Artworks {plan.designer_active_artwork_limit} · "
+                f"Team {plan.team_subaccount_limit}"
+            )
         else:
-            capacity = f"Offers {plan.manufacturer_monthly_offer_limit}/month · Team {plan.team_subaccount_limit}"
-        rows.append((str(plan.pk), f"{plan.public_name_en} / {plan.public_name_ar} — {price} — {capacity}"))
+            capacity = (
+                f"Offers {plan.manufacturer_monthly_offer_limit}/month · "
+                f"Team {plan.team_subaccount_limit}"
+            )
+        rows.append(
+            (
+                str(plan.pk),
+                f"{plan.public_name_en} / {plan.public_name_ar} — "
+                f"{price} — {capacity}",
+            )
+        )
     return rows, starter
 
 
@@ -30,29 +64,54 @@ def _selection_initial(profile):
     return str(selection.selected_plan_policy_id)
 
 
-from django.core.exceptions import ObjectDoesNotExist
-
-
 class OrganizationForm(forms.ModelForm):
+    website = _url_field(label="Website / الموقع")
+
     class Meta:
         model = Organization
-        fields = ["display_name", "legal_name", "email", "phone", "website", "address_line1", "address_line2", "city", "region", "country"]
+        fields = [
+            "display_name",
+            "legal_name",
+            "email",
+            "phone",
+            "website",
+            "address_line1",
+            "address_line2",
+            "city",
+            "region",
+            "country",
+        ]
 
 
 class DesignerOnboardingForm(forms.ModelForm):
+    portfolio_url = _url_field(label="Portfolio URL / رابط الأعمال")
     accept_terms = forms.BooleanField(required=True)
-    plan_policy_id = forms.ChoiceField(required=False, label="Plan / الخطة")
+    plan_policy_id = forms.ChoiceField(
+        required=False,
+        label="Plan / الخطة",
+        widget=forms.RadioSelect,
+    )
 
     class Meta:
         model = DesignerProfile
-        fields = ["studio_name", "portfolio_url", "legal_registration_number", "tax_number", "payout_information", "plan_policy_id"]
+        fields = [
+            "studio_name",
+            "portfolio_url",
+            "legal_registration_number",
+            "tax_number",
+            "payout_information",
+            "plan_policy_id",
+        ]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         choices, starter = _plan_choices(Organization.Kind.DESIGNER)
         self.fields["plan_policy_id"].choices = choices
         if not self.is_bound:
-            self.initial.setdefault("plan_policy_id", _selection_initial(self.instance) or str(starter.pk))
+            self.initial.setdefault(
+                "plan_policy_id",
+                _selection_initial(self.instance) or str(starter.pk),
+            )
 
     def save(self, commit=True):
         obj = super().save(commit=False)
@@ -65,19 +124,38 @@ class DesignerOnboardingForm(forms.ModelForm):
 
 
 class ManufacturerOnboardingForm(forms.ModelForm):
+    google_maps_url = _url_field(label="Google Maps URL / رابط خرائط Google")
     accept_terms = forms.BooleanField(required=True)
-    plan_policy_id = forms.ChoiceField(required=False, label="Plan / الخطة")
+    plan_policy_id = forms.ChoiceField(
+        required=False,
+        label="Plan / الخطة",
+        widget=forms.RadioSelect,
+    )
 
     class Meta:
         model = ManufacturerProfile
-        fields = ["commercial_registration", "tax_number", "google_maps_url", "primary_contact_person", "contact_job_title", "whatsapp", "daily_capacity", "monthly_capacity", "payout_information", "plan_policy_id"]
+        fields = [
+            "commercial_registration",
+            "tax_number",
+            "google_maps_url",
+            "primary_contact_person",
+            "contact_job_title",
+            "whatsapp",
+            "daily_capacity",
+            "monthly_capacity",
+            "payout_information",
+            "plan_policy_id",
+        ]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         choices, starter = _plan_choices(Organization.Kind.MANUFACTURER)
         self.fields["plan_policy_id"].choices = choices
         if not self.is_bound:
-            self.initial.setdefault("plan_policy_id", _selection_initial(self.instance) or str(starter.pk))
+            self.initial.setdefault(
+                "plan_policy_id",
+                _selection_initial(self.instance) or str(starter.pk),
+            )
 
     def save(self, commit=True):
         obj = super().save(commit=False)

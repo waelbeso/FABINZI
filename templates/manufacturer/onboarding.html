@@ -1,1 +1,59 @@
-{% extends "base.html" %}{% block title %}{% if request.LANGUAGE_CODE == 'ar' %}انضم كشريك تصنيع{% else %}Manufacturer onboarding{% endif %} · FABINZI{% endblock %}{% block content %}<section class="surface shell portal-onboarding"><span class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}شريك تصنيع{% else %}MANUFACTURER PARTNER{% endif %}</span><h1>{% if request.LANGUAGE_CODE == 'ar' %}أنشئ جهة التصنيع الخاصة بك{% else %}Create your Manufacturer organization{% endif %}</h1><p>{% if request.LANGUAGE_CODE == 'ar' %}ابدأ بمسودة حقيقية. لن تُفتح عمليات الإنتاج قبل مراجعة FABINZI واعتماد الجهة.{% else %}Start with a real application draft. Production operations remain locked until FABINZI review and approval.{% endif %}</p><form method="post" class="form-grid">{% csrf_token %}{{ org_form.as_p }}{{ profile_form.as_p }}<button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}إنشاء المسودة{% else %}Create draft{% endif %}</button></form></section>{% endblock %}
+{% extends "base.html" %}
+{% load static %}
+{% block title %}{% if request.LANGUAGE_CODE == 'ar' %}انضم كشريك تصنيع{% else %}Manufacturer onboarding{% endif %} · FABINZI{% endblock %}
+{% block extra_head %}{{ block.super }}<link rel="stylesheet" href="{% static 'css/business-onboarding.css' %}">{% endblock %}
+{% block content %}
+<section class="onboarding-shell" data-onboarding-role="manufacturer">
+  <header class="onboarding-hero">
+    <div>
+      <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}وضع تقديم الطلب{% else %}APPLICATION MODE{% endif %}</div>
+      <h1 class="page-title">{% if request.LANGUAGE_CODE == 'ar' %}أنشئ جهة التصنيع الخاصة بك{% else %}Create your Manufacturer organization{% endif %}</h1>
+      <p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}ابدأ بمسودة حقيقية. فرص التصنيع والعروض والإنتاج ومراقبة الجودة تظل مغلقة حتى اعتماد FABINZI.{% else %}Start with a real application draft. Opportunities, quotes, production and QC stay locked until FABINZI approval.{% endif %}</p>
+    </div>
+    <aside class="onboarding-note" aria-label="{% if request.LANGUAGE_CODE == 'ar' %}ما الذي يحدث بعد ذلك{% else %}What happens next{% endif %}">
+      <strong>{% if request.LANGUAGE_CODE == 'ar' %}قبل الاعتماد = وضع الطلب{% else %}Before approval = Application Mode{% endif %}</strong>
+      <p>{% if request.LANGUAGE_CODE == 'ar' %}بعد الاعتماد فقط تصبح الجهة مهنية نشطة. اختيار Pro يسجل النية التجارية فقط حتى وجود دليل فوترة مخول.{% else %}Only after approval does the Organization become professionally active. Selecting Pro records commercial intent only until authoritative billing evidence exists.{% endif %}</p>
+    </aside>
+  </header>
+
+  <form method="post" class="onboarding-form" novalidate>
+    {% csrf_token %}
+    <section class="onboarding-section" aria-labelledby="manufacturer-business-heading">
+      <div class="onboarding-section__head">
+        <span class="onboarding-step">1</span>
+        <div><h2 id="manufacturer-business-heading">{% if request.LANGUAGE_CODE == 'ar' %}بيانات الجهة{% else %}Business information{% endif %}</h2><p>{% if request.LANGUAGE_CODE == 'ar' %}بيانات جهة التصنيع التي ستراجعها FABINZI.{% else %}Manufacturer Organization details FABINZI will review.{% endif %}</p></div>
+      </div>
+      {% include "organizations/components/onboarding_business_fields.html" %}
+    </section>
+
+    <section class="onboarding-section" aria-labelledby="manufacturer-profile-heading">
+      <div class="onboarding-section__head">
+        <span class="onboarding-step">2</span>
+        <div><h2 id="manufacturer-profile-heading">{% if request.LANGUAGE_CODE == 'ar' %}ملف التصنيع{% else %}Manufacturer profile{% endif %}</h2><p>{% if request.LANGUAGE_CODE == 'ar' %}أضف السجل وبيانات التواصل والطاقة التصنيعية.{% else %}Add registration, contact and production-capacity information.{% endif %}</p></div>
+      </div>
+      {% include "organizations/components/onboarding_manufacturer_profile_fields.html" %}
+    </section>
+
+    <section class="onboarding-section" aria-labelledby="manufacturer-plan-heading">
+      <div class="onboarding-section__head">
+        <span class="onboarding-step">3</span>
+        <div><h2 id="manufacturer-plan-heading">{% if request.LANGUAGE_CODE == 'ar' %}الخطة المطلوبة{% else %}Requested plan{% endif %}</h2><p>{% if request.LANGUAGE_CODE == 'ar' %}الخيار التجاري لا يفتح مساحة العمل قبل الاعتماد.{% else %}Commercial intent never unlocks the workspace before approval.{% endif %}</p></div>
+      </div>
+      {% include "organizations/components/onboarding_plan_selector.html" %}
+    </section>
+
+    <section class="onboarding-section onboarding-section--compact" aria-labelledby="manufacturer-terms-heading">
+      <div class="onboarding-section__head">
+        <span class="onboarding-step">4</span>
+        <div><h2 id="manufacturer-terms-heading">{% if request.LANGUAGE_CODE == 'ar' %}الشروط{% else %}Terms{% endif %}</h2></div>
+      </div>
+      <label class="onboarding-check" for="{{ profile_form.accept_terms.id_for_label }}">{{ profile_form.accept_terms }} <span>{% if request.LANGUAGE_CODE == 'ar' %}أوافق على شروط انضمام شريك التصنيع{% else %}I accept the Manufacturer onboarding terms{% endif %}</span></label>
+      {{ profile_form.accept_terms.errors }}
+    </section>
+
+    <div class="onboarding-actions">
+      <button class="button" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}إنشاء المسودة{% else %}Create onboarding draft{% endif %}</button>
+    </div>
+  </form>
+</section>
+{% endblock %}
