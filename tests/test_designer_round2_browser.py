@@ -42,7 +42,13 @@ def _upload_form(container):
 
 
 @pytest.mark.django_db(transaction=True)
-def test_designer_round2_real_chrome_owner_surfaces_and_upload_inputs(client, live_server, tmp_path, settings):
+def test_designer_round2_real_chrome_owner_surfaces_and_upload_inputs(
+    client,
+    live_server,
+    tmp_path,
+    settings,
+    v2_3_reference_rows,
+):
     if os.getenv("CI") != "true":
         pytest.skip("Real Chrome Designer Round 2 QA is CI-only.")
 
