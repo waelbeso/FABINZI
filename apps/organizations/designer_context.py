@@ -54,23 +54,49 @@ def resolve_designer_membership(request, *, required=False):
             raise PermissionDenied("A Designer organization membership is required.")
         return None, memberships
 
-    requested = (
-        request.POST.get("organization")
-        or request.GET.get("org")
-        or request.session.get("designer_organization_id")
+    trusted = getattr(
+        request,
+        "_fabinzi_trusted_professional_organization",
+        None,
     )
-    selected = None
-    if requested:
-        try:
-            requested_id = int(requested)
-        except (TypeError, ValueError):
-            requested_id = None
-        if requested_id:
-            selected = next(
-                (m for m in memberships if m.organization_id == requested_id), None
+    if trusted is not None:
+        if trusted.kind != Organization.Kind.DESIGNER:
+            raise PermissionDenied("Trusted professional Organization type mismatch.")
+        selected = next(
+            (
+                membership
+                for membership in memberships
+                if membership.organization_id == trusted.pk
+            ),
+            None,
+        )
+        if selected is None:
+            raise PermissionDenied(
+                "Trusted Designer resource Organization membership is required."
             )
-    if selected is None:
-        selected = memberships[0]
+    else:
+        requested = (
+            request.POST.get("organization")
+            or request.GET.get("org")
+            or request.session.get("designer_organization_id")
+        )
+        selected = None
+        if requested:
+            try:
+                requested_id = int(requested)
+            except (TypeError, ValueError):
+                requested_id = None
+            if requested_id:
+                selected = next(
+                    (
+                        membership
+                        for membership in memberships
+                        if membership.organization_id == requested_id
+                    ),
+                    None,
+                )
+        if selected is None:
+            selected = memberships[0]
 
     request.session["designer_organization_id"] = selected.organization_id
     return selected, memberships

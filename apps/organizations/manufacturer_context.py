@@ -29,7 +29,9 @@ MANUFACTURER_QC_ROLES = {
     Membership.Role.PRODUCTION_MANAGER,
     Membership.Role.QC,
 }
-MANUFACTURER_TECHNICAL_VIEW_ROLES = MANUFACTURER_PRODUCTION_ROLES | MANUFACTURER_QC_ROLES
+MANUFACTURER_TECHNICAL_VIEW_ROLES = (
+    MANUFACTURER_PRODUCTION_ROLES | MANUFACTURER_QC_ROLES
+)
 MANUFACTURER_FINANCE_ROLES = {
     Membership.Role.OWNER,
     Membership.Role.MANAGER,
@@ -62,33 +64,63 @@ def resolve_manufacturer_membership(request, *, required=False):
             raise PermissionDenied("A Manufacturer organization membership is required.")
         return None, memberships
 
-    requested = (
-        request.POST.get("organization")
-        or request.GET.get("org")
-        or request.session.get("manufacturer_organization_id")
+    trusted = getattr(
+        request,
+        "_fabinzi_trusted_professional_organization",
+        None,
     )
-    selected = None
-    if requested:
-        try:
-            requested_id = int(requested)
-        except (TypeError, ValueError):
-            requested_id = None
-        if requested_id:
-            selected = next(
-                (membership for membership in memberships if membership.organization_id == requested_id),
-                None,
+    if trusted is not None:
+        if trusted.kind != Organization.Kind.MANUFACTURER:
+            raise PermissionDenied("Trusted professional Organization type mismatch.")
+        selected = next(
+            (
+                membership
+                for membership in memberships
+                if membership.organization_id == trusted.pk
+            ),
+            None,
+        )
+        if selected is None:
+            raise PermissionDenied(
+                "Trusted Manufacturer resource Organization membership is required."
             )
-    if selected is None:
-        selected = memberships[0]
+    else:
+        requested = (
+            request.POST.get("organization")
+            or request.GET.get("org")
+            or request.session.get("manufacturer_organization_id")
+        )
+        selected = None
+        if requested:
+            try:
+                requested_id = int(requested)
+            except (TypeError, ValueError):
+                requested_id = None
+            if requested_id:
+                selected = next(
+                    (
+                        membership
+                        for membership in memberships
+                        if membership.organization_id == requested_id
+                    ),
+                    None,
+                )
+        if selected is None:
+            selected = memberships[0]
 
     request.session["manufacturer_organization_id"] = selected.organization_id
     return selected, memberships
 
 
 def manufacturer_context(request, *, required=False):
-    membership, memberships = resolve_manufacturer_membership(request, required=required)
+    membership, memberships = resolve_manufacturer_membership(
+        request,
+        required=required,
+    )
     organization = membership.organization if membership else None
-    application = getattr(organization, "onboarding_application", None) if organization else None
+    application = (
+        getattr(organization, "onboarding_application", None) if organization else None
+    )
     return {
         "manufacturer_membership": membership,
         "manufacturer_memberships": memberships,
@@ -96,7 +128,8 @@ def manufacturer_context(request, *, required=False):
         "manufacturer_application": application,
         "manufacturer_is_active": bool(
             organization
-            and organization.verification_status == Organization.VerificationStatus.ACTIVE
+            and organization.verification_status
+            == Organization.VerificationStatus.ACTIVE
         ),
         "manufacturer_can_manage": bool(
             membership and membership.role in MANUFACTURER_MANAGE_ROLES
