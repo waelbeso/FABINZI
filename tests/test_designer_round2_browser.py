@@ -2,13 +2,15 @@ import os
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.files.storage import default_storage
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import Select
+from selenium.webdriver.support.ui import Select, WebDriverWait
 
 from apps.artwork.models import ArtworkAsset
 from apps.artwork.services import create_artwork
-from apps.design.models import DesignAsset
+from apps.design.models import DesignAsset, GarmentDesignVersion
 from apps.design.services import create_design
 from apps.media.models import MediaAsset
 from apps.public_inquiries.models import PublicInquiry
@@ -40,6 +42,26 @@ def _upload_form(container):
         By.XPATH,
         './/form[.//input[@type="hidden" and @name="action" and @value="upload_asset"]]',
     )
+
+
+def _rendered_messages(driver):
+    selectors = ".messages li, .message, [role='alert']"
+    return " | ".join(
+        element.text.strip()
+        for element in driver.find_elements(By.CSS_SELECTOR, selectors)
+        if element.text.strip()
+    )
+
+
+def _storage_state_for_new_media(*, media_before):
+    created = list(MediaAsset.objects.filter(pk__gt=media_before).order_by("pk"))
+    if not created:
+        return "NO_MEDIA"
+    states = []
+    for asset in created:
+        exists = default_storage.exists(asset.provider_asset_id) if asset.provider == MediaAsset.Provider.LOCAL_DEV else None
+        states.append(f"{asset.pk}:{asset.provider}:{asset.provider_asset_id}:exists={exists}")
+    return "; ".join(states)
 
 
 @pytest.mark.django_db(transaction=True)
@@ -160,15 +182,123 @@ def test_designer_round2_real_chrome_owner_surfaces_and_upload_inputs(
         driver.get(f"{live_server.url}/designer/designs/{draft_design.pk}/?org={organization.pk}&version={draft_design_version.pk}&lang=en")
         design_assets = wait.until(EC.visibility_of_element_located((By.ID, "design-assets")))
         design_form = _upload_form(design_assets)
-        Select(design_form.find_element(By.NAME, "kind")).select_by_value(DesignAsset.Kind.PATTERN)
-        design_form.find_element(By.NAME, "label").send_keys("Browser DXF Pattern")
-        design_form.find_element(By.CSS_SELECTOR, 'input[type="file"][name="file"]').send_keys(str(dxf_path))
+        kind_select = Select(design_form.find_element(By.NAME, "kind"))
+        kind_select.select_by_value(DesignAsset.Kind.PATTERN)
+        label_input = design_form.find_element(By.NAME, "label")
+        label_input.send_keys("Browser DXF Pattern")
+        file_input = design_form.find_element(By.CSS_SELECTOR, 'input[type="file"][name="file"]')
+        file_input.send_keys(str(dxf_path))
+        upload_button = design_form.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
+
+        # Pre-submit evidence: prove the rendered multipart form and domain state are correct.
+        assert design_form.get_attribute("method").lower() == "post"
+        assert design_form.get_attribute("enctype").lower() == "multipart/form-data"
+        assert design_form.find_element(By.CSS_SELECTOR, 'input[type="hidden"][name="action"]').get_attribute("value") == "upload_asset"
+        assert design_form.find_element(By.CSS_SELECTOR, 'input[type="hidden"][name="version_id"]').get_attribute("value") == str(draft_design_version.pk)
+        assert kind_select.first_selected_option.get_attribute("value") == DesignAsset.Kind.PATTERN
+        assert label_input.get_attribute("value") == "Browser DXF Pattern"
+        assert dxf_path.exists()
+        assert dxf_path.stat().st_size > 0
+        assert dxf_path.name in file_input.get_attribute("value")
+        draft_design.refresh_from_db()
+        draft_design_version.refresh_from_db()
+        assert draft_design.organization_id == organization.pk
+        assert draft_design_version.status == GarmentDesignVersion.Status.DRAFT
+        assert organization.memberships.filter(user=owner, is_active=True).exists()
+        assert driver.execute_script("return arguments[0].checkValidity();", design_form) is True
+
+        media_pk_before = MediaAsset.objects.order_by("-pk").values_list("pk", flat=True).first() or 0
+        media_count_before = MediaAsset.objects.count()
+        design_count_before = DesignAsset.objects.filter(version=draft_design_version).count()
         _shot(driver, "round2-04-design-assets-before-upload-desktop-en.png")
-        _click_element(driver, design_form.find_element(By.CSS_SELECTOR, 'button[type="submit"]'))
-        wait.until(lambda _d: DesignAsset.objects.filter(version=draft_design_version, label="Browser DXF Pattern").exists())
+
+        # Keep the established ActionChains interaction first. Diagnose whether it actually navigates.
+        _click_element(driver, upload_button)
+        actionchains_navigated = True
+        try:
+            WebDriverWait(driver, 12).until(EC.staleness_of(design_form))
+        except TimeoutException:
+            actionchains_navigated = False
+
+        if not actionchains_navigated:
+            # At this point the original interaction produced no document navigation. Capture the
+            # still-rendered valid form and use one normal WebDriver click only as a diagnostic
+            # comparison, never JavaScript click/submit.
+            still_valid = driver.execute_script("return arguments[0].checkValidity();", design_form)
+            current_url_before_native = driver.current_url
+            media_after_actionchains = MediaAsset.objects.count()
+            design_after_actionchains = DesignAsset.objects.filter(version=draft_design_version).count()
+            _shot(driver, "round2-diagnostic-design-actionchains-no-navigation.png")
+            upload_button.click()
+            native_navigated = True
+            try:
+                WebDriverWait(driver, 12).until(EC.staleness_of(design_form))
+            except TimeoutException:
+                native_navigated = False
+
+            if native_navigated:
+                result_url = driver.current_url
+                result_messages = _rendered_messages(driver)
+                result_body = driver.find_element(By.TAG_NAME, "body").text
+                media_after_native = MediaAsset.objects.count()
+                design_after_native = DesignAsset.objects.filter(version=draft_design_version).count()
+                storage_state = _storage_state_for_new_media(media_before=media_pk_before)
+                _shot(driver, "round2-diagnostic-design-after-native-submit.png")
+                pytest.fail(
+                    "FABINZI ROUND 2 — REAL CHROME DXF DIAGNOSIS\n"
+                    "ActionChains submit: NO NAVIGATION\n"
+                    "Native WebDriver button.click(): NAVIGATION OCCURRED\n"
+                    f"URL before native click: {current_url_before_native}\n"
+                    f"Resulting URL: {result_url}\n"
+                    f"Rendered messages: {result_messages!r}\n"
+                    f"MediaAsset delta after ActionChains: {media_after_actionchains - media_count_before}\n"
+                    f"DesignAsset delta after ActionChains: {design_after_actionchains - design_count_before}\n"
+                    f"MediaAsset delta after native click: {media_after_native - media_count_before}\n"
+                    f"DesignAsset delta after native click: {design_after_native - design_count_before}\n"
+                    f"Storage state: {storage_state}\n"
+                    f"Form valid before native click: {still_valid}\n"
+                    f"Rendered body excerpt: {result_body[:2500]!r}"
+                )
+
+            pytest.fail(
+                "FABINZI ROUND 2 — REAL CHROME DXF DIAGNOSIS\n"
+                "ActionChains submit: NO NAVIGATION\n"
+                "Native WebDriver button.click(): NO NAVIGATION\n"
+                f"Current URL: {driver.current_url}\n"
+                f"Form valid: {still_valid}\n"
+                f"MediaAsset delta: {MediaAsset.objects.count() - media_count_before}\n"
+                f"DesignAsset delta: {DesignAsset.objects.filter(version=draft_design_version).count() - design_count_before}"
+            )
+
+        # Navigation occurred after the original native interaction: inspect the resulting page
+        # before making any ORM success assumption.
+        result_url = driver.current_url
+        result_messages = _rendered_messages(driver)
+        result_body = driver.find_element(By.TAG_NAME, "body").text
+        design_assets = wait.until(EC.visibility_of_element_located((By.ID, "design-assets")))
+        result_assets_text = design_assets.text
+        media_count_after = MediaAsset.objects.count()
+        design_count_after = DesignAsset.objects.filter(version=draft_design_version).count()
+        storage_state = _storage_state_for_new_media(media_before=media_pk_before)
+        _shot(driver, "round2-diagnostic-design-after-submit.png")
+
+        if not DesignAsset.objects.filter(version=draft_design_version, label="Browser DXF Pattern").exists():
+            pytest.fail(
+                "FABINZI ROUND 2 — REAL CHROME DXF DIAGNOSIS\n"
+                "Form submitted/navigation occurred: YES\n"
+                f"Resulting URL: {result_url}\n"
+                f"Rendered messages: {result_messages!r}\n"
+                f"MediaAsset delta: {media_count_after - media_count_before}\n"
+                f"DesignAsset delta: {design_count_after - design_count_before}\n"
+                f"Storage state: {storage_state}\n"
+                f"Design Assets text: {result_assets_text[:1800]!r}\n"
+                f"Rendered body excerpt: {result_body[:2500]!r}"
+            )
+
         design_asset = DesignAsset.objects.select_related("media_asset").get(version=draft_design_version, label="Browser DXF Pattern")
         assert design_asset.media_asset.access == MediaAsset.Access.PRIVATE
         assert design_asset.media_asset.original_filename == dxf_path.name
+        assert "Design asset attached privately." in result_body
         wait.until(EC.text_to_be_present_in_element((By.ID, "design-assets"), "Browser DXF Pattern"))
         assert "/media/designer-private/" in driver.page_source
         _shot(driver, "round2-05-design-assets-after-upload-desktop-en.png")
