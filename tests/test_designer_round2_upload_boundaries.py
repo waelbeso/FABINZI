@@ -2,13 +2,13 @@ from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.files.storage import default_storage
 from django.core.files.uploadedfile import SimpleUploadedFile
 
 from apps.artwork.models import ArtworkAsset
 from apps.artwork.services import create_artwork
 from apps.design.models import DesignAsset
 from apps.design.services import create_design
-from apps.media.designer_services import DESIGNER_PRIVATE_FILE_MAX_BYTES
 from apps.media.models import MediaAsset
 from apps.organizations.models import Membership
 
@@ -73,9 +73,10 @@ def test_round2_design_empty_file_creates_no_media(client, settings):
 
 
 @pytest.mark.django_db
-def test_round2_design_oversize_file_creates_no_media_without_large_fixture(client, settings):
+def test_round2_design_oversize_file_creates_no_media_without_large_fixture(client, settings, tmp_path):
     settings.ENVIRONMENT = "test"
     settings.PRIVATE_MEDIA_STORAGE_MODE = "local"
+    settings.MEDIA_ROOT = tmp_path
     owner = User.objects.create_user(username="round2-design-large", password="password123")
     organization = _active_designer(owner, "Round2 Design Large")
     design = create_design(organization=organization, actor=owner, title="Large file")
@@ -83,21 +84,26 @@ def test_round2_design_oversize_file_creates_no_media_without_large_fixture(clie
     client.force_login(owner)
 
     oversized = SimpleUploadedFile("large.dxf", b"0\nEOF\n", content_type="application/dxf")
-    oversized.size = DESIGNER_PRIVATE_FILE_MAX_BYTES + 1
-    response = _post_upload(
-        client,
-        "designer-design-detail",
-        design.pk,
-        organization,
-        version.pk,
-        DesignAsset.Kind.PATTERN,
-        oversized,
-        "Large",
-    )
+    assert oversized.size > 4
+    with patch("apps.media.designer_services.DESIGNER_PRIVATE_FILE_MAX_BYTES", 4):
+        response = _post_upload(
+            client,
+            "designer-design-detail",
+            design.pk,
+            organization,
+            version.pk,
+            DesignAsset.Kind.PATTERN,
+            oversized,
+            "Large",
+        )
 
     assert response.status_code == 302
+    html = client.get(response["Location"]).content.decode("utf-8")
+    assert "larger than the 50 MB Designer workspace limit" in html
     assert MediaAsset.objects.count() == 0
     assert DesignAsset.objects.count() == 0
+    assert not any(path.is_file() for path in tmp_path.rglob("*"))
+    assert not default_storage.exists("designer-private")
 
 
 @pytest.mark.django_db
