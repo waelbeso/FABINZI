@@ -10,7 +10,6 @@ from django.core.files.storage import default_storage
 from django.test import override_settings
 from django.urls import reverse
 from selenium import webdriver
-from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
@@ -914,6 +913,9 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
     options.add_argument("--window-size=1280,900")
     driver = webdriver.Chrome(options=options)
     wait = WebDriverWait(driver, 12)
+    evidence_dir = Path("artifacts/browser-qa/preapproval-onboarding")
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    terms_diagnostics = {}
 
     def login_as(user):
         client.force_login(user)
@@ -927,14 +929,134 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
         element.send_keys(value)
         return element
 
-    def accept_terms(field_id="id_profile-accept_terms"):
+    def inspect_terms(field_id, key):
         checkbox = wait.until(EC.presence_of_element_located((By.ID, field_id)))
-        if not checkbox.is_selected():
-            label = wait.until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, f'label[for="{field_id}"]'))
-            )
-            ActionChains(driver).scroll_to_element(label).move_to_element(label).pause(0.08).click().perform()
-            wait.until(lambda _driver: checkbox.is_selected())
+        labels = driver.find_elements(By.CSS_SELECTOR, f'label[for="{field_id}"]')
+        label = labels[0] if labels else None
+        diagnostic = driver.execute_script(
+            """
+            const fieldId = arguments[0];
+            const checkbox = document.getElementById(fieldId);
+            const labels = Array.from(document.querySelectorAll('label')).filter(
+              (candidate) => candidate.htmlFor === fieldId
+            );
+            const label = labels.length ? labels[0] : null;
+            const geometry = (element) => {
+              if (!element) return null;
+              const rect = element.getBoundingClientRect();
+              const style = getComputedStyle(element);
+              return {
+                outerHTML: element.outerHTML,
+                rect: {x: rect.x, y: rect.y, width: rect.width, height: rect.height},
+                display: style.display,
+                visibility: style.visibility,
+                opacity: style.opacity,
+                pointerEvents: style.pointerEvents,
+                zIndex: style.zIndex,
+                position: style.position,
+              };
+            };
+            const hit = (element) => {
+              if (!element) return null;
+              const rect = element.getBoundingClientRect();
+              const target = document.elementFromPoint(
+                rect.x + (rect.width / 2), rect.y + (rect.height / 2)
+              );
+              if (!target) return null;
+              return {
+                tag: target.tagName.toLowerCase(),
+                id: target.id || '',
+                className: typeof target.className === 'string' ? target.className : '',
+                name: target.getAttribute('name') || '',
+                type: target.getAttribute('type') || '',
+                htmlFor: target.htmlFor || '',
+              };
+            };
+            return {
+              checkbox: geometry(checkbox),
+              label: geometry(label),
+              checkboxId: checkbox ? checkbox.id : null,
+              checkboxName: checkbox ? checkbox.name : null,
+              checkboxType: checkbox ? checkbox.type : null,
+              checked: checkbox ? checkbox.checked : null,
+              disabled: checkbox ? checkbox.disabled : null,
+              labelFor: label ? label.getAttribute('for') : null,
+              labelHtmlFor: label ? label.htmlFor : null,
+              idCount: document.querySelectorAll(`[id="${fieldId}"]`).length,
+              labelCount: labels.length,
+              association: Boolean(checkbox && label && document.getElementById(label.htmlFor) === checkbox),
+              checkboxCenterHit: hit(checkbox),
+              labelCenterHit: hit(label),
+            };
+            """,
+            field_id,
+        )
+        diagnostic["selenium"] = {
+            "checkbox_displayed": checkbox.is_displayed(),
+            "checkbox_enabled": checkbox.is_enabled(),
+            "label_displayed": bool(label and label.is_displayed()),
+            "label_enabled": bool(label and label.is_enabled()),
+        }
+        diagnostic["interactions"] = {}
+        terms_diagnostics[key] = diagnostic
+        return checkbox, label, diagnostic
+
+    def write_evidence(prefix):
+        sanitized_html = driver.execute_script(
+            """
+            const clone = document.documentElement.cloneNode(true);
+            clone.querySelectorAll('input[name="csrfmiddlewaretoken"], input[type="password"]').forEach(
+              (element) => element.setAttribute('value', '[REDACTED]')
+            );
+            return '<!doctype html>\n' + clone.outerHTML;
+            """
+        )
+        (evidence_dir / f"{prefix}-page.html").write_text(sanitized_html, encoding="utf-8")
+        (evidence_dir / f"{prefix}-terms-diagnostics.txt").write_text(
+            repr(terms_diagnostics), encoding="utf-8"
+        )
+        driver.save_screenshot(str(evidence_dir / f"{prefix}.png"))
+
+    def accept_terms(field_id="id_profile-accept_terms", *, key):
+        checkbox, label, diagnostic = inspect_terms(field_id, key)
+        assert diagnostic["idCount"] == 1
+        assert diagnostic["labelCount"] == 1
+        assert diagnostic["checkboxId"] == field_id
+        assert diagnostic["labelFor"] == field_id
+        assert diagnostic["labelHtmlFor"] == field_id
+        assert diagnostic["association"] is True
+        assert diagnostic["selenium"]["checkbox_displayed"] is True
+        assert diagnostic["selenium"]["checkbox_enabled"] is True
+        assert diagnostic["selenium"]["label_displayed"] is True
+        assert diagnostic["selenium"]["label_enabled"] is True
+        assert checkbox.is_selected() is False
+
+        label.click()
+        diagnostic["interactions"]["label_click_selected"] = checkbox.is_selected()
+        assert checkbox.is_selected() is True
+        label.click()
+        diagnostic["interactions"]["label_click_reset"] = not checkbox.is_selected()
+        assert checkbox.is_selected() is False
+
+        checkbox.click()
+        diagnostic["interactions"]["checkbox_click_selected"] = checkbox.is_selected()
+        assert checkbox.is_selected() is True
+        checkbox.click()
+        diagnostic["interactions"]["checkbox_click_reset"] = not checkbox.is_selected()
+        assert checkbox.is_selected() is False
+
+        checkbox.send_keys(Keys.SPACE)
+        diagnostic["interactions"]["keyboard_space_selected"] = checkbox.is_selected()
+        diagnostic["interactions"]["keyboard_focus_id"] = driver.switch_to.active_element.get_attribute("id")
+        assert diagnostic["interactions"]["keyboard_focus_id"] == field_id
+        assert checkbox.is_selected() is True
+        checkbox.send_keys(Keys.SPACE)
+        diagnostic["interactions"]["keyboard_space_reset"] = not checkbox.is_selected()
+        assert checkbox.is_selected() is False
+
+        label.click()
+        diagnostic["interactions"]["final_acceptance_label_click"] = checkbox.is_selected()
+        assert checkbox.is_selected() is True
         return checkbox
 
     try:
@@ -950,7 +1072,7 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
         replace("id_org-website", "www.example.com")
         replace("id_profile-studio_name", "Browser Draft Studio")
         replace("id_profile-portfolio_url", "portfolio.example.com/work")
-        accept_terms()
+        accept_terms(key="designer-create")
         driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]').click()
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-application-mode="designer"]')))
         assert "APPLICATION MODE" in driver.page_source
@@ -986,7 +1108,7 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
         replace("id_org-website", "example.com")
         replace("id_profile-commercial_registration", "CR-BROWSER")
         replace("id_profile-google_maps_url", "maps.app.goo.gl/example")
-        accept_terms()
+        accept_terms(key="manufacturer-create")
         driver.find_element(By.CSS_SELECTOR, 'form.onboarding-form button[type="submit"]').click()
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-application-mode="manufacturer"]')))
         assert "manufacturer-sidebar" not in driver.page_source
@@ -1009,7 +1131,12 @@ def test_preapproval_application_mode_real_chrome_designer_and_manufacturer(clie
         manufacturer_org.manufacturer_profile.refresh_from_db()
         assert manufacturer_org.manufacturer_profile.google_maps_url == "https://maps.app.goo.gl/updated-example"
 
-        ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-        assert driver.save_screenshot(str(ARTIFACT_DIR / "application-mode-manufacturer-rtl.png"))
+        (evidence_dir / "terms-diagnostics.txt").write_text(
+            repr(terms_diagnostics), encoding="utf-8"
+        )
+        assert driver.save_screenshot(str(evidence_dir / "application-mode-manufacturer-rtl.png"))
+    except Exception:
+        write_evidence("failure")
+        raise
     finally:
         driver.quit()
