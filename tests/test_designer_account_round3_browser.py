@@ -201,6 +201,9 @@ def test_designer_round3_real_chrome_workspace_payout_subscription_notifications
         assert SubscriptionBillingConfirmation.objects.filter(organization=org).count() == billing_before
         _shot(driver, "round4-01-subscription-desktop-en.png")
 
+        session = client.session
+        session["django_language"] = "ar"
+        session.save()
         driver.get(f"{live_server.url}/designer/subscription/?org={org.pk}&lang=ar")
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".designer-workspace")))
         assert '<html lang="ar" dir="rtl"' in driver.page_source
@@ -215,6 +218,9 @@ def test_designer_round3_real_chrome_workspace_payout_subscription_notifications
         assert _no_overflow(driver)
         _shot(driver, "round4-02-subscription-ar-rtl.png")
 
+        session = client.session
+        session["django_language"] = "en"
+        session.save()
         driver.get(f"{live_server.url}/designer/notifications/?org={org.pk}&lang=en")
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Round 3 browser notification"))
         assert _only_active_nav(driver)
