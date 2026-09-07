@@ -39,7 +39,15 @@
     </div>
     <div class="studio-tool-pane stack" data-studio-pane="upload" hidden>
       <form method="post" enctype="multipart/form-data" class="stack studio-source-form" id="private-upload-form">{% csrf_token %}<input type="hidden" name="action" value="upload_image">
-        <div class="upload-drop"><strong>{% if request.LANGUAGE_CODE == 'ar' %}صورتك الخاصة{% else %}Your private image{% endif %}</strong><p class="help-text">{% if request.LANGUAGE_CODE == 'ar' %}PNG أو JPEG أو WebP — بحد أقصى 10MB. لن تظهر في سوق الأعمال الفنية.{% else %}PNG, JPEG or WebP — up to 10 MB. It will never appear in the public Artwork Marketplace.{% endif %}</p><input id="private-art-file" name="file" type="file" accept="image/png,image/jpeg,image/webp" required></div>
+        <div class="upload-drop">
+          <strong>{% if request.LANGUAGE_CODE == 'ar' %}صورتك الخاصة{% else %}Your private image{% endif %}</strong>
+          <p class="help-text" id="private-art-file-help">{% if request.LANGUAGE_CODE == 'ar' %}PNG أو JPEG أو WebP — بحد أقصى 10MB. لن تظهر في سوق الأعمال الفنية.{% else %}PNG, JPEG or WebP — up to 10 MB. It will never appear in the public Artwork Marketplace.{% endif %}</p>
+          <div class="studio-file-picker">
+            <input class="studio-file-picker__input" id="private-art-file" name="file" type="file" accept="image/png,image/jpeg,image/webp" aria-describedby="private-art-file-help private-art-file-status" required>
+            <label class="button button--ghost studio-file-picker__trigger" for="private-art-file">{% if request.LANGUAGE_CODE == 'ar' %}اختر صورة{% else %}Choose image{% endif %}</label>
+            <span class="studio-file-picker__status" id="private-art-file-status" aria-live="polite" dir="auto" data-empty-label="{% if request.LANGUAGE_CODE == 'ar' %}لم يتم اختيار صورة{% else %}No image selected{% endif %}">{% if request.LANGUAGE_CODE == 'ar' %}لم يتم اختيار صورة{% else %}No image selected{% endif %}</span>
+          </div>
+        </div>
         <div class="field"><label for="upload-zone">{% if request.LANGUAGE_CODE == 'ar' %}المنطقة{% else %}Zone{% endif %}</label><select class="select" id="upload-zone" name="decoration_zone" data-zone-select required>{% for zone in zones %}<option value="{{ zone.id }}" data-zone-method="{{ zone.method }}">{{ zone.name }}</option>{% endfor %}</select></div>
         <div class="field"><label for="upload-method">{% if request.LANGUAGE_CODE == 'ar' %}طريقة الإنتاج{% else %}Production method{% endif %}</label><select class="select" id="upload-method" name="production_method" data-method-select required><option value="print">{% if request.LANGUAGE_CODE == 'ar' %}طباعة{% else %}Print{% endif %}</option><option value="embroidery">{% if request.LANGUAGE_CODE == 'ar' %}تطريز{% else %}Embroidery{% endif %}</option></select></div>
         <label class="cluster"><input id="rights-confirmed" type="checkbox" name="rights_confirmed" required><span>{% if request.LANGUAGE_CODE == 'ar' %}أؤكد أن لدي الحق في استخدام هذا المحتوى.{% else %}I confirm that I have the right to use this content.{% endif %}</span></label>
