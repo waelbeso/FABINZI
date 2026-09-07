@@ -46,7 +46,8 @@ def test_entitlement_summary_owns_subscription_lock_transaction_and_rolls_starte
         email="round3-transaction@designer.test",
     )
     org = _active_designer(owner)
-    subscription = org.professional_subscription
+    assert connection.in_atomic_block is False
+    subscription = entitlement_summary(org)["subscription"]
     now = timezone.now()
     stale_end = now - timedelta(days=1)
     subscription.current_period_start = stale_end - timedelta(days=31)
