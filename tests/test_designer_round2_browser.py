@@ -2,7 +2,7 @@ import os
 
 import pytest
 from django.contrib.auth import get_user_model
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select, WebDriverWait
@@ -43,13 +43,6 @@ def _upload_form(container):
     )
 
 
-def _submit_form_and_wait_for_navigation(driver, form):
-    """Use the established native interaction, then synchronize on the real response document."""
-    button = form.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
-    _click_element(driver, button)
-    _wait(driver).until(EC.staleness_of(form))
-
-
 def _wait_for_body_text(driver, text):
     """Retry across Chrome document swaps without retaining a stale inspector node."""
     return WebDriverWait(
@@ -59,13 +52,11 @@ def _wait_for_body_text(driver, text):
     ).until(lambda current: text in current.find_element(By.TAG_NAME, "body").text)
 
 
-def _rendered_messages(driver):
-    selectors = ".messages li, .message, [role='alert']"
-    return " | ".join(
-        element.text.strip()
-        for element in driver.find_elements(By.CSS_SELECTOR, selectors)
-        if element.text.strip()
-    )
+def _submit_upload_and_wait_for_success(driver, form, success_text):
+    """Use native WebDriver submit interaction and wait for the rendered Django success response."""
+    button = form.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
+    button.click()
+    _wait_for_body_text(driver, success_text)
 
 
 @pytest.mark.django_db(transaction=True)
@@ -214,11 +205,13 @@ def test_designer_round2_real_chrome_owner_surfaces_and_upload_inputs(
         design_count_before = DesignAsset.objects.filter(version=draft_design_version).count()
         _shot(driver, "round2-04-design-assets-before-upload-desktop-en.png")
 
-        # Synchronize on the real redirect response before inspecting ORM state.
-        _submit_form_and_wait_for_navigation(driver, design_form)
-        result_body = driver.find_element(By.TAG_NAME, "body").text
+        # Native WebDriver submit plus semantic Django response is the authoritative browser acceptance signal.
+        _submit_upload_and_wait_for_success(
+            driver,
+            design_form,
+            "Design asset attached privately.",
+        )
         design_assets = wait.until(EC.visibility_of_element_located((By.ID, "design-assets")))
-        assert "Design asset attached privately." in result_body
         assert MediaAsset.objects.count() == media_count_before + 1
         assert DesignAsset.objects.filter(version=draft_design_version).count() == design_count_before + 1
         design_asset = DesignAsset.objects.select_related("media_asset").get(
@@ -274,122 +267,33 @@ def test_designer_round2_real_chrome_owner_surfaces_and_upload_inputs(
 
             if kind == ArtworkAsset.Kind.PREVIEW:
                 _shot(driver, "round2-06-artwork-assets-before-upload-desktop-en.png")
-                preview_upload_button = form.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
-                media_before = MediaAsset.objects.count()
-                artwork_assets_before = ArtworkAsset.objects.filter(version=draft_artwork_version).count()
-                current_url_before = driver.current_url
 
-                _click_element(driver, preview_upload_button)
-                actionchains_navigated = True
-                try:
-                    WebDriverWait(driver, 12).until(EC.staleness_of(form))
-                except TimeoutException:
-                    actionchains_navigated = False
-
-                if actionchains_navigated:
-                    result_url = driver.current_url
-                    result_message = _rendered_messages(driver)
-                    result_body = driver.find_element(By.TAG_NAME, "body").text
-                    preview_asset = ArtworkAsset.objects.filter(
-                        version=draft_artwork_version,
-                        kind=ArtworkAsset.Kind.PREVIEW,
-                        label="Browser Preview",
-                    ).select_related("media_asset").first()
-                    preview_private = bool(preview_asset and preview_asset.media_asset.access == MediaAsset.Access.PRIVATE)
-                    public_derivative = bool(
-                        preview_asset and (preview_asset.media_asset.metadata or {}).get("artwork_public_derivative")
-                    )
-                    _shot(driver, "round2-diagnostic-artwork-preview-after-actionchains.png")
-                    pytest.fail(
-                        "FABINZI ROUND 2 — ARTWORK PREVIEW BROWSER DIAGNOSIS\n"
-                        "ActionChains click navigation: YES\n"
-                        "Native WebDriver button.click navigation: NOT NEEDED\n"
-                        f"Resulting URL: {result_url}\n"
-                        f"Rendered Django message: {result_message!r}\n"
-                        f"MediaAsset created: {'YES' if MediaAsset.objects.count() > media_before else 'NO'}\n"
-                        f"ArtworkAsset created: {'YES' if ArtworkAsset.objects.filter(version=draft_artwork_version).count() > artwork_assets_before else 'NO'}\n"
-                        f"Preview remains PRIVATE: {'YES' if preview_private else 'NO'}\n"
-                        f"Public derivative created: {'YES' if public_derivative else 'NO'}\n"
-                        "Exact failure layer: test synchronization / post-submit assertion path\n"
-                        "Product-code modification required: NO\n"
-                        f"Rendered body excerpt: {result_body[:1800]!r}"
-                    )
-
-                still_valid = driver.execute_script("return arguments[0].checkValidity();", form)
-                selected_kind = kind_select.first_selected_option.get_attribute("value")
-                selected_label = label_input.get_attribute("value")
-                selected_file = artwork_file_input.get_attribute("value")
-                media_after_actionchains = MediaAsset.objects.count()
-                artwork_after_actionchains = ArtworkAsset.objects.filter(version=draft_artwork_version).count()
-                _shot(driver, "round2-diagnostic-artwork-preview-actionchains-no-navigation.png")
-
-                preview_upload_button.click()
-                native_navigated = True
-                try:
-                    WebDriverWait(driver, 12).until(EC.staleness_of(form))
-                except TimeoutException:
-                    native_navigated = False
-
-                if native_navigated:
-                    result_url = driver.current_url
-                    result_message = _rendered_messages(driver)
-                    result_body = driver.find_element(By.TAG_NAME, "body").text
-                    preview_asset = ArtworkAsset.objects.filter(
-                        version=draft_artwork_version,
-                        kind=ArtworkAsset.Kind.PREVIEW,
-                        label="Browser Preview",
-                    ).select_related("media_asset").first()
-                    preview_private = bool(preview_asset and preview_asset.media_asset.access == MediaAsset.Access.PRIVATE)
-                    public_derivative = bool(
-                        preview_asset and (preview_asset.media_asset.metadata or {}).get("artwork_public_derivative")
-                    )
-                    _shot(driver, "round2-diagnostic-artwork-preview-after-native-click.png")
-                    pytest.fail(
-                        "FABINZI ROUND 2 — ARTWORK PREVIEW BROWSER DIAGNOSIS\n"
-                        "ActionChains click navigation: NO\n"
-                        "Native WebDriver button.click navigation: YES\n"
-                        f"URL before native click: {current_url_before}\n"
-                        f"Resulting URL: {result_url}\n"
-                        f"Rendered Django message: {result_message!r}\n"
-                        f"MediaAsset delta after ActionChains: {media_after_actionchains - media_before}\n"
-                        f"ArtworkAsset delta after ActionChains: {artwork_after_actionchains - artwork_assets_before}\n"
-                        f"MediaAsset created: {'YES' if MediaAsset.objects.count() > media_before else 'NO'}\n"
-                        f"ArtworkAsset created: {'YES' if ArtworkAsset.objects.filter(version=draft_artwork_version).count() > artwork_assets_before else 'NO'}\n"
-                        f"Preview remains PRIVATE: {'YES' if preview_private else 'NO'}\n"
-                        f"Public derivative created: {'YES' if public_derivative else 'NO'}\n"
-                        f"Form validity before native click: {still_valid}\n"
-                        f"Selected kind: {selected_kind!r}\n"
-                        f"Selected label: {selected_label!r}\n"
-                        f"Selected file: {selected_file!r}\n"
-                        "Exact failure layer: ActionChains interaction\n"
-                        "Product-code modification required: NO\n"
-                        f"Rendered body excerpt: {result_body[:1800]!r}"
-                    )
-
-                pytest.fail(
-                    "FABINZI ROUND 2 — ARTWORK PREVIEW BROWSER DIAGNOSIS\n"
-                    "ActionChains click navigation: NO\n"
-                    "Native WebDriver button.click navigation: NO\n"
-                    f"Current URL: {driver.current_url}\n"
-                    f"Form validity: {still_valid}\n"
-                    f"Selected kind: {selected_kind!r}\n"
-                    f"Selected label: {selected_label!r}\n"
-                    f"Selected file: {selected_file!r}\n"
-                    f"MediaAsset delta: {MediaAsset.objects.count() - media_before}\n"
-                    f"ArtworkAsset delta: {ArtworkAsset.objects.filter(version=draft_artwork_version).count() - artwork_assets_before}\n"
-                    "Exact failure layer: browser/UI interaction not yet classified\n"
-                    "Product-code modification required: NO"
-                )
-
-            _submit_form_and_wait_for_navigation(driver, form)
-            result_body = driver.find_element(By.TAG_NAME, "body").text
-            assert "Artwork asset attached privately for workflow use." in result_body
-            wait.until(
-                lambda _d, expected=label: ArtworkAsset.objects.filter(
-                    version=draft_artwork_version,
-                    label=expected,
-                ).exists()
+            media_count_before = MediaAsset.objects.count()
+            artwork_count_before = ArtworkAsset.objects.filter(version=draft_artwork_version).count()
+            _submit_upload_and_wait_for_success(
+                driver,
+                form,
+                "Artwork asset attached privately for workflow use.",
             )
+            artwork_section = wait.until(
+                EC.visibility_of_element_located(
+                    (By.XPATH, '//section[.//h2[normalize-space(.)="Artwork assets"]]')
+                )
+            )
+            reacquired_form = _upload_form(artwork_section)
+            assert reacquired_form.is_displayed()
+            assert MediaAsset.objects.count() == media_count_before + 1
+            assert ArtworkAsset.objects.filter(version=draft_artwork_version).count() == artwork_count_before + 1
+            uploaded_asset = ArtworkAsset.objects.select_related("media_asset").get(
+                version=draft_artwork_version,
+                kind=kind,
+                label=label,
+            )
+            assert uploaded_asset.media_asset.access == MediaAsset.Access.PRIVATE
+            assert uploaded_asset.media_asset.original_filename == path.name
+            assert not (uploaded_asset.media_asset.metadata or {}).get("artwork_public_derivative")
+            assert label in artwork_section.text
+
         uploaded_artwork_assets = list(
             ArtworkAsset.objects.filter(version=draft_artwork_version).select_related("media_asset")
         )
