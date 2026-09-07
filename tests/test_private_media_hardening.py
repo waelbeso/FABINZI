@@ -2,11 +2,13 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
+from botocore.exceptions import ClientError
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.urls import reverse
 
+from apps.media.designer_services import create_private_designer_asset
 from apps.media.models import MediaAsset
 from apps.media.services import (
     ProductionStorageUnavailable,
@@ -15,6 +17,7 @@ from apps.media.services import (
     private_media_response,
     private_media_storage_mode,
 )
+from apps.organizations.models import Membership, Organization
 
 User = get_user_model()
 PNG_1X1 = bytes.fromhex(
@@ -24,6 +27,22 @@ PNG_1X1 = bytes.fromhex(
 
 def upload():
     return SimpleUploadedFile("private.png", PNG_1X1, content_type="image/png")
+
+
+def designer_org(owner, name="Private Media Designer"):
+    organization = Organization.objects.create(
+        kind=Organization.Kind.DESIGNER,
+        display_name=name,
+        email=f"{owner.username}@designer.example.test",
+        verification_status=Organization.VerificationStatus.ACTIVE,
+        created_by=owner,
+    )
+    Membership.objects.create(
+        organization=organization,
+        user=owner,
+        role=Membership.Role.OWNER,
+    )
+    return organization
 
 
 @pytest.mark.django_db
@@ -130,3 +149,70 @@ def test_production_private_preview_uses_short_lived_authorized_signed_access_an
     assert "SUPER_SECRET_NEVER_EXPOSE" not in response["Location"]
     assert "no-store" in response["Cache-Control"]
     assert "noindex" in response["X-Robots-Tag"]
+
+
+@pytest.mark.django_db
+def test_designer_local_storage_io_failure_is_classified_and_secret_safe(tmp_path):
+    owner = User.objects.create_user(username="designer-local-io", password="password12345")
+    organization = designer_org(owner, "Designer Local IO")
+
+    with override_settings(
+        ENVIRONMENT="test",
+        PRIVATE_MEDIA_STORAGE_MODE="local",
+        MEDIA_ROOT=tmp_path,
+    ), patch(
+        "apps.media.designer_services.default_storage.save",
+        side_effect=OSError("/sensitive/internal/storage/path"),
+    ):
+        with pytest.raises(ProductionStorageUnavailable) as exc_info:
+            create_private_designer_asset(
+                upload=SimpleUploadedFile("pattern.dxf", b"0\nEOF\n", content_type="application/dxf"),
+                owner=owner,
+                organization=organization,
+                purpose="design_pattern",
+            )
+
+    assert "temporarily unavailable" in str(exc_info.value)
+    assert "/sensitive/internal/storage/path" not in str(exc_info.value)
+    assert MediaAsset.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_designer_s3_client_failure_is_classified_and_secret_safe():
+    owner = User.objects.create_user(username="designer-s3-failure", password="password12345")
+    organization = designer_org(owner, "Designer S3 Failure")
+    fake_config = SimpleNamespace(
+        config={"bucket": "secret-private-bucket"},
+        get_secrets=lambda: {"access_key_id": "SECRET_ACCESS", "secret_access_key": "SECRET_KEY"},
+    )
+    s3 = Mock()
+    s3.put_object.side_effect = ClientError(
+        {"Error": {"Code": "ServiceUnavailable", "Message": "secret provider detail"}},
+        "PutObject",
+    )
+
+    with override_settings(
+        ENVIRONMENT="production",
+        PRIVATE_MEDIA_STORAGE_MODE="s3",
+    ), patch(
+        "apps.media.designer_services.active_provider",
+        return_value=fake_config,
+    ), patch(
+        "apps.media.designer_services._s3_client",
+        return_value=s3,
+    ):
+        with pytest.raises(ProductionStorageUnavailable) as exc_info:
+            create_private_designer_asset(
+                upload=SimpleUploadedFile("source.svg", b"<svg></svg>", content_type="image/svg+xml"),
+                owner=owner,
+                organization=organization,
+                purpose="artwork_source",
+            )
+
+    safe_error = str(exc_info.value)
+    assert "temporarily unavailable" in safe_error
+    assert "secret-private-bucket" not in safe_error
+    assert "secret provider detail" not in safe_error
+    assert "SECRET_ACCESS" not in safe_error
+    assert "SECRET_KEY" not in safe_error
+    assert MediaAsset.objects.count() == 0

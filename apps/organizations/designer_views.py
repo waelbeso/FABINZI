@@ -36,6 +36,7 @@ from apps.artwork.services import (
     create_artwork_revision,
     create_designed_product,
     publish_designed_product,
+    require_artwork_draft,
     set_ip_declaration,
     submit_artwork_version,
 )
@@ -59,6 +60,7 @@ from apps.design.services import (
     add_asset,
     create_design,
     create_revision,
+    require_draft,
     submit_version,
 )
 from apps.finance.models import FinanceAccount, LedgerEntry, OrderFinance, PayoutProfile, SettlementRequest
@@ -70,8 +72,12 @@ from apps.finance.services import (
 )
 from apps.manufacturer_marketplace.models import ManufacturerListing, ManufacturerQuote, RFQ
 from apps.manufacturer_marketplace.services import cancel_rfq, create_rfq, open_rfq, select_quote
-from apps.media.designer_services import create_private_designer_asset
+from apps.media.designer_services import (
+    cleanup_unattached_private_designer_asset,
+    create_private_designer_asset,
+)
 from apps.media.models import MediaAsset
+from apps.media.services import ProductionStorageUnavailable
 from apps.operations.models import FulfillmentRecord, ProductionJob
 from apps.storefront.designer_services import (
     hide_store_product,
@@ -116,6 +122,38 @@ def _error_text(exc):
     if isinstance(exc, ValidationError):
         return "; ".join(exc.messages)
     return str(exc)
+
+
+def _private_storage_error(request):
+    return _localized(
+        request,
+        "Private file storage is temporarily unavailable. Your file was not attached. Please try again later.",
+        "تخزين الملفات الخاصة غير متاح مؤقتًا. لم يتم إرفاق ملفك. يرجى المحاولة مرة أخرى لاحقًا.",
+    )
+
+
+def _preflight_design_asset_upload(*, version, actor, kind, upload):
+    require_draft(version, actor)
+    if kind not in DesignAsset.Kind.values:
+        raise ValidationError("Choose a valid Design asset type.")
+    if not upload:
+        raise ValidationError("Choose a file to upload.")
+    if kind == DesignAsset.Kind.PRODUCT_IMAGE:
+        mime_type = str(getattr(upload, "content_type", "") or "")
+        if not mime_type.startswith("image/"):
+            raise ValidationError("Product image assets must use an image file.")
+
+
+def _preflight_artwork_asset_upload(*, version, actor, kind, upload):
+    require_artwork_draft(version, actor)
+    if kind not in ArtworkAsset.Kind.values:
+        raise ValidationError("Choose a valid Artwork asset type.")
+    if not upload:
+        raise ValidationError("Choose a file to upload.")
+    if kind == ArtworkAsset.Kind.PREVIEW:
+        mime_type = str(getattr(upload, "content_type", "") or "")
+        if not mime_type.startswith("image/"):
+            raise ValidationError("Artwork Preview must use an image file.")
 
 
 def _parse_pairs(value):
@@ -447,9 +485,20 @@ def designer_design_detail(request, pk):
                 delete_decoration_zone(zone=get_object_or_404(DecorationZone, pk=request.POST.get("zone_id"), version=version), actor=request.user, request=request)
             elif action == "upload_asset":
                 kind = request.POST.get("kind", "")
-                asset_media = create_private_designer_asset(upload=request.FILES.get("file"), owner=request.user, organization=organization, purpose=f"design_{kind}")
-                add_asset(version=version, actor=request.user, media_asset=asset_media, kind=kind, label=request.POST.get("label", ""), request=request)
-                messages.success(request, _localized(request, "Design asset attached privately.", "تم إرفاق ملف التصميم بشكل خاص."))
+                upload = request.FILES.get("file")
+                _preflight_design_asset_upload(version=version, actor=request.user, kind=kind, upload=upload)
+                asset_media = None
+                try:
+                    asset_media = create_private_designer_asset(upload=upload, owner=request.user, organization=organization, purpose=f"design_{kind}")
+                    add_asset(version=version, actor=request.user, media_asset=asset_media, kind=kind, label=request.POST.get("label", ""), request=request)
+                except ProductionStorageUnavailable:
+                    messages.error(request, _private_storage_error(request))
+                except (ValidationError, PermissionDenied):
+                    if asset_media is not None:
+                        cleanup_unattached_private_designer_asset(asset_media)
+                    raise
+                else:
+                    messages.success(request, _localized(request, "Design asset attached privately.", "تم إرفاق ملف التصميم بشكل خاص."))
             elif action == "delete_asset":
                 delete_design_asset(asset=get_object_or_404(DesignAsset, pk=request.POST.get("asset_id"), version=version), actor=request.user, request=request)
         except (ValidationError, PermissionDenied) as exc:
@@ -522,9 +571,20 @@ def designer_artwork_detail(request, pk):
                 return redirect(f"/designer/artworks/{artwork.pk}/?org={organization.pk}&version={new_version.pk}")
             elif action == "upload_asset":
                 kind = request.POST.get("kind", "")
-                media = create_private_designer_asset(upload=request.FILES.get("file"), owner=request.user, organization=organization, purpose=f"artwork_{kind}")
-                add_artwork_asset(version=version, actor=request.user, media_asset=media, kind=kind, label=request.POST.get("label", ""), request=request)
-                messages.success(request, _localized(request, "Artwork asset attached privately for workflow use.", "تم إرفاق ملف العمل الفني بشكل خاص للاستخدام في سير العمل."))
+                upload = request.FILES.get("file")
+                _preflight_artwork_asset_upload(version=version, actor=request.user, kind=kind, upload=upload)
+                media = None
+                try:
+                    media = create_private_designer_asset(upload=upload, owner=request.user, organization=organization, purpose=f"artwork_{kind}")
+                    add_artwork_asset(version=version, actor=request.user, media_asset=media, kind=kind, label=request.POST.get("label", ""), request=request)
+                except ProductionStorageUnavailable:
+                    messages.error(request, _private_storage_error(request))
+                except (ValidationError, PermissionDenied):
+                    if media is not None:
+                        cleanup_unattached_private_designer_asset(media)
+                    raise
+                else:
+                    messages.success(request, _localized(request, "Artwork asset attached privately for workflow use.", "تم إرفاق ملف العمل الفني بشكل خاص للاستخدام في سير العمل."))
             elif action == "delete_asset":
                 delete_artwork_asset(asset=get_object_or_404(ArtworkAsset, pk=request.POST.get("asset_id"), version=version), actor=request.user, request=request)
             elif action == "ip_declaration":

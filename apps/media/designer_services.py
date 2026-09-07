@@ -2,9 +2,11 @@ import hashlib
 import uuid
 from pathlib import Path
 
-from django.core.exceptions import PermissionDenied, ValidationError
+from botocore.exceptions import BotoCoreError, ClientError
+from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, ValidationError
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+from django.db import DatabaseError
 
 from apps.integrations.models import IntegrationConfig
 from apps.organizations.models import Organization
@@ -18,6 +20,7 @@ from .services import (
 )
 
 DESIGNER_PRIVATE_FILE_MAX_BYTES = 50 * 1024 * 1024
+_SAFE_STORAGE_ERROR = "Private file storage is temporarily unavailable."
 
 
 def designer_asset_organization_id(asset):
@@ -77,6 +80,58 @@ def claim_or_require_private_designer_asset(*, asset, organization, actor, purpo
     return asset
 
 
+def _delete_private_storage_object(*, provider, stored_key):
+    if provider == MediaAsset.Provider.LOCAL_DEV:
+        default_storage.delete(stored_key)
+        return
+    if provider == MediaAsset.Provider.AMAZON_S3:
+        integration = active_provider(IntegrationConfig.Provider.AMAZON_S3)
+        bucket = (integration.config or {}).get("bucket", "")
+        if not bucket:
+            raise ProductionStorageUnavailable(_SAFE_STORAGE_ERROR)
+        _s3_client(integration).delete_object(Bucket=bucket, Key=stored_key)
+
+
+def _designer_media_has_references(asset):
+    for relation in asset._meta.related_objects:
+        accessor = relation.get_accessor_name()
+        if not accessor:
+            continue
+        if relation.one_to_one:
+            try:
+                getattr(asset, accessor)
+            except ObjectDoesNotExist:
+                continue
+            return True
+        related_manager = getattr(asset, accessor)
+        if related_manager.exists():
+            return True
+    return False
+
+
+def cleanup_unattached_private_designer_asset(asset):
+    """Remove only a newly-created, unreferenced Designer-private upload.
+
+    If storage cleanup cannot be completed safely, preserve the database row so the
+    storage object remains traceable rather than deleting the pointer to it.
+    """
+    if not asset or asset.access != MediaAsset.Access.PRIVATE:
+        return False
+    if not (asset.metadata or {}).get("designer_private_upload"):
+        return False
+    if _designer_media_has_references(asset):
+        return False
+    try:
+        _delete_private_storage_object(
+            provider=asset.provider,
+            stored_key=asset.provider_asset_id,
+        )
+    except (ProductionStorageUnavailable, BotoCoreError, ClientError, OSError):
+        return False
+    asset.delete()
+    return True
+
+
 def create_private_designer_asset(*, upload, owner, organization, purpose="technical"):
     if not getattr(owner, "is_authenticated", False):
         raise ValidationError("Authentication is required before uploading Designer files.")
@@ -102,35 +157,48 @@ def create_private_designer_asset(*, upload, owner, organization, purpose="techn
     mode = private_media_storage_mode()
 
     if mode == "local":
-        stored_key = default_storage.save(key, ContentFile(payload))
+        try:
+            stored_key = default_storage.save(key, ContentFile(payload))
+        except OSError as exc:
+            raise ProductionStorageUnavailable(_SAFE_STORAGE_ERROR) from exc
         provider = MediaAsset.Provider.LOCAL_DEV
     else:
         integration = active_provider(IntegrationConfig.Provider.AMAZON_S3)
         bucket = (integration.config or {}).get("bucket", "")
         if not bucket:
-            raise ProductionStorageUnavailable("Amazon S3 bucket is not configured")
-        _s3_client(integration).put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=payload,
-            ContentType=mime_type,
-            CacheControl="private, no-store",
-        )
+            raise ProductionStorageUnavailable(_SAFE_STORAGE_ERROR)
+        try:
+            _s3_client(integration).put_object(
+                Bucket=bucket,
+                Key=key,
+                Body=payload,
+                ContentType=mime_type,
+                CacheControl="private, no-store",
+            )
+        except (BotoCoreError, ClientError) as exc:
+            raise ProductionStorageUnavailable(_SAFE_STORAGE_ERROR) from exc
         stored_key = key
         provider = MediaAsset.Provider.AMAZON_S3
 
-    return MediaAsset.objects.create(
-        provider=provider,
-        provider_asset_id=stored_key,
-        original_filename=filename,
-        mime_type=mime_type,
-        size_bytes=len(payload),
-        checksum_sha256=checksum,
-        access=MediaAsset.Access.PRIVATE,
-        metadata={
-            "designer_private_upload": True,
-            "organization_id": organization.pk,
-            "purpose": str(purpose or "technical")[:80],
-        },
-        uploaded_by=owner,
-    )
+    try:
+        return MediaAsset.objects.create(
+            provider=provider,
+            provider_asset_id=stored_key,
+            original_filename=filename,
+            mime_type=mime_type,
+            size_bytes=len(payload),
+            checksum_sha256=checksum,
+            access=MediaAsset.Access.PRIVATE,
+            metadata={
+                "designer_private_upload": True,
+                "organization_id": organization.pk,
+                "purpose": str(purpose or "technical")[:80],
+            },
+            uploaded_by=owner,
+        )
+    except DatabaseError:
+        try:
+            _delete_private_storage_object(provider=provider, stored_key=stored_key)
+        except (ProductionStorageUnavailable, BotoCoreError, ClientError, OSError):
+            pass
+        raise
