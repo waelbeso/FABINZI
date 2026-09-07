@@ -5,20 +5,28 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
+from apps.organizations.designer_context import designer_context
 from .models import Notification, NotificationPreference
 
 E164 = re.compile(r"^\+[1-9]\d{7,14}$")
 
 
-@login_required
-def notification_center(request):
+def _redirect_target(name, organization=None):
+    if organization is None:
+        return redirect(name)
+    from django.urls import reverse
+
+    return redirect(f"{reverse(name)}?org={organization.pk}")
+
+
+def _notification_center(request, *, template_name, redirect_name, extra_context=None, organization=None):
     preference, _ = NotificationPreference.objects.get_or_create(user=request.user)
     if request.method == "POST":
         action = request.POST.get("action")
         if action == "mark_all_read":
             Notification.objects.filter(recipient=request.user, is_read=False).update(is_read=True, read_at=timezone.now())
             messages.success(request, "تم تعليم جميع الإشعارات كمقروءة." if request.LANGUAGE_CODE == "ar" else "All notifications marked as read.")
-            return redirect("notifications")
+            return _redirect_target(redirect_name, organization)
         if action == "preferences":
             email_enabled = request.POST.get("email_enabled") == "on"
             sms_enabled = request.POST.get("sms_enabled") == "on"
@@ -33,12 +41,33 @@ def notification_center(request):
                 preference.phone_e164 = phone
                 preference.save(update_fields=["email_enabled", "sms_enabled", "phone_e164", "updated_at"])
                 messages.success(request, "تم حفظ تفضيلات الإشعارات." if request.LANGUAGE_CODE == "ar" else "Notification preferences saved.")
-                return redirect("notifications")
+                return _redirect_target(redirect_name, organization)
 
     notifications = Notification.objects.filter(recipient=request.user)[:100]
     unread_count = Notification.objects.filter(recipient=request.user, is_read=False).count()
-    return render(
+    context = {"notifications": notifications, "preference": preference, "unread_count": unread_count}
+    if extra_context:
+        context.update(extra_context)
+    return render(request, template_name, context)
+
+
+@login_required
+def notification_center(request):
+    return _notification_center(
         request,
-        "notifications/center.html",
-        {"notifications": notifications, "preference": preference, "unread_count": unread_count},
+        template_name="notifications/center.html",
+        redirect_name="notifications",
+    )
+
+
+@login_required
+def designer_notification_center(request):
+    context = designer_context(request, required=True)
+    organization = context["designer_organization"]
+    return _notification_center(
+        request,
+        template_name="designer/notifications.html",
+        redirect_name="designer-notifications",
+        extra_context=context,
+        organization=organization,
     )

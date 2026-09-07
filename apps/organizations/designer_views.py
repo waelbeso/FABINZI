@@ -824,7 +824,19 @@ def designer_finance(request):
         action = request.POST.get("action")
         try:
             if action == "payout_profile":
-                profile = update_payout_profile(organization=organization, actor=request.user, method=request.POST.get("method", PayoutProfile.Method.BANK), account_holder=request.POST.get("account_holder", "").strip(), destination_hint=request.POST.get("destination_hint", "").strip(), submit=request.POST.get("submit_for_verification") == "on", request=request)
+                profile = update_payout_profile(
+                    organization=organization,
+                    actor=request.user,
+                    method=request.POST.get("method", PayoutProfile.Method.BANK),
+                    account_holder=request.POST.get("account_holder", "").strip(),
+                    destination_hint=request.POST.get("destination_hint", "").strip(),
+                    bank_name=request.POST.get("bank_name", "").strip(),
+                    iban=request.POST.get("iban", "").strip(),
+                    country=request.POST.get("country", "").strip(),
+                    currency=request.POST.get("payout_currency", "").strip(),
+                    submit=request.POST.get("submit_for_verification") == "on",
+                    request=request,
+                )
                 messages.success(request, _localized(request, "Payout profile saved.", "تم حفظ ملف التحويل."))
             elif action == "settlement":
                 request_settlement(organization=organization, actor=request.user, amount=request.POST.get("amount"), currency=request.POST.get("currency", "EGP"), request=request)
@@ -843,5 +855,17 @@ def designer_finance(request):
     order_finance = OrderFinance.objects.filter(designer_account_id__in=account_ids).select_related("order").order_by("-recognized_at")[:100]
     ledger = LedgerEntry.objects.filter(account_id__in=account_ids).select_related("order_finance", "settlement").order_by("-created_at")[:150]
     settlements = SettlementRequest.objects.filter(organization=organization).select_related("payout_profile").order_by("-requested_at")[:100]
-    context.update({"finance_rows": rows, "payout_profile": profile, "order_finance": order_finance, "ledger": ledger, "settlements": settlements, "payout_methods": PayoutProfile.Method.choices})
+    payout_has_stored_iban = bool(profile and profile.method == PayoutProfile.Method.BANK and profile.iban_encrypted and profile.iban_last4)
+    payout_mask = f"IBAN •••• {profile.iban_last4}" if payout_has_stored_iban else (profile.destination_hint if profile else "")
+    context.update({
+        "finance_rows": rows,
+        "payout_profile": profile,
+        "order_finance": order_finance,
+        "ledger": ledger,
+        "settlements": settlements,
+        "payout_methods": PayoutProfile.Method.choices,
+        "designer_can_mutate_payout": context["designer_membership"].role == Membership.Role.OWNER,
+        "payout_has_stored_iban": payout_has_stored_iban,
+        "payout_mask": payout_mask,
+    })
     return render(request, "designer/finance.html", context)

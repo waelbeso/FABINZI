@@ -28,6 +28,38 @@ DESIGNER_FINANCE_ROLES = {
     Membership.Role.ACCOUNTANT,
 }
 
+DESIGNER_ROUTE_SECTIONS = {
+    "designer": "overview",
+    "designer-profile": "profile",
+    "designer-public-profile": "public-profile",
+    "designer-public-inquiries": "public-inquiries",
+    "designer-public-inquiry-detail": "public-inquiries",
+    "designer-team": "team",
+    "designer-design-list": "designs",
+    "designer-design-detail": "designs",
+    "designer-design-technical-v2-4": "designs",
+    "designer-artworks": "artwork",
+    "designer-artwork-detail": "artwork",
+    "designer-artwork-technical-v2-4": "artwork",
+    "designer-products": "products",
+    "designer-product-detail": "products",
+    "designer-ready-product-composer-v2-4": "products",
+    "designer-ready-product-composer-detail-v2-4": "products",
+    "designer-rfqs": "rfqs",
+    "designer-rfq-detail": "rfqs",
+    "designer-store": "store",
+    "designer-store-product": "store",
+    "designer-fulfillment": "fulfillment",
+    "designer-finance": "finance",
+    "designer-subscription": "subscription",
+    "designer-notifications": "notifications",
+}
+
+
+def designer_active_section(request):
+    match = getattr(request, "resolver_match", None)
+    return DESIGNER_ROUTE_SECTIONS.get(getattr(match, "url_name", None))
+
 
 def designer_memberships(user):
     if not user or not user.is_authenticated:
@@ -113,6 +145,7 @@ def designer_context(request, *, required=False):
         "designer_memberships": memberships,
         "designer_organization": organization,
         "designer_application": application,
+        "designer_active_section": designer_active_section(request),
         "designer_is_active": bool(
             organization
             and organization.verification_status

@@ -1,0 +1,3 @@
+{% extends "designer/base.html" %}
+{% block title %}{% if request.LANGUAGE_CODE == 'ar' %}إشعارات المصمم{% else %}Designer Notifications{% endif %} · FABINZI{% endblock %}
+{% block designer_content %}{% include "notifications/_center_content.html" %}{% endblock %}

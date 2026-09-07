@@ -341,3 +341,97 @@ def test_mixed_legacy_and_v2_settlement_provenance_fails_closed_without_allocati
     PayoutProfile.objects.create(organization=organization, method=PayoutProfile.Method.MANUAL, account_holder="Mixed Owner", destination_hint="MANUAL-MIXED-QA", status=PayoutProfile.Status.VERIFIED)
     with pytest.raises(ValidationError, match="Mixed legacy/V2 finance provenance"):
         request_settlement(organization=organization, actor=owner, amount="100.00", currency="EGP", idempotency_key="mixed-provenance")
+
+
+def test_round3_bank_blank_iban_preserves_existing_ciphertext_mask_and_can_submit():
+    owner = user("v28-round3-bank-owner")
+    organization = org(owner, kind=Organization.Kind.DESIGNER, name="V2-8 Round 3 Bank Org")
+    full_iban = "EG00ROUNDTHREE00001234"
+    profile = update_payout_profile(
+        organization=organization,
+        actor=owner,
+        method=PayoutProfile.Method.BANK,
+        account_holder="Round Three Owner",
+        bank_name="Round Three Bank",
+        iban=full_iban,
+        country="EG",
+        currency="EGP",
+        submit=False,
+    )
+    ciphertext = profile.iban_encrypted
+    last4 = profile.iban_last4
+    mask = profile.destination_hint
+
+    saved = update_payout_profile(
+        organization=organization,
+        actor=owner,
+        method=PayoutProfile.Method.BANK,
+        account_holder="Round Three Owner",
+        bank_name="Round Three Bank Updated",
+        iban="",
+        country="EG",
+        currency="EGP",
+        destination_hint="FAKE-MASK-MUST-NOT-WIN",
+        submit=False,
+    )
+    assert saved.iban_encrypted == ciphertext
+    assert saved.iban_last4 == last4
+    assert saved.destination_hint == mask
+
+    submitted = update_payout_profile(
+        organization=organization,
+        actor=owner,
+        method=PayoutProfile.Method.BANK,
+        account_holder="Round Three Owner",
+        bank_name="Round Three Bank Updated",
+        iban="",
+        country="EG",
+        currency="EGP",
+        submit=True,
+    )
+    assert submitted.status == PayoutProfile.Status.PENDING
+    assert submitted.iban_encrypted == ciphertext
+    assert submitted.iban_last4 == last4
+    assert submitted.destination_hint == mask
+    assert full_iban not in json.dumps(AuditEvent.objects.filter(object_id=str(profile.pk)).values_list("metadata", flat=True), default=str)
+
+
+def test_round3_verified_payout_profile_is_locked_before_normal_owner_mutation():
+    owner = user("v28-round3-verified-owner")
+    reviewer = user("v28-round3-verified-reviewer", staff=True)
+    organization = org(owner, kind=Organization.Kind.DESIGNER, name="V2-8 Round 3 Verified Org")
+    profile = update_payout_profile(
+        organization=organization,
+        actor=owner,
+        method=PayoutProfile.Method.BANK,
+        account_holder="Locked Owner",
+        bank_name="Locked Bank",
+        iban="EG00ROUNDTHREE00001234",
+        country="EG",
+        currency="EGP",
+        submit=True,
+    )
+    profile.status = PayoutProfile.Status.VERIFIED
+    profile.verification_notes = "Locked notes"
+    profile.verified_by = reviewer
+    profile.verified_at = timezone.now()
+    profile.save(update_fields=["status", "verification_notes", "verified_by", "verified_at"])
+    fields = ("method", "account_holder", "destination_hint", "bank_name", "iban_encrypted", "iban_last4", "country", "currency", "status", "verification_notes", "verified_by_id", "verified_at")
+    before = {field: getattr(profile, field) for field in fields}
+    event_count = AuditEvent.objects.filter(object_id=str(profile.pk), action__in=["finance.payout_profile.updated", "finance.payout_profile.submitted"]).count()
+
+    with pytest.raises(ValidationError, match="Verified payout profiles are read-only"):
+        update_payout_profile(
+            organization=organization,
+            actor=owner,
+            method=PayoutProfile.Method.BANK,
+            account_holder="MUTATED",
+            bank_name="MUTATED",
+            iban="EG00ROUNDTHREE99995678",
+            country="US",
+            currency="USD",
+            submit=False,
+        )
+    profile.refresh_from_db()
+    assert {field: getattr(profile, field) for field in fields} == before
+    assert AuditEvent.objects.filter(object_id=str(profile.pk), action__in=["finance.payout_profile.updated", "finance.payout_profile.submitted"]).count() == event_count
