@@ -1,8 +1,10 @@
 import os
+from datetime import timedelta
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
+from django.db import connection
 from django.utils import timezone
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
@@ -11,6 +13,7 @@ from apps.finance.models import PayoutProfile
 from apps.finance.services import review_payout_profile
 from apps.notifications.models import Notification
 from apps.storefront.models import Storefront
+from apps.subscriptions.services import entitlement_summary
 
 from .test_designer_portal_browser import (
     _active_designer,
@@ -33,6 +36,33 @@ def _only_active_nav(driver):
 
 def _payout_form(driver):
     return driver.find_element(By.XPATH, '//form[.//input[@type="hidden" and @name="action" and @value="payout_profile"]]')
+
+
+@pytest.mark.django_db(transaction=True)
+def test_entitlement_summary_owns_subscription_lock_transaction_and_rolls_starter_period(v2_3_reference_rows):
+    owner = User.objects.create_user(
+        username="designer-round3-transaction-owner",
+        password="password12345",
+        email="round3-transaction@designer.test",
+    )
+    org = _active_designer(owner)
+    subscription = org.professional_subscription
+    now = timezone.now()
+    stale_end = now - timedelta(days=1)
+    subscription.current_period_start = stale_end - timedelta(days=31)
+    subscription.current_period_end = stale_end
+    subscription.save(update_fields=["current_period_start", "current_period_end", "updated_at"])
+    period_count = subscription.periods.count()
+
+    assert connection.in_atomic_block is False
+    summary = entitlement_summary(org, now=now)
+
+    subscription.refresh_from_db()
+    assert summary["plan_code"] == "designer_starter"
+    assert subscription.current_period_start == stale_end
+    assert subscription.current_period_end > now
+    assert subscription.periods.count() == period_count + 1
+    assert connection.in_atomic_block is False
 
 
 @pytest.mark.django_db(transaction=True)
