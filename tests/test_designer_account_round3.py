@@ -1,4 +1,5 @@
 import json
+from html import unescape
 from datetime import timedelta
 
 import pytest
@@ -391,7 +392,7 @@ def test_subscription_usage_productization_preserves_starter_and_payment_window_
     assert subscription.current_plan_id == before_plan
     assert subscription.current_plan.code == "designer_starter"
     assert SubscriptionBillingConfirmation.objects.filter(organization=org).count() == billing_before
-    assert "Pro can be activated only after payment is confirmed through FABINZI's authorized billing process. Until confirmation, your current subscription remains unchanged." in upgrade.content.decode()
+    assert "Pro can be activated only after payment is confirmed through FABINZI's authorized billing process. Until confirmation, your current subscription remains unchanged." in unescape(upgrade.content.decode())
 
     pro = get_effective_plan(DESIGNER_PRO)
     OnboardingPlanSelection.objects.create(
