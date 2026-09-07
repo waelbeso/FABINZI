@@ -2,7 +2,7 @@ import os
 
 import pytest
 from django.contrib.auth import get_user_model
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select, WebDriverWait
@@ -48,6 +48,15 @@ def _submit_form_and_wait_for_navigation(driver, form):
     button = form.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
     _click_element(driver, button)
     _wait(driver).until(EC.staleness_of(form))
+
+
+def _wait_for_body_text(driver, text):
+    """Retry across Chrome document swaps without retaining a stale inspector node."""
+    return WebDriverWait(
+        driver,
+        20,
+        ignored_exceptions=(WebDriverException,),
+    ).until(lambda current: text in current.find_element(By.TAG_NAME, "body").text)
 
 
 def _rendered_messages(driver):
@@ -146,7 +155,7 @@ def test_designer_round2_real_chrome_owner_surfaces_and_upload_inputs(
         _shot(driver, "round2-01-public-profile-editor-desktop-en.png")
         save_button = driver.find_element(By.CSS_SELECTOR, 'button[name="action"][value="save_revision"]')
         _click_element(driver, save_button)
-        wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Public profile draft saved."))
+        _wait_for_body_text(driver, "Public profile draft saved.")
         assert organization.public_profile_revisions.filter(status="draft").exists()
 
         # Current approved public state remains public while the draft revision is pending.
