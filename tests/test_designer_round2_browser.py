@@ -3,6 +3,7 @@ import os
 import pytest
 from django.contrib.auth import get_user_model
 from selenium.common.exceptions import WebDriverException
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select, WebDriverWait
@@ -53,8 +54,10 @@ def _wait_for_body_text(driver, text):
 
 
 def _submit_upload_and_wait_for_success(driver, form, success_text):
-    """Use native WebDriver submit interaction and wait for the rendered Django success response."""
+    """Position the upload control, then use native click and the rendered Django response."""
     button = form.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
+    ActionChains(driver).scroll_to_element(button).move_to_element(button).perform()
+    _wait(driver).until(lambda _d: button.is_displayed() and button.is_enabled())
     button.click()
     _wait_for_body_text(driver, success_text)
 
