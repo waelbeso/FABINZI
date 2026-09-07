@@ -2,6 +2,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 
 from apps.artwork.models import Artwork
 from apps.design.models import GarmentDesign
@@ -11,12 +12,14 @@ from apps.organizations.models import Membership, Organization
 from .models import SubscriptionBillingConfirmation, TeamInvitation
 from .services import (
     ARTWORK_SLOT_STATUSES,
+    DESIGNER_PRO,
     DESIGN_SLOT_STATUSES,
     accept_team_invitation,
     apply_designer_downgrade,
     cancel_subscription,
     downgrade_to_starter,
     entitlement_summary,
+    get_effective_plan,
     onboarding_commercial_summary,
     require_owner,
 )
@@ -69,6 +72,20 @@ def _commercial_context(organization):
         "onboarding_commercial": commercial,
         "billing_history": history,
     }
+
+
+def _days_remaining(value):
+    if not value:
+        return None
+    day = timezone.localtime(value).date() if hasattr(value, "hour") else value
+    return max(0, (day - timezone.localdate()).days)
+
+
+def _designer_pro_policy():
+    try:
+        return get_effective_plan(DESIGNER_PRO)
+    except ValidationError:
+        return None
 
 
 def _subscription_action(request, organization, context, *, designer):
@@ -124,6 +141,8 @@ def designer_subscription(request):
             messages.success(request, success)
             return redirect(f"/designer/subscription/?org={organization.pk}")
     summary = entitlement_summary(organization)
+    commercial_context = _commercial_context(organization)
+    commercial = commercial_context["onboarding_commercial"]
     active_designs = GarmentDesign.objects.filter(organization=organization, status__in=DESIGN_SLOT_STATUSES).order_by("created_at", "id")
     active_artworks = Artwork.objects.filter(organization=organization, status__in=ARTWORK_SLOT_STATUSES).order_by("created_at", "id")
     context.update({
@@ -131,8 +150,11 @@ def designer_subscription(request):
         "active_designs_for_retention": active_designs,
         "active_artworks_for_retention": active_artworks,
         "is_subscription_owner": context["designer_membership"].role == Membership.Role.OWNER,
+        "renewal_days_remaining": _days_remaining(summary["subscription"].next_billing_at),
+        "payment_window_days_remaining": _days_remaining(commercial.get("payment_due_at")),
+        "designer_pro_policy": _designer_pro_policy(),
     })
-    context.update(_commercial_context(organization))
+    context.update(commercial_context)
     return render(request, "designer/subscription.html", context)
 
 

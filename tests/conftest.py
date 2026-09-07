@@ -6,6 +6,8 @@ import pytest
 from PIL import Image
 from django.utils import timezone
 
+pytest_plugins = ["tests.v2_3_support"]
+
 
 def _png_bytes():
     buffer = io.BytesIO()

@@ -34,7 +34,7 @@ from apps.finance.views import finance_dashboard
 from apps.media.designer_views import private_designer_media
 from apps.media.manufacturer_views import manufacturer_production_media
 from apps.media.views import private_studio_media
-from apps.notifications.views import notification_center
+from apps.notifications.views import designer_notification_center, notification_center
 from apps.operations.views import order_operations
 from apps.organizations.access_guards import (
     designer_any_active_guard,
@@ -427,6 +427,11 @@ urlpatterns = [
         "designer/finance/",
         designer_context_guard(designer_finance),
         name="designer-finance",
+    ),
+    path(
+        "designer/notifications/",
+        designer_context_guard(designer_notification_center),
+        name="designer-notifications",
     ),
     path("manufacturer/", manufacturer_portal, name="manufacturer"),
     path(

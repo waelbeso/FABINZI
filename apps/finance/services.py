@@ -97,7 +97,6 @@ def validate_policy_draft(*, policy, actor, request=None):
     validate_finance_policy(policy); policy.validated_at = timezone.now(); policy.save(update_fields=["validated_at", "updated_at"])
     record_audit_event(actor=actor, action="finance.policy.validated", instance=policy, metadata={"code": policy.code}, request=request); return policy
 
-
 @transaction.atomic
 def activate_policy(*, policy, actor, confirmed=False, request=None):
     if not getattr(actor, "is_staff", False) or not actor.has_perm("finance.activate_finance_policy_governance"): raise PermissionDenied("V2 Finance Policy activation permission required.")
@@ -282,12 +281,33 @@ def payout_iban(profile): return decrypt_text(profile.iban_encrypted) if profile
 
 @transaction.atomic
 def update_payout_profile(*, organization, actor, method, account_holder, destination_hint="", bank_name="", iban="", country="", currency="", bank_proof=None, submit=False, request=None):
-    require_payout_mutation_access(actor, organization); profile = PayoutProfile.objects.select_for_update().filter(organization=organization).first() or PayoutProfile(organization=organization); normalized = _normalize_iban(iban) if method == PayoutProfile.Method.BANK else ""
-    if method == PayoutProfile.Method.BANK and submit and not (bank_name.strip() and normalized and country.strip() and currency.strip()): raise ValidationError("Bank name, IBAN, country and currency are required before verification.")
+    require_payout_mutation_access(actor, organization)
+    existing = PayoutProfile.objects.select_for_update().filter(organization=organization).first()
+    if existing and existing.status == PayoutProfile.Status.VERIFIED:
+        raise ValidationError("Verified payout profiles are read-only. Changes require authorized FABINZI review.")
+    profile = existing or PayoutProfile(organization=organization)
+    existing_bank_iban = bool(
+        existing
+        and existing.method == PayoutProfile.Method.BANK
+        and existing.iban_encrypted
+        and existing.iban_last4
+    )
+    normalized = _normalize_iban(iban) if method == PayoutProfile.Method.BANK else ""
+    has_bank_iban = bool(normalized or existing_bank_iban)
+    if method == PayoutProfile.Method.BANK and submit and not (bank_name.strip() and has_bank_iban and country.strip() and currency.strip()):
+        raise ValidationError("Bank name, IBAN, country and currency are required before verification.")
     profile.method = method; profile.account_holder = account_holder.strip(); profile.bank_name = bank_name.strip(); profile.country = country.strip().upper(); profile.currency = currency.strip().upper()
-    if normalized: profile.iban_encrypted = encrypt_text(normalized); profile.iban_last4 = normalized[-4:]; profile.destination_hint = f"IBAN •••• {profile.iban_last4}"
-    elif destination_hint.strip(): profile.destination_hint = destination_hint.strip()
-    else: profile.destination_hint = "Not configured"
+    if method == PayoutProfile.Method.BANK:
+        if normalized:
+            profile.iban_encrypted = encrypt_text(normalized); profile.iban_last4 = normalized[-4:]; profile.destination_hint = f"IBAN •••• {profile.iban_last4}"
+        elif existing_bank_iban:
+            profile.destination_hint = f"IBAN •••• {profile.iban_last4}"
+        else:
+            profile.destination_hint = "Not configured"
+    elif destination_hint.strip():
+        profile.destination_hint = destination_hint.strip()
+    else:
+        profile.destination_hint = "Not configured"
     if bank_proof is not None: profile.bank_proof = bank_proof
     profile.status = PayoutProfile.Status.PENDING if submit else PayoutProfile.Status.DRAFT; profile.verification_notes = ""; profile.verified_by = None; profile.verified_at = None; profile.full_clean(); profile.save()
     record_audit_event(actor=actor, action="finance.payout_profile.submitted" if submit else "finance.payout_profile.updated", instance=profile, metadata={"method": profile.method, "bank_name": profile.bank_name, "country": profile.country, "currency": profile.currency, "iban_last4": profile.iban_last4}, request=request); return profile

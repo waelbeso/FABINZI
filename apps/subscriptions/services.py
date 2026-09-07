@@ -262,6 +262,7 @@ def _roll_nonpaid_period_locked(subscription, *, now=None):
     return changed
 
 
+@transaction.atomic
 def _subscription_locked_for_org(organization, *, now=None):
     subscription = ensure_subscription_for_organization(organization)
     subscription = (
