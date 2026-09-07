@@ -15,7 +15,7 @@ from apps.notifications.models import Notification, NotificationPreference
 from apps.organizations.designer_context import DESIGNER_ROUTE_SECTIONS
 from apps.organizations.models import DesignerProfile, Membership, OnboardingApplication, Organization
 from apps.storefront.models import Storefront
-from apps.subscriptions.models import OnboardingPlanSelection, OrganizationSubscription
+from apps.subscriptions.models import OnboardingPlanSelection, OrganizationSubscription, SubscriptionBillingConfirmation
 from apps.subscriptions.services import DESIGNER_PRO, entitlement_summary, get_effective_plan, plan_snapshot, price_snapshot
 
 User = get_user_model()
@@ -384,12 +384,14 @@ def test_subscription_usage_productization_preserves_starter_and_payment_window_
     assert "No paid renewal currently due" in starter_body
 
     before_plan = OrganizationSubscription.objects.get(organization=org).current_plan_id
+    billing_before = SubscriptionBillingConfirmation.objects.filter(organization=org).count()
     upgrade = client.post(reverse("designer-subscription") + f"?org={org.pk}", {"action": "upgrade"}, follow=True)
     assert upgrade.status_code == 200
     subscription = OrganizationSubscription.objects.get(organization=org)
     assert subscription.current_plan_id == before_plan
     assert subscription.current_plan.code == "designer_starter"
-    assert "confirmed billing evidence" in upgrade.content.decode()
+    assert SubscriptionBillingConfirmation.objects.filter(organization=org).count() == billing_before
+    assert "Pro can be activated only after payment is confirmed through FABINZI's authorized billing process. Until confirmation, your current subscription remains unchanged." in upgrade.content.decode()
 
     pro = get_effective_plan(DESIGNER_PRO)
     OnboardingPlanSelection.objects.create(
