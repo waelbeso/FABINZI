@@ -220,6 +220,15 @@
     document.querySelectorAll('[data-studio-pane]').forEach(pane => { pane.hidden = pane.dataset.studioPane !== button.dataset.studioTab; });
   }));
 
+  const privateFileInput = document.getElementById('private-art-file');
+  const privateFileStatus = document.getElementById('private-art-file-status');
+  if (privateFileInput && privateFileStatus) {
+    const emptyFileLabel = privateFileStatus.dataset.emptyLabel || privateFileStatus.textContent || '';
+    privateFileInput.addEventListener('change', () => {
+      privateFileStatus.textContent = privateFileInput.files?.[0]?.name || emptyFileLabel;
+    });
+  }
+
   document.querySelectorAll('[data-artwork-choice]').forEach(button => button.addEventListener('click', () => {
     document.querySelectorAll('[data-artwork-choice]').forEach(choice => choice.setAttribute('aria-pressed', choice === button ? 'true' : 'false'));
     document.getElementById('selected-artwork-version').value = button.dataset.artworkVersion;
