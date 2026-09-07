@@ -99,7 +99,11 @@ def _subscription_action(request, organization, context, *, designer):
     subscription = summary["subscription"]
     if action == "upgrade":
         raise ValidationError(
-            "Pro activation requires explicit confirmed billing evidence through authorized operations; browser/client requests cannot activate paid entitlement."
+            _localized(
+                request,
+                "Pro can be activated only after payment is confirmed through FABINZI's authorized billing process. Until confirmation, your current subscription remains unchanged.",
+                "لا يمكن تفعيل خطة Pro إلا بعد تأكيد الدفع عبر مسار الفوترة المعتمد في FABINZI. وحتى يتم التأكيد، سيظل اشتراكك الحالي دون تغيير.",
+            )
         )
     if action == "cancel":
         cancel_subscription(subscription=subscription, actor=request.user, request=request)

@@ -13,6 +13,7 @@ from apps.finance.models import PayoutProfile
 from apps.finance.services import review_payout_profile
 from apps.notifications.models import Notification
 from apps.storefront.models import Storefront
+from apps.subscriptions.models import SubscriptionBillingConfirmation
 from apps.subscriptions.services import entitlement_summary
 
 from .test_designer_portal_browser import (
@@ -191,14 +192,36 @@ def test_designer_round3_real_chrome_workspace_payout_subscription_notifications
         assert "Designer Starter" in driver.page_source
         assert "Designer Pro" in driver.page_source
         assert "No paid renewal currently due" in driver.page_source
+        billing_before = SubscriptionBillingConfirmation.objects.filter(organization=org).count()
         upgrade_form = driver.find_element(By.XPATH, '//form[.//input[@name="action" and @value="upgrade"]]')
         _click_element(driver, upgrade_form.find_element(By.CSS_SELECTOR, 'button[type="submit"]'))
-        wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "confirmed billing evidence"))
+        wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Pro can be activated only after payment is confirmed through FABINZI's authorized billing process. Until confirmation, your current subscription remains unchanged."))
         org.professional_subscription.refresh_from_db()
         assert org.professional_subscription.current_plan.code == "designer_starter"
-        _shot(driver, "round3-08-subscription-desktop-en.png")
+        assert SubscriptionBillingConfirmation.objects.filter(organization=org).count() == billing_before
+        _shot(driver, "round4-01-subscription-desktop-en.png")
 
-        _click(driver, By.CSS_SELECTOR, 'a[href^="/designer/notifications/"]')
+        session = client.session
+        session["django_language"] = "ar"
+        session.save()
+        driver.get(f"{live_server.url}/designer/subscription/?org={org.pk}&lang=ar")
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".designer-workspace")))
+        assert '<html lang="ar" dir="rtl"' in driver.page_source
+        assert _no_overflow(driver)
+        billing_before_ar = SubscriptionBillingConfirmation.objects.filter(organization=org).count()
+        upgrade_form = driver.find_element(By.XPATH, '//form[.//input[@name="action" and @value="upgrade"]]')
+        _click_element(driver, upgrade_form.find_element(By.CSS_SELECTOR, 'button[type="submit"]'))
+        wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "لا يمكن تفعيل خطة Pro إلا بعد تأكيد الدفع عبر مسار الفوترة المعتمد في FABINZI. وحتى يتم التأكيد، سيظل اشتراكك الحالي دون تغيير."))
+        org.professional_subscription.refresh_from_db()
+        assert org.professional_subscription.current_plan.code == "designer_starter"
+        assert SubscriptionBillingConfirmation.objects.filter(organization=org).count() == billing_before_ar
+        assert _no_overflow(driver)
+        _shot(driver, "round4-02-subscription-ar-rtl.png")
+
+        session = client.session
+        session["django_language"] = "en"
+        session.save()
+        driver.get(f"{live_server.url}/designer/notifications/?org={org.pk}&lang=en")
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Round 3 browser notification"))
         assert _only_active_nav(driver)
         assert "designer-workspace" in driver.page_source

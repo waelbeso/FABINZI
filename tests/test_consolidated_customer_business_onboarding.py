@@ -816,7 +816,10 @@ def test_subscription_history_context_is_safe_and_team_member_cannot_activate_pa
 
     views_source = (ROOT / "apps/subscriptions/views.py").read_text(encoding="utf-8")
     assert 'if action == "upgrade":' in views_source
-    assert "browser/client requests cannot activate paid entitlement" in views_source
+    assert "Pro can be activated only after payment is confirmed through FABINZI's authorized billing process. Until confirmation, your current subscription remains unchanged." in views_source
+    assert "لا يمكن تفعيل خطة Pro إلا بعد تأكيد الدفع عبر مسار الفوترة المعتمد في FABINZI. وحتى يتم التأكيد، سيظل اشتراكك الحالي دون تغيير." in views_source
+    assert "browser/client requests cannot activate paid entitlement" not in views_source
+    assert "activate_paid_pro(" not in views_source
     designer_template = (ROOT / "templates/designer/subscription.html").read_text(encoding="utf-8")
     manufacturer_template = (ROOT / "templates/manufacturer/subscription.html").read_text(encoding="utf-8")
     assert "Actual entitlement" in designer_template
