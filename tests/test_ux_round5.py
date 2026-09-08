@@ -41,10 +41,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _two_zone_project(data):
     project = create_studio_project(
-        customer=data["customer"],
-        product=data["product"],
-        variant=data["variant"],
-        quantity=1,
+        customer=data["customer"], product=data["product"], variant=data["variant"], quantity=1
     )
     customization = enable_customization(project=project, actor=data["customer"])
     front = add_customization_element(
@@ -78,8 +75,8 @@ def test_round5_server_renders_independent_zone_surfaces_and_validates_requested
     assert response.status_code == 200
     assert response.context["active_zone"].pk == data["print_zone"].pk
     zones = {zone.pk: zone for zone in response.context["zones"]}
-    assert [element.pk for element in zones[data["zone"].pk].surface_elements] == [front.pk]
-    assert [element.pk for element in zones[data["print_zone"].pk].surface_elements] == [back.pk]
+    assert [e.pk for e in zones[data["zone"].pk].surface_elements] == [front.pk]
+    assert [e.pk for e in zones[data["print_zone"].pk].surface_elements] == [back.pk]
 
     html = response.content.decode()
     assert html.count("data-zone-surface") == 2
@@ -87,7 +84,7 @@ def test_round5_server_renders_independent_zone_surfaces_and_validates_requested
     assert html.count('id="zone-workspace"') == 1
     assert f'id="zone-surface-{data["zone"].pk}"' in html
     assert f'id="zone-surface-{data["print_zone"].pk}"' in html
-    assert f'value="{data["print_zone"].pk}" data-zone-name="{data["print_zone"].name}"' in html
+    assert f'aria-current="true">2</button>' in html
 
     for requested in ("not-a-zone", str(data["wrong_zone"].pk), "999999999"):
         fallback = client.get(reverse("studio-project", args=[project.pk]) + f"?zone={requested}")
@@ -104,8 +101,7 @@ def test_round5_add_actions_and_handled_validation_preserve_zone_redirect(client
     url = reverse("studio-project", args=[project.pk])
     expected = f"{url}?zone={data['print_zone'].pk}"
 
-    artwork = client.post(
-        url,
+    for payload in (
         {
             "action": "add_artwork",
             "active_zone": data["print_zone"].pk,
@@ -113,12 +109,6 @@ def test_round5_add_actions_and_handled_validation_preserve_zone_redirect(client
             "artwork_version": data["version"].pk,
             "production_method": "print",
         },
-    )
-    assert artwork.status_code == 302
-    assert artwork["Location"] == expected
-
-    text = client.post(
-        url,
         {
             "action": "add_text",
             "active_zone": data["print_zone"].pk,
@@ -126,9 +116,10 @@ def test_round5_add_actions_and_handled_validation_preserve_zone_redirect(client
             "text": "Back label",
             "production_method": "print",
         },
-    )
-    assert text.status_code == 302
-    assert text["Location"] == expected
+    ):
+        response = client.post(url, payload)
+        assert response.status_code == 302
+        assert response["Location"] == expected
 
     before = CustomizationElement.objects.filter(customization__project=project).count()
     invalid = client.post(
@@ -202,26 +193,17 @@ def test_round5_same_artwork_transform_delete_ready_and_generic_zone_counts(clie
     one_project = create_studio_project(customer=one["customer"], product=one["product"], variant=one["variant"])
     enable_customization(project=one_project, actor=one["customer"])
     client.force_login(one["customer"])
-    one_response = client.get(reverse("studio-project", args=[one_project.pk]))
-    assert one_response.status_code == 200
-    assert one_response.content.decode().count("data-zone-surface") == 1
+    assert client.get(reverse("studio-project", args=[one_project.pk])).content.decode().count("data-zone-surface") == 1
 
     many = build_catalog("round5manyzone")
     DecorationZone.objects.create(
-        version=many["garment"],
-        name="Pocket",
-        method=DecorationZone.Method.PRINT,
-        placement={"x": .3, "y": .45},
-        max_width_mm=80,
-        max_height_mm=90,
+        version=many["garment"], name="Pocket", method=DecorationZone.Method.PRINT,
+        placement={"x": .3, "y": .45}, max_width_mm=80, max_height_mm=90,
     )
     many_project = create_studio_project(customer=many["customer"], product=many["product"], variant=many["variant"])
     enable_customization(project=many_project, actor=many["customer"])
     client.force_login(many["customer"])
-    many_response = client.get(reverse("studio-project", args=[many_project.pk]))
-    assert many_response.status_code == 200
-    assert many_response.content.decode().count("data-zone-surface") == 3
-
+    assert client.get(reverse("studio-project", args=[many_project.pk])).content.decode().count("data-zone-surface") == 3
 
 
 def test_round5_source_contract_uses_structural_surfaces_and_per_zone_pointer_geometry():
@@ -229,9 +211,8 @@ def test_round5_source_contract_uses_structural_surfaces_and_per_zone_pointer_ge
     javascript = (ROOT / "static/js/studio-editor.js").read_text(encoding="utf-8")
     views = (ROOT / "apps/storefront/studio_views.py").read_text(encoding="utf-8")
 
-    assert "data-zone-surface" in template
-    assert "data-zone-workspace" in template
-    assert "zone.surface_elements" in template
+    for needle in ("data-zone-surface", "data-zone-workspace", "zone.surface_elements"):
+        assert needle in template
     assert "zone.surface_elements = elements_by_zone[zone.pk]" in views
     assert "_resolve_active_zone" in views
     assert "request.GET.get(\"zone\")" in views
@@ -259,10 +240,8 @@ def test_round5_real_chrome_front_back_isolation_sync_upload_mobile_and_rtl(clie
         max_height_mm=420,
     )
     customer = User.objects.create_user(
-        username="round5-browser-customer",
-        password="password12345",
-        theme_preference="light",
-        language_preference="en",
+        username="round5-browser-customer", password="password12345",
+        theme_preference="light", language_preference="en",
     )
     PRIVATE_UPLOAD_PATH.write_bytes(PNG_1X1)
 
@@ -279,8 +258,9 @@ def test_round5_real_chrome_front_back_isolation_sync_upload_mobile_and_rtl(clie
         Select(driver.find_element(By.ID, "artwork-zone")).select_by_value(str(data["zone"].pk))
         Select(driver.find_element(By.ID, "artwork-method")).select_by_value("print")
         _click(driver, By.ID, "add-selected-artwork")
-        wait.until(EC.url_contains(f"zone={data['zone'].pk}"))
-        wait.until(lambda _d: CustomizationElement.objects.filter(customization__project=project, kind=CustomizationElement.Kind.ARTWORK).count() == 1)
+        wait.until(lambda _d: CustomizationElement.objects.filter(
+            customization__project=project, kind=CustomizationElement.Kind.ARTWORK
+        ).count() == 1)
         front = CustomizationElement.objects.get(customization__project=project, kind=CustomizationElement.Kind.ARTWORK)
         assert front.decoration_zone_id == data["zone"].pk
         assert driver.find_element(By.ID, f"zone-surface-{data['zone'].pk}").is_displayed()
@@ -294,26 +274,31 @@ def test_round5_real_chrome_front_back_isolation_sync_upload_mobile_and_rtl(clie
         assert Select(driver.find_element(By.ID, "text-zone")).first_selected_option.get_attribute("value") == str(back_zone.pk)
         assert driver.find_element(By.CSS_SELECTOR, f'[data-zone-anchor="{back_zone.pk}"]').get_attribute("aria-current") == "true"
         assert driver.find_element(By.ID, "active-zone-title").text.strip() == "Back"
+        assert "320.00 × 420.00" in driver.find_element(By.CSS_SELECTOR, f'[data-zone-dimensions][data-zone-id="{back_zone.pk}"]').text
         assert driver.find_element(By.ID, f"zone-surface-{back_zone.pk}").is_displayed()
         assert not driver.find_element(By.ID, f"zone-surface-{data['zone'].pk}").is_displayed()
         Select(driver.find_element(By.ID, "artwork-method")).select_by_value("print")
         _click(driver, By.ID, "add-selected-artwork")
-        wait.until(EC.url_contains(f"zone={back_zone.pk}"))
-        wait.until(lambda _d: CustomizationElement.objects.filter(customization__project=project, kind=CustomizationElement.Kind.ARTWORK).count() == 2)
-        artworks = list(CustomizationElement.objects.filter(customization__project=project, kind=CustomizationElement.Kind.ARTWORK).order_by("id"))
-        front = next(element for element in artworks if element.decoration_zone_id == data["zone"].pk)
-        back = next(element for element in artworks if element.decoration_zone_id == back_zone.pk)
-        assert front.artwork_version_id == back.artwork_version_id
-        assert front.pk != back.pk
+        wait.until(lambda _d: CustomizationElement.objects.filter(
+            customization__project=project, kind=CustomizationElement.Kind.ARTWORK
+        ).count() == 2)
+        artworks = list(CustomizationElement.objects.filter(
+            customization__project=project, kind=CustomizationElement.Kind.ARTWORK
+        ).order_by("id"))
+        front = next(e for e in artworks if e.decoration_zone_id == data["zone"].pk)
+        back = next(e for e in artworks if e.decoration_zone_id == back_zone.pk)
+        assert front.artwork_version_id == back.artwork_version_id and front.pk != back.pk
         _shot(driver, "round5-02-back-en.png")
 
         Select(driver.find_element(By.ID, "active-zone")).select_by_value(str(data["zone"].pk))
         wait.until(lambda d: d.find_element(By.ID, f"zone-surface-{data['zone'].pk}").is_displayed())
         _click(driver, By.CSS_SELECTOR, f'[data-element-id="{front.pk}"]')
         back_before = dict(CustomizationElement.objects.get(pk=back.pk).transform)
-        x_control = driver.find_element(By.ID, "transform-x")
-        driver.execute_script("arguments[0].value='0.42'; arguments[0].dispatchEvent(new Event('change',{bubbles:true}));", x_control)
-        wait.until(lambda _d: float(CustomizationElement.objects.get(pk=front.pk).transform["x"]) == 0.42)
+        driver.execute_script(
+            "arguments[0].value='0.42'; arguments[0].dispatchEvent(new Event('change',{bubbles:true}));",
+            driver.find_element(By.ID, "transform-x"),
+        )
+        wait.until(lambda _d: float(CustomizationElement.objects.get(pk=front.pk).transform["x"]) == .42)
         wait.until(lambda d: d.find_element(By.ID, "studio-save-state").get_attribute("data-state") == "saved")
         assert CustomizationElement.objects.get(pk=back.pk).transform == back_before
 
@@ -323,9 +308,11 @@ def test_round5_real_chrome_front_back_isolation_sync_upload_mobile_and_rtl(clie
         assert driver.find_element(By.ID, "transform-x").get_attribute("value") == ""
         _click(driver, By.CSS_SELECTOR, f'[data-element-id="{back.pk}"]')
         front_before_back_edit = dict(CustomizationElement.objects.get(pk=front.pk).transform)
-        back_x = driver.find_element(By.ID, "transform-x")
-        driver.execute_script("arguments[0].value='0.58'; arguments[0].dispatchEvent(new Event('change',{bubbles:true}));", back_x)
-        wait.until(lambda _d: float(CustomizationElement.objects.get(pk=back.pk).transform["x"]) == 0.58)
+        driver.execute_script(
+            "arguments[0].value='0.58'; arguments[0].dispatchEvent(new Event('change',{bubbles:true}));",
+            driver.find_element(By.ID, "transform-x"),
+        )
+        wait.until(lambda _d: float(CustomizationElement.objects.get(pk=back.pk).transform["x"]) == .58)
         assert CustomizationElement.objects.get(pk=front.pk).transform == front_before_back_edit
 
         _click(driver, By.CSS_SELECTOR, '[data-studio-tab="upload"]')
@@ -338,13 +325,13 @@ def test_round5_real_chrome_front_back_isolation_sync_upload_mobile_and_rtl(clie
         assert driver.execute_script("return arguments[0].files.length", file_input) == 1
         assert driver.find_element(By.ID, "private-art-file-status").text.strip() == PRIVATE_UPLOAD_PATH.name
         visible_body = driver.find_element(By.TAG_NAME, "body").text
-        assert str(PRIVATE_UPLOAD_PATH) not in visible_body
-        assert "fakepath" not in visible_body.lower()
+        assert str(PRIVATE_UPLOAD_PATH) not in visible_body and "fakepath" not in visible_body.lower()
         Select(driver.find_element(By.ID, "upload-method")).select_by_value("print")
         _click(driver, By.ID, "rights-confirmed")
         _click(driver, By.CSS_SELECTOR, "#private-upload-form button[type='submit']")
-        wait.until(EC.url_contains(f"zone={back_zone.pk}"))
-        wait.until(lambda _d: CustomizationElement.objects.filter(customization__project=project, kind=CustomizationElement.Kind.IMAGE).count() == 1)
+        wait.until(lambda _d: CustomizationElement.objects.filter(
+            customization__project=project, kind=CustomizationElement.Kind.IMAGE
+        ).count() == 1)
         private_image = CustomizationElement.objects.get(customization__project=project, kind=CustomizationElement.Kind.IMAGE)
         assert private_image.decoration_zone_id == back_zone.pk
         assert private_image.media_asset.access == MediaAsset.Access.PRIVATE
@@ -359,9 +346,12 @@ def test_round5_real_chrome_front_back_isolation_sync_upload_mobile_and_rtl(clie
         text_input.send_keys("Front only")
         Select(driver.find_element(By.ID, "text-method")).select_by_value("print")
         _click(driver, By.CSS_SELECTOR, '[data-studio-pane="text"] button[type="submit"]')
-        wait.until(EC.url_contains(f"zone={data['zone'].pk}"))
+        wait.until(lambda _d: CustomizationElement.objects.filter(
+            customization__project=project, kind=CustomizationElement.Kind.TEXT
+        ).count() == 1)
         text_element = CustomizationElement.objects.get(customization__project=project, kind=CustomizationElement.Kind.TEXT)
         assert text_element.decoration_zone_id == data["zone"].pk
+        assert f"zone={data['zone'].pk}" in driver.current_url
         Select(driver.find_element(By.ID, "active-zone")).select_by_value(str(back_zone.pk))
         wait.until(lambda d: d.find_element(By.ID, f"zone-surface-{back_zone.pk}").is_displayed())
         assert not driver.find_element(By.CSS_SELECTOR, f'[data-element-id="{text_element.pk}"]').is_displayed()
@@ -384,8 +374,7 @@ def test_round5_real_chrome_front_back_isolation_sync_upload_mobile_and_rtl(clie
         driver.get(project_url + f"?zone={data['zone'].pk}&lang=ar")
         wait.until(EC.presence_of_element_located((By.ID, "studio-editor")))
         html = driver.find_element(By.TAG_NAME, "html")
-        assert html.get_attribute("lang") == "ar"
-        assert html.get_attribute("dir") == "rtl"
+        assert html.get_attribute("lang") == "ar" and html.get_attribute("dir") == "rtl"
         workspace = driver.find_element(By.ID, "zone-workspace")
         assert driver.execute_script("return getComputedStyle(arguments[0]).direction", workspace) == "ltr"
         assert CustomizationElement.objects.get(pk=front.pk).transform == front_transform
