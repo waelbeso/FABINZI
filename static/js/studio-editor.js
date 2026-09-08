@@ -6,8 +6,9 @@
   const readonly = root.dataset.readonly === 'true';
   const language = root.dataset.language || 'en';
   const csrf = document.querySelector('#studio-csrf input[name="csrfmiddlewaretoken"]')?.value || '';
-  const workspace = document.getElementById('zone-workspace');
   const zoneSelect = document.getElementById('active-zone');
+  const surfaces = Array.from(document.querySelectorAll('[data-zone-surface]'));
+  const workspaces = Array.from(document.querySelectorAll('[data-zone-workspace]'));
   const saveState = document.getElementById('studio-save-state');
   const validationPanel = document.getElementById('studio-validation');
   const validationTitle = document.getElementById('validation-title');
@@ -47,8 +48,15 @@
 
   function updateControls() {
     const enabled = !!selected && !readonly;
-    Object.values(controls).forEach(input => { if (input) input.disabled = !enabled; });
-    if (methodControl) methodControl.disabled = !enabled;
+    Object.values(controls).forEach(input => {
+      if (!input) return;
+      input.disabled = !enabled;
+      if (!selected) input.value = '';
+    });
+    if (methodControl) {
+      methodControl.disabled = !enabled;
+      if (!selected) methodControl.selectedIndex = -1;
+    }
     if (deleteButton) deleteButton.disabled = !enabled;
     document.getElementById('no-element-selected')?.toggleAttribute('hidden', !!selected);
     if (!selected) return;
@@ -62,11 +70,10 @@
 
   function setSelected(el) {
     document.querySelectorAll('[data-studio-element].is-selected').forEach(node => node.classList.remove('is-selected'));
+    selected = null;
+    if (el && zoneSelect && zoneSelect.value !== el.dataset.zoneId) setActiveZone(el.dataset.zoneId);
     selected = el || null;
-    if (selected) {
-      selected.classList.add('is-selected');
-      if (zoneSelect && zoneSelect.value !== selected.dataset.zoneId) setActiveZone(selected.dataset.zoneId, false);
-    }
+    if (selected) selected.classList.add('is-selected');
     updateControls();
   }
 
@@ -178,22 +185,57 @@
     return zoneSelect ? Array.from(zoneSelect.options).find(option => option.value === String(id)) : null;
   }
 
-  function setActiveZone(id, syncSources = true) {
-    if (!zoneSelect || !workspace) return;
+  function zoneSurface(id) {
+    return surfaces.find(surface => surface.dataset.zoneId === String(id)) || null;
+  }
+
+  function syncLegacyWorkspaceId(surface) {
+    workspaces.forEach(workspace => workspace.removeAttribute('id'));
+    const workspace = surface?.querySelector('[data-zone-workspace]');
+    if (workspace) workspace.id = 'zone-workspace';
+    return workspace;
+  }
+
+  function replaceZoneQuery(zoneId) {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('zone', String(zoneId));
+      window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+    } catch (_) {}
+  }
+
+  function setActiveZone(id, updateUrl = true) {
+    if (!zoneSelect) return;
     const option = zoneOption(id) || zoneSelect.options[0];
     if (!option) return;
+
+    if (selected && selected.dataset.zoneId !== option.value) {
+      selected.classList.remove('is-selected');
+      selected = null;
+      updateControls();
+    }
+
     zoneSelect.value = option.value;
-    document.getElementById('active-zone-title').textContent = option.dataset.zoneName || option.textContent;
-    const ratio = clamp(number(option.dataset.zoneRatio, 1), .35, 2.85);
-    workspace.style.aspectRatio = `${ratio} / 1`;
+    const title = document.getElementById('active-zone-title');
+    if (title) title.textContent = option.dataset.zoneName || option.textContent;
+
+    surfaces.forEach(surface => { surface.hidden = surface.dataset.zoneId !== option.value; });
+    const surface = zoneSurface(option.value);
+    const workspace = syncLegacyWorkspaceId(surface);
+    if (workspace) {
+      const ratio = clamp(number(option.dataset.zoneRatio, 1), .35, 2.85);
+      workspace.style.aspectRatio = `${ratio} / 1`;
+    }
+
     document.querySelectorAll('[data-zone-anchor]').forEach(marker => marker.setAttribute('aria-current', marker.dataset.zoneAnchor === option.value ? 'true' : 'false'));
-    document.querySelectorAll('[data-studio-element]').forEach(el => { el.hidden = el.dataset.zoneId !== option.value; });
-    const width = option.dataset.zoneWidth;
-    const height = option.dataset.zoneHeight;
-    const dimensions = document.getElementById('zone-dimensions');
-    if (dimensions) dimensions.textContent = width && height ? (language === 'ar' ? `الحد الأقصى الحقيقي للمنطقة: ${width} × ${height} مم. الإحداثيات محفوظة normalized ولا تتأثر باتجاه RTL.` : `Real zone maximum: ${width} × ${height} mm. Coordinates are normalized and never mirrored by RTL.`) : (language === 'ar' ? 'الإحداثيات محفوظة normalized داخل المنطقة ولا تتأثر باتجاه RTL.' : 'Coordinates are normalized inside the zone and never mirrored by RTL.');
-    if (selected && selected.dataset.zoneId !== option.value) setSelected(null);
-    if (syncSources) document.querySelectorAll('[data-zone-select]').forEach(select => { if (Array.from(select.options).some(item => item.value === option.value)) { select.value = option.value; updateMethodSelect(select); } });
+    document.querySelectorAll('[data-zone-select]').forEach(select => {
+      if (Array.from(select.options).some(item => item.value === option.value)) {
+        select.value = option.value;
+        updateMethodSelect(select);
+      }
+    });
+    document.querySelectorAll('[data-active-zone-input]').forEach(input => { input.value = option.value; });
+    if (updateUrl) replaceZoneQuery(option.value);
   }
 
   function zoneMethods(select) {
@@ -241,8 +283,7 @@
   if (initiallySelectedArtwork) selectedArtworkMethods = (initiallySelectedArtwork.dataset.methods || '').split(',').filter(Boolean);
 
   document.querySelectorAll('[data-zone-select]').forEach(select => {
-    select.addEventListener('change', () => updateMethodSelect(select));
-    updateMethodSelect(select);
+    select.addEventListener('change', () => setActiveZone(select.value));
   });
 
   zoneSelect?.addEventListener('change', () => setActiveZone(zoneSelect.value));
@@ -252,6 +293,7 @@
     applyElement(el);
     el.addEventListener('click', event => { event.stopPropagation(); setSelected(el); });
     el.addEventListener('focus', () => setSelected(el));
+    const workspace = el.closest('[data-zone-workspace]');
     if (readonly || !workspace) return;
     el.addEventListener('pointerdown', event => {
       if (event.button !== undefined && event.button !== 0) return;
@@ -290,7 +332,7 @@
     });
   });
 
-  workspace?.addEventListener('click', () => setSelected(null));
+  workspaces.forEach(workspace => workspace.addEventListener('click', () => setSelected(null)));
 
   Object.entries(controls).forEach(([key, input]) => input?.addEventListener('change', async () => {
     if (!selected) return;
@@ -304,7 +346,10 @@
     const previous = selected.dataset.method;
     selected.dataset.method = methodControl.value;
     const ok = await saveElement(selected, { production_method: methodControl.value });
-    if (!ok) selected.dataset.method = previous;
+    if (!ok) {
+      selected.dataset.method = previous;
+      updateControls();
+    }
   });
 
   deleteButton?.addEventListener('click', async () => {
@@ -324,7 +369,7 @@
   window.addEventListener('beforeunload', event => { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
 
   const initialZone = zoneSelect?.value;
-  if (initialZone) setActiveZone(initialZone, true);
+  if (initialZone) setActiveZone(initialZone, false);
   if (initiallySelectedArtwork) {
     document.getElementById('selected-artwork-version').value = initiallySelectedArtwork.dataset.artworkVersion;
     const zone = document.querySelector('#add-artwork-form [data-zone-select]');
