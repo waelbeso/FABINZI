@@ -2,6 +2,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 
 from apps.artwork.models import ArtworkVersion
 from apps.artwork.public import decorate_public_artworks, public_artwork_queryset, version_eligible_for_zone
@@ -98,6 +99,21 @@ def _validation_context(project, request):
         return {"valid": False, "issues": issues, "unit_price": project.variant.price if project.variant_id else project.product.base_price, "currency": project.product.currency}
 
 
+def _resolve_active_zone(zones, requested_zone_id=None):
+    if not zones:
+        return None
+    try:
+        requested_zone_id = int(requested_zone_id)
+    except (TypeError, ValueError):
+        return zones[0]
+    return next((zone for zone in zones if zone.pk == requested_zone_id), zones[0])
+
+
+def _studio_project_target(project, active_zone=None):
+    target = reverse("studio-project", args=[project.pk])
+    return f"{target}?zone={active_zone.pk}" if active_zone else target
+
+
 @login_required
 def studio(request):
     projects = _project_queryset().filter(customer=request.user)
@@ -148,6 +164,7 @@ def studio_project(request, pk):
 
     if request.method == "POST":
         action = request.POST.get("action")
+        active_zone = _resolve_active_zone(zones, request.POST.get("active_zone") or request.GET.get("zone"))
         try:
             if action == "reopen":
                 reopen_project_for_attention(project=project, actor=request.user, request=request)
@@ -159,6 +176,7 @@ def studio_project(request, pk):
             elif action in {"add_artwork", "add_text", "upload_image"}:
                 customization = enable_customization(project=project, actor=request.user, request=request)
                 zone = get_object_or_404(DecorationZone, pk=request.POST.get("decoration_zone"), version=project.product.designed_product.garment_version)
+                active_zone = zone
                 production_method = request.POST.get("production_method", "")
                 if action == "add_artwork":
                     artwork_version = get_object_or_404(ArtworkVersion, pk=request.POST.get("artwork_version"), status=ArtworkVersion.Status.APPROVED, artwork__status="approved")
@@ -189,14 +207,17 @@ def studio_project(request, pk):
                 return redirect("cart")
         except (ValidationError, PermissionDenied) as exc:
             messages.error(request, _customer_error(request, exc))
-        return redirect("studio-project", pk=project.pk)
+        return redirect(_studio_project_target(project, active_zone))
 
     elements = []
+    elements_by_zone = {zone.pk: [] for zone in zones}
     if hasattr(project, "customization"):
         for element in project.customization.elements.select_related("decoration_zone", "media_asset", "artwork_version__artwork__organization"):
             element.visual_transform = normalize_transform(element.transform)
             element.visual_source_url = element_source_url(element)
             elements.append(element)
+            if element.decoration_zone_id in elements_by_zone:
+                elements_by_zone[element.decoration_zone_id].append(element)
     for zone in zones:
         placement = zone.placement or {}
         try:
@@ -208,7 +229,9 @@ def studio_project(request, pk):
         zone.anchor_y_pct = round(zone.anchor_y * 100, 4)
         zone.allowed_methods = allowed_methods_for_zone(zone)
         zone.workspace_ratio = float(zone.max_width_mm) / float(zone.max_height_mm) if zone.max_width_mm and zone.max_height_mm else 1.0
+        zone.surface_elements = elements_by_zone[zone.pk]
 
+    active_zone = _resolve_active_zone(zones, request.GET.get("zone"))
     marketplace = _marketplace_for_product(project.product, request.GET.get("art_q", "").strip())
     validation = _validation_context(project, request)
-    return render(request, "storefront/studio_project.html", {"project": project, "zones": zones, "elements": elements, "marketplace_artworks": marketplace, "preferred_artwork_id": preferred_artwork_id, "validation": validation})
+    return render(request, "storefront/studio_project.html", {"project": project, "zones": zones, "active_zone": active_zone, "elements": elements, "marketplace_artworks": marketplace, "preferred_artwork_id": preferred_artwork_id, "validation": validation})
