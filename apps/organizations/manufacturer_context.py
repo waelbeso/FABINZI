@@ -39,6 +39,33 @@ MANUFACTURER_FINANCE_ROLES = {
 }
 
 
+MANUFACTURER_ROUTE_SECTIONS = {'manufacturer': 'overview',
+ 'manufacturer-profile': 'profile',
+ 'manufacturer-public-profile': 'public-profile',
+ 'manufacturer-public-products': 'public-products',
+ 'manufacturer-public-inquiries': 'public-inquiries',
+ 'manufacturer-public-inquiry-detail': 'public-inquiries',
+ 'manufacturer-team': 'team',
+ 'manufacturer-capabilities': 'capabilities',
+ 'manufacturer-opportunities': 'opportunities',
+ 'manufacturer-marketplace-dashboard': 'opportunities',
+ 'manufacturer-rfq-detail': 'opportunities',
+ 'manufacturer-quotes': 'quotes',
+ 'manufacturer-quote-detail': 'quotes',
+ 'manufacturer-production': 'production',
+ 'manufacturer-production-detail': 'production',
+ 'manufacturer-qc': 'production',
+ 'manufacturer-ready-to-ship': 'production',
+ 'manufacturer-shipment': 'production',
+ 'manufacturer-finance': 'finance',
+ 'manufacturer-notifications': 'notifications'}
+
+
+def manufacturer_active_section(request):
+    match = getattr(request, "resolver_match", None)
+    return MANUFACTURER_ROUTE_SECTIONS.get(getattr(match, "url_name", None))
+
+
 def manufacturer_memberships(user):
     if not user or not user.is_authenticated:
         return Membership.objects.none()
@@ -122,6 +149,7 @@ def manufacturer_context(request, *, required=False):
         getattr(organization, "onboarding_application", None) if organization else None
     )
     return {
+        "manufacturer_active_section": manufacturer_active_section(request),
         "manufacturer_membership": membership,
         "manufacturer_memberships": memberships,
         "manufacturer_organization": organization,

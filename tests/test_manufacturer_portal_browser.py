@@ -86,6 +86,16 @@ def _replace(driver, element, value):
 
 
 def _shot(driver, name):
+    from urllib.parse import urlsplit
+    path = urlsplit(driver.current_url).path
+    selected = driver.find_elements(By.CSS_SELECTOR, '.mfr-nav a[aria-current="page"]')
+    assert len(selected) == 1, path
+    if "/production/" in path:
+        assert urlsplit(selected[0].get_attribute("href")).path == "/manufacturer/production/"
+    elif "/rfq/" in path:
+        assert urlsplit(selected[0].get_attribute("href")).path == "/manufacturer/opportunities/"
+    elif "/quotes/" in path:
+        assert urlsplit(selected[0].get_attribute("href")).path == "/manufacturer/quotes/"
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
     assert driver.save_screenshot(str(ARTIFACT_DIR / name))
 
@@ -191,6 +201,8 @@ def test_manufacturer_portal_real_chrome_a_to_h(client, live_server, v2_3_refere
         _shot(driver, EXPECTED_SCREENSHOTS[0])
 
         driver.get(f"{live_server.url}/manufacturer/profile/?org={org.pk}&lang=en")
+        assert not driver.find_elements(By.NAME, "display_name")
+        _click(driver, By.CSS_SELECTOR, 'a[href*="edit=1"]')
         wait.until(EC.presence_of_element_located((By.NAME, "display_name")))
         _replace(driver, driver.find_element(By.NAME, "display_name"), "Browser Factory Works")
         _replace(driver, driver.find_element(By.NAME, "city"), "New Cairo")
@@ -208,7 +220,7 @@ def test_manufacturer_portal_real_chrome_a_to_h(client, live_server, v2_3_refere
         assert profile.primary_contact_person == "Browser Operations Lead"
         assert revision.proposed_data["organization"]["display_name"] == "Browser Factory Works"
         assert revision.proposed_data["organization"]["city"] == "New Cairo"
-        assert "Manufacturer profile updated." in driver.page_source
+        assert "Profile saved. Public changes, if any, require FABINZI review." in driver.page_source
         start_public_profile_review(revision=revision, reviewer=reviewer)
         review_public_profile_revision(
             revision=revision,
@@ -341,8 +353,8 @@ def test_manufacturer_portal_real_chrome_a_to_h(client, live_server, v2_3_refere
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "500.00"))
         settlement_form = _form_with_hidden(driver, "action", "request_settlement")
         _replace(driver, settlement_form.find_element(By.NAME, "amount"), "150.00")
-        _replace(driver, settlement_form.find_element(By.NAME, "currency"), "EGP")
-        _click_element(driver, settlement_form.find_element(By.CSS_SELECTOR, 'button[type="submit"]'))
+        assert settlement_form.find_element(By.NAME, "currency").get_attribute("value") == "EGP"
+        _click_element(driver, settlement_form.find_element(By.CSS_SELECTOR, 'button'))
         wait.until(lambda _d: SettlementRequest.objects.filter(organization=org, amount=Decimal("150.00")).exists())
         assert _no_overflow(driver)
         _shot(driver, EXPECTED_SCREENSHOTS[12])
@@ -386,3 +398,110 @@ def test_manufacturer_portal_real_chrome_a_to_h(client, live_server, v2_3_refere
 
     inventory = sorted(path.name for path in ARTIFACT_DIR.glob("*.png"))
     assert inventory == EXPECTED_SCREENSHOTS
+
+@pytest.mark.django_db(transaction=True)
+def test_manufacturer_round1_real_chrome(client, live_server, monkeypatch, tmp_path):
+    if os.getenv("CI") != "true":
+        pytest.skip("Real Chrome Manufacturer QA is CI-only.")
+    from unittest.mock import Mock
+    from PIL import Image
+    from apps.integrations.models import IntegrationConfig
+    from apps.media import manufacturer_public_services as images
+    from apps.media.models import MediaAsset
+
+    owner, org, _, _ = manufacturer("round1-browser")
+    integration, _ = IntegrationConfig.objects.update_or_create(provider=IntegrationConfig.Provider.CLOUDFLARE_IMAGES, defaults={"enabled": True, "config": {"account_id": "a" * 32}})
+    monkeypatch.setattr(IntegrationConfig, "get_secrets", lambda self: {"api_token": "synthetic-browser-token"})
+    responses = [Mock(ok=True, json=lambda purpose=purpose: {"success": True, "result": {"id": f"browser-{purpose}", "requireSignedURLs": False, "variants": [f"https://imagedelivery.net/browser/browser-{purpose}/public"]}}) for purpose in ("profile", "cover")]
+    post = Mock(side_effect=responses)
+    monkeypatch.setattr(images.requests, "post", post)
+    monkeypatch.setattr(images.requests, "delete", Mock())
+    file = tmp_path / "round1-public.png"
+    Image.new("RGB", (48, 32), "purple").save(file)
+    driver = _chrome()
+    try:
+        _login(driver, live_server, client, owner)
+        for path in ("", "profile/", "public-profile/", "public-products/", "public-inquiries/", "team/", "capabilities/", "opportunities/", "quotes/", "production/", "finance/", "notifications/"):
+            driver.get(f"{live_server.url}/manufacturer/{path}?org={org.pk}&lang=en")
+            _wait(driver).until(EC.presence_of_element_located((By.CSS_SELECTOR, ".mfr-nav")))
+            active = driver.find_elements(By.CSS_SELECTOR, '.mfr-nav a[aria-current="page"]')
+            assert len(active) == 1, path
+            assert _no_overflow(driver), path
+        _shot(driver, "round1-notifications-desktop.png")
+        from apps.public_inquiries.models import PublicInquiry
+        inquiry = PublicInquiry.objects.create(target_kind="manufacturer", target_organization=org, sender_user=owner, status="submitted")
+        driver.get(f"{live_server.url}/manufacturer/public-inquiries/{inquiry.pk}/?org={org.pk}&lang=en")
+        selected = driver.find_elements(By.CSS_SELECTOR, '.mfr-nav a[aria-current="page"]')
+        assert len(selected) == 1 and "/manufacturer/public-inquiries/?" in selected[0].get_attribute("href")
+        _shot(driver, "round1-public-inquiry-child.png")
+        driver.get(f"{live_server.url}/manufacturer/profile/?org={org.pk}&lang=en")
+        assert not driver.find_elements(By.NAME, "display_name")
+        _shot(driver, "round1-profile-readonly.png")
+        _click(driver, By.CSS_SELECTOR, 'a[href*="edit=1"]')
+        _replace(driver, driver.find_element(By.NAME, "display_name"), "Cancelled change")
+        _click(driver, By.LINK_TEXT, "Cancel")
+        org.refresh_from_db()
+        assert org.display_name == "Factory round1-browser"
+        _click(driver, By.CSS_SELECTOR, 'a[href*="edit=1"]')
+        _replace(driver, driver.find_element(By.NAME, "display_name"), "Pending public name")
+        _click(driver, By.CSS_SELECTOR, 'form button[type="submit"]')
+        _wait(driver).until(EC.presence_of_element_located((By.LINK_TEXT, "Edit profile")))
+        org.refresh_from_db()
+        assert org.display_name == "Factory round1-browser"
+        assert "Pending public name" in driver.page_source
+        _shot(driver, "round1-profile-pending-review.png")
+        # A separate organization keeps the upload draft independent of that submitted review.
+        upload_owner, upload_org, _, _ = manufacturer("round1-upload-browser")
+        _login(driver, live_server, client, upload_owner)
+        driver.get(f"{live_server.url}/manufacturer/public-profile/?org={upload_org.pk}&lang=en")
+        for purpose in ("profile", "cover"):
+            driver.find_element(By.NAME, f"{purpose}_image_upload").send_keys(str(file))
+        assert "round1-public.png" in driver.find_element(By.ID, "profile-upload-name").text
+        _click(driver, By.CSS_SELECTOR, 'button[value="save_revision"]')
+        _wait(driver).until(lambda d: PublicProfileRevision.objects.filter(organization=upload_org).exists())
+        revision = PublicProfileRevision.objects.get(organization=upload_org)
+        for purpose in ("profile", "cover"):
+            asset = MediaAsset.objects.get(provider_asset_id=f"browser-{purpose}")
+            assert revision.proposed_data["public_state"][f"{purpose}_image_id"] == asset.pk
+            assert Select(driver.find_element(By.NAME, f"{purpose}_image_id")).first_selected_option.get_attribute("value") == str(asset.pk)
+        assert revision.status == PublicProfileRevision.Status.DRAFT
+        assert upload_org.public_state.profile_image_id is None
+        assert post.call_count == 2
+        assert "imagedelivery.net" not in driver.page_source
+        assert "synthetic-browser-token" not in driver.page_source
+        _shot(driver, "round1-public-media-desktop.png")
+        driver.get(f"{live_server.url}/manufacturer/finance/?org={upload_org.pk}&lang=en")
+        assert not driver.find_elements(By.NAME, "amount")
+        iban = "EG380019000500000000263180002"
+        for name, value in {"account_holder": "Synthetic Browser Holder", "bank_name": "Synthetic Bank", "iban": iban, "country": "EG", "payout_currency": "EGP"}.items():
+            _replace(driver, driver.find_element(By.NAME, name), value)
+        _click(driver, By.CSS_SELECTOR, 'button[value="save_payout"]')
+        _wait(driver).until(lambda d: PayoutProfile.objects.filter(organization=upload_org).exists())
+        assert iban not in driver.page_source
+        assert driver.find_element(By.NAME, "iban").get_attribute("value") == ""
+        payout = PayoutProfile.objects.get(organization=upload_org)
+        cipher = payout.iban_encrypted
+        _click(driver, By.CSS_SELECTOR, 'button[value="save_payout"]')
+        _wait(driver).until(EC.presence_of_element_located((By.NAME, "iban")))
+        payout.refresh_from_db()
+        assert payout.iban_encrypted == cipher
+        _shot(driver, "round1-bank-saved-mask.png")
+        payout.status = PayoutProfile.Status.VERIFIED; payout.save()
+        driver.refresh()
+        assert not driver.find_elements(By.NAME, "iban")
+        _shot(driver, "round1-bank-verified.png")
+        for role in (Membership.Role.MANAGER, Membership.Role.ACCOUNTANT):
+            Membership.objects.filter(organization=upload_org, user=upload_owner).update(role=role)
+            driver.refresh()
+            assert not driver.find_elements(By.NAME, "amount")
+            assert not driver.find_elements(By.NAME, "iban")
+        Membership.objects.filter(organization=upload_org, user=upload_owner).update(role=Membership.Role.OWNER)
+        driver.set_window_size(390, 844)
+        for path, name in (("public-profile", "media"), ("finance", "finance"), ("profile", "profile"), ("notifications", "notifications")):
+            driver.get(f"{live_server.url}/manufacturer/{path}/?org={upload_org.pk}&lang=ar")
+            assert driver.find_element(By.TAG_NAME, "html").get_attribute("dir") == "rtl"
+            assert _no_overflow(driver)
+            assert len(driver.find_elements(By.CSS_SELECTOR, '.mfr-nav a[aria-current="page"]')) == 1
+            _shot(driver, f"round1-{name}-mobile-ar.png")
+    finally:
+        driver.quit()

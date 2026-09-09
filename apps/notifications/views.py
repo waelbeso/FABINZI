@@ -71,3 +71,20 @@ def designer_notification_center(request):
         extra_context=context,
         organization=organization,
     )
+
+
+@login_required
+def manufacturer_notification_center(request):
+    from apps.organizations.manufacturer_context import require_active_manufacturer_context
+
+    context = require_active_manufacturer_context(request)
+    response = _notification_center(
+        request,
+        template_name="manufacturer/notifications.html",
+        redirect_name="manufacturer-notifications",
+        extra_context=context,
+        organization=context["manufacturer_organization"],
+    )
+    response["Cache-Control"] = "private, no-store"
+    response["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    return response

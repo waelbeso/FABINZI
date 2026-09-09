@@ -118,7 +118,7 @@ def _clean_public_list(value, *, field_name, limit=24):
     return result
 
 
-def _clean_public_media_id(value, *, field_name):
+def _clean_public_media_id(value, *, field_name, organization):
     if value in (None, "", 0, "0"):
         return None
     try:
@@ -128,6 +128,11 @@ def _clean_public_media_id(value, *, field_name):
     asset = MediaAsset.objects.filter(pk=asset_id).first()
     if not asset or asset.access != MediaAsset.Access.PUBLIC or not asset.mime_type.startswith("image/"):
         raise ValidationError({field_name: "Choose an explicitly PUBLIC image MediaAsset."})
+    if organization.kind == Organization.Kind.MANUFACTURER:
+        from apps.media.manufacturer_public_services import manufacturer_public_image_eligible
+
+        if not manufacturer_public_image_eligible(asset, organization):
+            raise ValidationError({field_name: "Choose a public image belonging to this Manufacturer. / اختر صورة عامة تابعة لهذا المصنّع."})
     return asset_id
 
 
@@ -147,10 +152,10 @@ def _clean_public_state(data, *, organization):
             data.get("specializations"), field_name="specializations"
         ),
         "profile_image_id": _clean_public_media_id(
-            data.get("profile_image_id"), field_name="profile_image_id"
+            data.get("profile_image_id"), field_name="profile_image_id", organization=organization
         ),
         "cover_image_id": _clean_public_media_id(
-            data.get("cover_image_id"), field_name="cover_image_id"
+            data.get("cover_image_id"), field_name="cover_image_id", organization=organization
         ),
         "public_google_maps_url": _validate_optional_url(
             data.get("public_google_maps_url"), field_name="public_google_maps_url"
