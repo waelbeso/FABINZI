@@ -221,3 +221,36 @@ def test_sidebar_one_active_primary(client, path, section):
     assert response.status_code == 200
     assert response.context["manufacturer_active_section"] == section
     assert response.content.count(b'aria-current="page"') == 1
+
+
+
+def test_legacy_bank_hint_is_not_rendered_as_secure_iban(client):
+    actor, org, _, _ = manufacturer()
+    client.force_login(actor)
+    raw = "EG380019000500000000263180002"
+    PayoutProfile.objects.create(organization=org, method="bank", account_holder="Legacy", destination_hint=raw, status="verified")
+    response = client.get(f"/manufacturer/finance/?org={org.pk}")
+    assert raw.encode() not in response.content
+
+
+@pytest.mark.parametrize("balance,verified,mixed,expected", [(0, True, False, "No withdrawable balance"), (10, True, False, "below the minimum"), (500, False, False, "verified payout profile is required"), (500, True, True, "finance policy review"), (500, True, False, None)])
+def test_settlement_prerequisites_use_authoritative_ledger(client, balance, verified, mixed, expected):
+    from apps.finance.models import FinanceAccount, LedgerEntry
+    from django.utils import timezone
+    actor, org, _, _ = manufacturer()
+    client.force_login(actor)
+    account = FinanceAccount.objects.create(account_type="organization", organization=org, currency="EGP")
+    if balance:
+        LedgerEntry.objects.create(account=account, entry_type=LedgerEntry.EntryType.MANUFACTURER_EARNING, amount=balance, currency="EGP", available_at=timezone.now())
+    if mixed:
+        LedgerEntry.objects.create(account=account, entry_type=LedgerEntry.EntryType.MANUFACTURER_PAYABLE, amount=1, currency="EGP", available_at=timezone.now())
+    if verified:
+        PayoutProfile.objects.create(organization=org, method="manual", account_holder="Synthetic", destination_hint="Reference", status="verified")
+    response = client.get(f"/manufacturer/finance/?org={org.pk}")
+    assert response.status_code == 200
+    if expected:
+        assert expected.encode() in response.content
+        assert b'name="amount"' not in response.content
+    else:
+        assert b'name="amount"' in response.content
+        assert b'min="100.00"' in response.content

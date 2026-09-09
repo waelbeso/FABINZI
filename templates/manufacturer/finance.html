@@ -26,7 +26,7 @@
 <div>
 <dt>{% if request.LANGUAGE_CODE == 'ar' %}وجهة التحويل المقنّعة{% else %}Masked payout destination{% endif %}</dt>
 <dd>
-<bdi dir="ltr">{{ payout_mask|default:payout_profile.destination_hint }}</bdi>
+<bdi dir="ltr">{% if payout_profile.method == 'bank' %}{{ payout_mask|default:'—' }}{% else %}{{ payout_profile.destination_hint }}{% endif %}</bdi>
 </dd>
 </div>
 <div>
@@ -73,7 +73,7 @@
 </form>
 {% else %}
 <p>{% if request.LANGUAGE_CODE == 'ar' %}يمكن للمالك فقط تعديل بيانات التحويل.{% else %}Only an Owner can edit payout details.{% endif %}</p>
-{% if payout_profile %}<p>{{ payout_profile.account_holder }} · <bdi dir="ltr">{{ payout_mask|default:payout_profile.destination_hint }}</bdi>
+{% if payout_profile %}<p>{{ payout_profile.account_holder }} · <bdi dir="ltr">{% if payout_profile.method == 'bank' %}{{ payout_mask|default:'—' }}{% else %}{{ payout_profile.destination_hint }}{% endif %}</bdi>
 </p>{% endif %}
 {% endif %}
 {% if payout_profile %}<p>{% if request.LANGUAGE_CODE == 'ar' %}الحالة: {{ payout_profile.status|mfr_ar:payout_profile.get_status_display }}{% else %}Status: {{ payout_profile.get_status_display }}{% endif %}</p>{% endif %}
