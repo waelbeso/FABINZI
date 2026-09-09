@@ -4,12 +4,15 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.shortcuts import redirect, render
+from django.db.models import Q
+
+from apps.media.manufacturer_public_services import create_manufacturer_public_image, manufacturer_public_image_eligible, validate_public_image
 
 from apps.media.models import MediaAsset
 from apps.organizations.designer_context import DESIGNER_MANAGE_ROLES, require_active_designer_context
 from apps.organizations.manufacturer_context import MANUFACTURER_MANAGE_ROLES, require_active_manufacturer_context
-from apps.organizations.models import PublicProfileRevision
-from apps.organizations.public_profile_services import current_public_profile_data, save_public_profile_revision, submit_public_profile_revision
+from apps.organizations.models import Organization, PublicProfileRevision
+from apps.organizations.public_profile_services import normalize_public_profile_data, current_public_profile_data, save_public_profile_revision, submit_public_profile_revision
 from .services import approved_manufacturer_products, ensure_public_state, hide_public_profile, request_public_profile_visibility, verified_canonical_capabilities
 
 
@@ -23,6 +26,9 @@ def _list(value):
 
 def _public_images(organization):
     user_ids = organization.memberships.filter(is_active=True).values_list("user_id", flat=True)
+    if organization.kind == Organization.Kind.MANUFACTURER:
+        assets = MediaAsset.objects.filter(access=MediaAsset.Access.PUBLIC, mime_type__startswith="image/").filter(Q(metadata__organization_id=organization.pk) | Q(metadata__organization_id=str(organization.pk)) | Q(uploaded_by_id__in=user_ids)).order_by("-created_at")
+        return [asset for asset in assets if manufacturer_public_image_eligible(asset, organization)]
     return MediaAsset.objects.filter(access=MediaAsset.Access.PUBLIC, mime_type__startswith="image/", uploaded_by_id__in=user_ids).order_by("-created_at")[:80]
 
 
@@ -72,6 +78,24 @@ def _profile_action(request, organization, *, manufacturer=False):
         return "Public visibility request submitted for FABINZI approval."
     _revision, payload = _editable_payload(organization)
     payload = _apply_post(payload, request.POST, manufacturer=manufacturer)
+    if manufacturer:
+        uploads = {purpose: request.FILES.get(f"{purpose}_image_upload") for purpose in ("profile", "cover")}
+        if any(uploads.values()):
+            if organization.public_profile_revisions.filter(status__in=[PublicProfileRevision.Status.SUBMITTED, PublicProfileRevision.Status.UNDER_REVIEW]).exists():
+                raise ValidationError("A revision is already under review. / توجد مراجعة قيد المراجعة بالفعل.")
+            for purpose, upload in uploads.items():
+                if upload:
+                    payload["public_state"][f"{purpose}_image_id"] = None
+            payload = normalize_public_profile_data(organization=organization, proposed_data=payload)
+            # Validate both files before the first external side effect.
+            for upload in uploads.values():
+                if upload:
+                    validate_public_image(upload)
+                    upload.seek(0)
+            for purpose, upload in uploads.items():
+                if upload:
+                    asset = create_manufacturer_public_image(upload=upload, organization=organization, actor=request.user, purpose=purpose, request=request)
+                    payload["public_state"][f"{purpose}_image_id"] = asset.pk
     revision = save_public_profile_revision(organization=organization, actor=request.user, proposed_data=payload, request=request)
     if action == "submit_revision":
         submit_public_profile_revision(revision=revision, actor=request.user, request=request)

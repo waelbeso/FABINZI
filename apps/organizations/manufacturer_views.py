@@ -7,10 +7,12 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.debug import sensitive_post_parameters
 
 from apps.finance.models import FinanceAccount, PayoutProfile, SettlementRequest
 from apps.finance.services import (
     account_balance,
+    _settlement_policy_resolution,
     cancel_settlement,
     request_settlement,
     update_payout_profile,
@@ -328,6 +330,11 @@ def manufacturer_profile(request):
     context = _require_active(request)
     organization = context["manufacturer_organization"]
     profile = organization.manufacturer_profile
+    edit_mode = context["manufacturer_can_manage"] and (request.GET.get("edit") == "1" or request.method == "POST")
+    organization_fields = ("display_name", "email", "phone", "website", "address_line1", "address_line2", "city", "region", "country")
+    profile_fields = ("google_maps_url", "primary_contact_person", "contact_job_title", "whatsapp")
+    form_values = {field: getattr(organization, field) for field in organization_fields}
+    form_values.update({field: getattr(profile, field) for field in profile_fields})
     if request.method == "POST":
         if not context["manufacturer_can_manage"]:
             raise PermissionDenied
@@ -362,10 +369,21 @@ def manufacturer_profile(request):
         else:
             messages.success(
                 request,
-                _localized(request, "Manufacturer profile updated.", "تم تحديث ملف المصنع."),
+                _localized(request, "Profile saved. Public changes, if any, require FABINZI review.", "تم حفظ الملف. تخضع التغييرات العامة، إن وجدت، لمراجعة FABINZI."),
             )
             return _redirect_with_org("manufacturer-profile", organization)
-    context.update({"profile": profile})
+    if request.method == "POST":
+        form_values = {field: request.POST.get(field, "") for field in (*organization_fields, *profile_fields)}
+        organization.refresh_from_db()
+        profile.refresh_from_db()
+    pending = organization.public_profile_revisions.filter(status__in=["submitted", "under_review", "changes_required"]).first()
+    pending_fields = []
+    if pending:
+        labels = {"display_name": ("Display name", "اسم العرض"), "website": ("Website", "الموقع"), "city": ("City", "المدينة"), "region": ("Region", "المنطقة"), "country": ("Country", "الدولة")}
+        for field, value in (pending.proposed_data.get("organization") or {}).items():
+            if field in labels and value != getattr(organization, field):
+                pending_fields.append({"label": _localized(request, *labels[field]), "value": value})
+    context.update({"profile": profile, "profile_edit_mode": edit_mode, "profile_form": form_values, "pending_public_revision": pending, "pending_public_fields": pending_fields})
     return _render(request, "manufacturer/profile.html", context)
 
 
@@ -829,7 +847,35 @@ def manufacturer_shipment(request, pk):
     return _render(request, "manufacturer/shipment.html", context)
 
 
+def _settlement_amount(value):
+    try:
+        amount = Decimal(value)
+        if not amount.is_finite() or amount <= 0:
+            raise ValueError
+        return amount
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValidationError("Enter a valid positive amount. / أدخل مبلغاً موجباً صالحاً.") from None
+
+
+def _settlement_availability(request, row, *, can_mutate, profile):
+    if not can_mutate:
+        return _localized(request, "Only an Owner can request a settlement.", "يمكن للمالك فقط طلب تسوية.")
+    if not profile or profile.status != PayoutProfile.Status.VERIFIED:
+        return _localized(request, "A verified payout profile is required.", "يلزم ملف تحويل موثّق.")
+    if row["balance"]["withdrawable"] <= 0:
+        return _localized(request, "No withdrawable balance yet.", "لا يوجد رصيد قابل للسحب حاليًا.")
+    try:
+        resolution = _settlement_policy_resolution(account=row["account"], currency=row["account"].currency)
+    except ValidationError:
+        return _localized(request, "Settlement requires finance policy review.", "تتطلب التسوية مراجعة السياسة المالية.")
+    row["minimum_payout"] = resolution["minimum_payout"]
+    if row["balance"]["withdrawable"] < row["minimum_payout"]:
+        return _localized(request, "Withdrawable balance is below the minimum settlement.", "الرصيد القابل للسحب أقل من الحد الأدنى للتسوية.")
+    return ""
+
+
 @login_required
+@sensitive_post_parameters("iban")
 def manufacturer_finance(request):
     context = _require_active(request, roles=MANUFACTURER_FINANCE_ROLES)
     organization = context["manufacturer_organization"]
@@ -843,6 +889,10 @@ def manufacturer_finance(request):
                     method=request.POST.get("method", PayoutProfile.Method.BANK),
                     account_holder=request.POST.get("account_holder", ""),
                     destination_hint=request.POST.get("destination_hint", ""),
+                    bank_name=request.POST.get("bank_name", ""),
+                    iban=request.POST.get("iban", ""),
+                    country=request.POST.get("country", ""),
+                    currency=request.POST.get("payout_currency", ""),
                     submit=action == "submit_payout",
                     request=request,
                 )
@@ -854,7 +904,7 @@ def manufacturer_finance(request):
                 request_settlement(
                     organization=organization,
                     actor=request.user,
-                    amount=request.POST.get("amount", "0"),
+                    amount=_settlement_amount(request.POST.get("amount", "0")),
                     currency=request.POST.get("currency", "EGP"),
                     request=request,
                 )
@@ -891,6 +941,12 @@ def manufacturer_finance(request):
             }
         )
     payout_profile = PayoutProfile.objects.filter(organization=organization).first()
+    can_mutate = context["manufacturer_membership"].role == Membership.Role.OWNER
+    for row in rows:
+        row["settlement_blocker"] = _settlement_availability(request, row, can_mutate=can_mutate, profile=payout_profile)
+    payout_method = request.GET.get("method", payout_profile.method if payout_profile else PayoutProfile.Method.BANK)
+    if payout_method not in PayoutProfile.Method.values:
+        payout_method = PayoutProfile.Method.BANK
     settlements = SettlementRequest.objects.filter(organization=organization).order_by(
         "-requested_at"
     )[:50]
@@ -900,6 +956,11 @@ def manufacturer_finance(request):
             "payout_profile": payout_profile,
             "settlements": settlements,
             "payout_methods": PayoutProfile.Method.choices,
+            "payout_method": payout_method,
+            "manufacturer_can_mutate_payout": can_mutate,
+            "payout_has_stored_iban": bool(payout_profile and payout_profile.method == PayoutProfile.Method.BANK and payout_profile.iban_encrypted and payout_profile.iban_last4),
+            "payout_mask": f"IBAN •••• {payout_profile.iban_last4}" if payout_profile and payout_profile.method == PayoutProfile.Method.BANK and payout_profile.iban_encrypted and payout_profile.iban_last4 else "",
+
         }
     )
     return _render(request, "manufacturer/finance.html", context)

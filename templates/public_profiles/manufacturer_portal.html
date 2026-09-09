@@ -1,4 +1,5 @@
 {% extends "manufacturer/base.html" %}
+{% load static %}
 
 {% block manufacturer_content %}
 <header class="mfr-page-head">
@@ -38,7 +39,7 @@
     {% endif %}
   </p>
 
-  <form method="post" class="form-grid">
+  <form method="post" enctype="multipart/form-data" class="form-grid">
     {% csrf_token %}
     <input type="hidden" name="organization" value="{{ manufacturer_organization.id }}">
 
@@ -139,6 +140,17 @@
       </select>
     </label>
 
+    <div class="mfr-upload">
+      <label class="button button--ghost" for="profile-image-upload">{% if request.LANGUAGE_CODE == 'ar' %}رفع صورة الملف جديدة{% else %}Upload new profile image{% endif %}</label>
+      <input id="profile-image-upload" type="file" name="profile_image_upload" accept="image/png,image/jpeg,image/webp" aria-describedby="profile-upload-name upload-help" data-public-image-upload>
+      <span id="profile-upload-name" aria-live="polite" data-upload-name>{% if request.LANGUAGE_CODE == 'ar' %}لم يتم اختيار ملف{% else %}No file chosen{% endif %}</span>
+    </div>
+    <div class="mfr-upload">
+      <label class="button button--ghost" for="cover-image-upload">{% if request.LANGUAGE_CODE == 'ar' %}رفع صورة الغلاف جديدة{% else %}Upload new cover image{% endif %}</label>
+      <input id="cover-image-upload" type="file" name="cover_image_upload" accept="image/png,image/jpeg,image/webp" aria-describedby="cover-upload-name upload-help" data-public-image-upload>
+      <span id="cover-upload-name" aria-live="polite" data-upload-name>{% if request.LANGUAGE_CODE == 'ar' %}لم يتم اختيار ملف{% else %}No file chosen{% endif %}</span>
+    </div>
+    <p id="upload-help" class="muted span-2">{% if request.LANGUAGE_CODE == 'ar' %}PNG أو JPEG أو WebP، حتى 10 ميبيبايت. الصورة الجديدة تحل محل الاختيار عند الحفظ وتظل خاضعة للمراجعة.{% else %}PNG, JPEG or WebP, up to 10 MiB. A new upload replaces the selection on save and remains subject to review.{% endif %}</p>
     <div class="action-row span-2">
       <button class="button button--ghost" name="action" value="save_revision">
         {% if request.LANGUAGE_CODE == 'ar' %}حفظ المسودة{% else %}Save draft{% endif %}
@@ -188,4 +200,5 @@
     </button>
   </form>
 </section>
+<script src="{% static 'js/manufacturer-public-media.js' %}" defer></script>
 {% endblock %}
