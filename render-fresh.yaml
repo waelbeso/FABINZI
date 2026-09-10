@@ -35,7 +35,7 @@ envVarGroups:
 services:
   - type: keyvalue
     name: fabinzi-prod-redis
-    plan: free
+    plan: 256mb
     region: frankfurt
     ipAllowList: []
     maxmemoryPolicy: noeviction
