@@ -208,6 +208,89 @@ class SubscriptionBillingConfirmation(models.Model):
         ordering = ("-confirmed_at",)
 
 
+class ManufacturerSubscriptionUpgradeRequest(models.Model):
+    """Customer intent for a Manufacturer Pro upgrade; never billing evidence."""
+
+    class Status(models.TextChoices):
+        REQUESTED = "requested", "Requested"
+        COMPLETED = "completed", "Completed"
+        CANCELLED = "cancelled", "Cancelled"
+
+    organization = models.ForeignKey(
+        "organizations.Organization",
+        on_delete=models.PROTECT,
+        related_name="manufacturer_subscription_upgrade_requests",
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="requested_manufacturer_subscription_upgrades",
+    )
+    target_plan_policy = models.ForeignKey(
+        SubscriptionPlanPolicy,
+        on_delete=models.PROTECT,
+        related_name="manufacturer_upgrade_requests",
+    )
+    plan_code = models.CharField(max_length=64, editable=False)
+    plan_version = models.PositiveIntegerField(editable=False)
+    policy_snapshot = models.JSONField(default=dict, editable=False)
+    price_snapshot = models.JSONField(default=dict, editable=False)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.REQUESTED, db_index=True)
+    requested_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="resolved_manufacturer_subscription_upgrades",
+    )
+    billing_confirmation = models.OneToOneField(
+        SubscriptionBillingConfirmation,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="manufacturer_upgrade_request",
+        editable=False,
+    )
+
+    class Meta:
+        ordering = ("-requested_at", "-id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization"],
+                condition=Q(status="requested"),
+                name="unique_requested_mfr_upgrade",
+            )
+        ]
+        indexes = [models.Index(fields=["status", "requested_at"], name="mfr_upgrade_status_idx")]
+
+    def clean(self):
+        super().clean()
+        from apps.organizations.models import Organization
+
+        if self.organization_id and self.organization.kind != Organization.Kind.MANUFACTURER:
+            raise ValidationError({"organization": "Upgrade requests require a Manufacturer Organization."})
+        if self.target_plan_policy_id:
+            if self.target_plan_policy.audience != SubscriptionPlanPolicy.Audience.MANUFACTURER:
+                raise ValidationError({"target_plan_policy": "Upgrade target must be a Manufacturer plan."})
+            if self.plan_code and self.plan_code != self.target_plan_policy.code:
+                raise ValidationError({"plan_code": "Stored upgrade plan code must match the target policy."})
+            if self.plan_version and self.plan_version != self.target_plan_policy.version:
+                raise ValidationError({"plan_version": "Stored upgrade plan version must match the target policy."})
+        if self.billing_confirmation_id and self.billing_confirmation.organization_id != self.organization_id:
+            raise ValidationError({"billing_confirmation": "Billing evidence must belong to the same Organization."})
+        if self.status == self.Status.REQUESTED and (
+            self.resolved_at or self.resolved_by_id or self.billing_confirmation_id
+        ):
+            raise ValidationError("An unresolved upgrade request cannot contain resolution evidence.")
+        if self.status == self.Status.COMPLETED and not self.billing_confirmation_id:
+            raise ValidationError("A completed upgrade request requires confirmed billing evidence.")
+
+    def __str__(self):
+        return f"{self.organization} · {self.plan_code} v{self.plan_version} · {self.status}"
+
+
 class ManufacturerOfferUsage(models.Model):
     subscription = models.ForeignKey(OrganizationSubscription, on_delete=models.PROTECT, related_name="manufacturer_offer_usage")
     organization = models.ForeignKey("organizations.Organization", on_delete=models.PROTECT, related_name="manufacturer_offer_usage")
