@@ -1,3 +1,4 @@
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -65,7 +66,7 @@ def test_team_missing_malformed_and_ambiguous_identity_stay_inline(client, v2_3_
 
 
 @pytest.mark.django_db
-def test_team_direct_add_accepts_plain_fabinzi_user_without_business_profile(client, v2_3_reference_rows):
+def test_team_direct_add_accepts_plain_fabinzi_user_and_preserves_seat_limit(client, v2_3_reference_rows):
     owner, org, _profile, _application = manufacturer("round2-team-plain")
     teammate = User.objects.create_user(username="round2-plain-user", email="round2-plain@example.test", password="password123")
     assert not Membership.objects.filter(user=teammate).exists()
@@ -82,9 +83,17 @@ def test_team_direct_add_accepts_plain_fabinzi_user_without_business_profile(cli
     assert membership.is_active is True
     assert not Organization.objects.filter(created_by=teammate).exists()
 
+    second = User.objects.create_user(username="round2-second-seat", email="round2-second-seat@example.test", password="password123")
+    exhausted = client.post(
+        _url("manufacturer-team", org),
+        {"action": "upsert", "email": second.email, "role": Membership.Role.QC},
+    )
+    assert exhausted.status_code == 200
+    assert not Membership.objects.filter(organization=org, user=second).exists()
+
 
 @pytest.mark.django_db
-def test_team_manager_cannot_assign_owner_role_and_seat_rules_remain_server_side(client, v2_3_reference_rows):
+def test_team_manager_cannot_assign_owner_role_and_role_rules_remain_server_side(client, v2_3_reference_rows):
     owner, org, _profile, _application = manufacturer("round2-team-rbac")
     subscription = entitlement_summary(org)["subscription"]
     pro = get_effective_plan(MANUFACTURER_PRO)
@@ -143,7 +152,7 @@ def test_current_pro_or_historical_pro_state_cannot_create_upgrade_request(clien
     subscription.current_plan = pro
     subscription.status = OrganizationSubscription.Status.TRIALING
     subscription.trial_started_at = timezone.now()
-    subscription.trial_ends_at = timezone.now() + timezone.timedelta(days=30)
+    subscription.trial_ends_at = timezone.now() + timedelta(days=30)
     subscription.trial_consumed = True
     subscription.policy_snapshot = plan_snapshot(pro)
     subscription.price_snapshot = price_snapshot(pro)
@@ -278,7 +287,7 @@ def test_public_directory_and_detail_use_approved_data_with_logo_fallback_and_pr
     owner, org, _profile, _application = manufacturer("round2-public-directory")
     org.region = "Cairo"
     org.save(update_fields=["region", "updated_at"])
-    listing = ManufacturerListing.objects.create(
+    ManufacturerListing.objects.create(
         organization=org,
         headline_en="Approved production headline",
         overview_en="Approved production overview",
