@@ -1,12 +1,14 @@
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
 from django.http import HttpResponseRedirect
 from django.urls import path, reverse
-from django.utils import timezone
 
 from apps.audit.services import record_audit_event
 from apps.integrations.admin_site import fabinzi_admin_site
+from .manufacturer_upgrade_services import (
+    activate_paid_pro_with_upgrade_resolution,
+    cancel_manufacturer_upgrade_request,
+)
 from .models import (
     ManufacturerOfferUsage,
     ManufacturerSubscriptionUpgradeRequest,
@@ -22,7 +24,6 @@ from .models import (
     TeamInvitationConfiguration,
 )
 from .services import (
-    activate_paid_pro,
     confirm_subscription_billing,
     downgrade_to_starter,
     entitlement_summary,
@@ -37,43 +38,6 @@ def _operator_allowed(user):
     except PermissionDenied:
         return False
     return True
-
-
-@transaction.atomic
-def _complete_matching_upgrade_request(*, organization, confirmation, actor, request=None):
-    upgrade = (
-        ManufacturerSubscriptionUpgradeRequest.objects.select_for_update()
-        .filter(
-            organization=organization,
-            status=ManufacturerSubscriptionUpgradeRequest.Status.REQUESTED,
-            target_plan_policy_id=confirmation.plan_policy_id,
-            plan_code=confirmation.plan_code,
-            plan_version=confirmation.plan_version,
-        )
-        .first()
-    )
-    if not upgrade:
-        return None
-    upgrade.status = ManufacturerSubscriptionUpgradeRequest.Status.COMPLETED
-    upgrade.resolved_at = timezone.now()
-    upgrade.resolved_by = actor
-    upgrade.billing_confirmation = confirmation
-    upgrade.full_clean()
-    upgrade.save(update_fields=["status", "resolved_at", "resolved_by", "billing_confirmation"])
-    record_audit_event(
-        actor=actor,
-        action="subscription.manufacturer_upgrade_completed",
-        instance=upgrade,
-        metadata={
-            "organization_id": organization.pk,
-            "request_id": upgrade.pk,
-            "billing_confirmation_id": confirmation.pk,
-            "plan_code": confirmation.plan_code,
-            "plan_version": confirmation.plan_version,
-        },
-        request=request,
-    )
-    return upgrade
 
 
 @admin.register(SubscriptionPlanPolicy, site=fabinzi_admin_site)
@@ -163,30 +127,17 @@ class ManufacturerSubscriptionUpgradeRequestAdmin(admin.ModelAdmin):
     def cancel_requested_upgrades(self, request, queryset):
         require_subscription_operator(request.user)
         cancelled = 0
-        with transaction.atomic():
-            rows = ManufacturerSubscriptionUpgradeRequest.objects.select_for_update().filter(
-                pk__in=queryset.values_list("pk", flat=True),
-                status=ManufacturerSubscriptionUpgradeRequest.Status.REQUESTED,
-            )
-            for upgrade in rows:
-                upgrade.status = ManufacturerSubscriptionUpgradeRequest.Status.CANCELLED
-                upgrade.resolved_at = timezone.now()
-                upgrade.resolved_by = request.user
-                upgrade.full_clean()
-                upgrade.save(update_fields=["status", "resolved_at", "resolved_by"])
-                record_audit_event(
+        for upgrade in queryset.order_by("pk"):
+            try:
+                _row, changed = cancel_manufacturer_upgrade_request(
+                    upgrade_request=upgrade,
                     actor=request.user,
-                    action="subscription.manufacturer_upgrade_cancelled",
-                    instance=upgrade,
-                    metadata={
-                        "organization_id": upgrade.organization_id,
-                        "request_id": upgrade.pk,
-                        "reason": "operator_cancelled",
-                        "entitlement_changed": False,
-                    },
                     request=request,
                 )
-                cancelled += 1
+            except ValidationError as exc:
+                self.message_user(request, str(exc), messages.ERROR)
+            else:
+                cancelled += int(changed)
         self.message_user(request, f"Cancelled {cancelled} pending Manufacturer upgrade request(s).", messages.SUCCESS)
 
 
@@ -216,8 +167,7 @@ class OrganizationSubscriptionAdmin(admin.ModelAdmin):
             obj = self._obj(request, object_id)
             if request.method != "POST": raise ValidationError("Lifecycle actions require POST.")
             confirmation = SubscriptionBillingConfirmation.objects.get(pk=request.POST.get("billing_confirmation_id"), organization=obj.organization)
-            activate_paid_pro(organization=obj.organization, actor=request.user, billing_confirmation=confirmation, request=request)
-            _complete_matching_upgrade_request(organization=obj.organization, confirmation=confirmation, actor=request.user, request=request)
+            activate_paid_pro_with_upgrade_resolution(organization=obj.organization, actor=request.user, billing_confirmation=confirmation, request=request)
         except (ValidationError, PermissionDenied, SubscriptionBillingConfirmation.DoesNotExist) as exc: self.message_user(request, str(exc), messages.ERROR)
         else: self.message_user(request, "Confirmed Pro subscription activated.", messages.SUCCESS)
         return HttpResponseRedirect(reverse("fabinzi_admin:subscriptions_organizationsubscription_change", args=[object_id]))
