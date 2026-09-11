@@ -227,6 +227,19 @@ def test_manufacturer_round2_real_chrome(client, live_server, v2_3_reference_row
         assert "Manufacturing Offers used" in driver.page_source
         assert "Current Starter vs Pro" in driver.page_source
         request_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//button[normalize-space(.)="Request Pro upgrade"]')))
+        driver.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});",
+            request_button,
+        )
+        wait.until(
+            lambda d: d.execute_script(
+                "const r=arguments[0].getBoundingClientRect();"
+                "const x=r.left+r.width/2; const y=r.top+r.height/2;"
+                "const top=document.elementFromPoint(x,y);"
+                "return top===arguments[0] || arguments[0].contains(top);",
+                request_button,
+            )
+        )
         request_button.click()
         wait.until(EC.presence_of_element_located((By.ID, "upgrade-request-status")))
         upgrade = ManufacturerSubscriptionUpgradeRequest.objects.get(
