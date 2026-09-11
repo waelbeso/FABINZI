@@ -309,7 +309,7 @@ def test_manufacturer_round2_real_chrome(client, live_server, v2_3_reference_row
         driver.get(f"{live_server.url}/manufacturer/capabilities/?org={org.pk}&lang=en")
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "FABINZI canonical verification"))
         assert "Garment Manufacturing" in driver.page_source
-        assert f"Capability ID #{capability.pk}" in driver.find_element(By.TAG_NAME, "body").text
+        assert f"Capability ID: #{capability.pk}" in driver.find_element(By.TAG_NAME, "body").text
         _shot(driver, EXPECTED[5])
 
         # M2-01/M2-06: directory has approved media, no-media fallback and failed-media fallback.
