@@ -18,7 +18,7 @@ from apps.subscriptions.models import ManufacturerSubscriptionUpgradeRequest, Or
 from apps.subscriptions.services import MANUFACTURER_PRO, confirm_subscription_billing, entitlement_summary, get_effective_plan
 
 from .test_manufacturer_portal_acceptance import manufacturer
-from .test_manufacturer_portal_browser import _chrome, _login, _no_overflow, _replace, _wait
+from .test_manufacturer_portal_browser import _chrome, _click_element, _login, _no_overflow, _replace, _wait
 
 User = get_user_model()
 ARTIFACT_DIR = Path("artifacts/manufacturer-browser-qa/round2")
@@ -291,7 +291,7 @@ def test_manufacturer_round2_real_chrome(client, live_server, v2_3_reference_row
         _replace(driver, driver.find_element(By.NAME, "city"), "Pending City")
         _replace(driver, driver.find_element(By.NAME, "public_categories"), "Pending category, Apparel")
         _replace(driver, driver.find_element(By.NAME, "public_certifications"), "Pending certificate, ISO 9001")
-        driver.find_element(By.CSS_SELECTOR, 'button[value="submit_revision"]').click()
+        _click_element(driver, driver.find_element(By.CSS_SELECTOR, 'button[value="submit_revision"]'))
         wait.until(lambda _d: PublicProfileRevision.objects.filter(organization=org, status=PublicProfileRevision.Status.SUBMITTED).exists())
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Editing is locked during review"))
         assert "Round 2 Pending Factory Name" in driver.page_source
@@ -353,7 +353,7 @@ def test_manufacturer_round2_real_chrome(client, live_server, v2_3_reference_row
         assert "Garment Manufacturing · Verified" in driver.find_element(By.TAG_NAME, "body").text
         _shot(driver, EXPECTED[10])
         revoke_form = driver.find_element(By.XPATH, f'//form[.//input[@name="verification_id" and @value="{verification.pk}"]]')
-        revoke_form.find_element(By.CSS_SELECTOR, 'button[value="revoke_capability"]').click()
+        _click_element(driver, revoke_form.find_element(By.CSS_SELECTOR, 'button[value="revoke_capability"]'))
         wait.until(lambda _d: ManufacturerCapabilityVerification.objects.filter(pk=verification.pk, status=ManufacturerCapabilityVerification.Status.REVOKED).exists())
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Garment Manufacturing · Revoked"))
         _shot(driver, EXPECTED[11])
