@@ -46,8 +46,12 @@ EXPECTED = [
     "16a-public-profile-pending-mobile-ar-rtl-dark.png",
     "16b-public-profile-lock-mobile-ar-rtl-dark.png",
     "17a-subscription-entitlement-mobile-ar-rtl-dark.png",
+    "17a2-subscription-usage-mobile-ar-rtl-dark.png",
+    "17a3-subscription-renewal-mobile-ar-rtl-dark.png",
     "17b-subscription-comparison-request-mobile-ar-rtl-dark.png",
+    "17b2-subscription-request-status-mobile-ar-rtl-dark.png",
     "17c-subscription-history-controls-mobile-ar-rtl-dark.png",
+    "17c2-subscription-plan-controls-mobile-ar-rtl-dark.png",
 ]
 
 
@@ -195,6 +199,66 @@ def _layout_state(driver, element):
         """,
         element,
     )
+
+
+def _subscription_layout_snapshot(driver, root):
+    return driver.execute_script(
+        """
+        const root = arguments[0];
+        const main = root.closest('.mfr-main');
+        const panels = Array.from(root.children).filter((el) => el.classList.contains('mfr-panel'));
+        const wrapper = root.querySelector('.manufacturer-table-wrap');
+        const table = wrapper ? wrapper.querySelector('.manufacturer-table') : null;
+        const box = (el) => {
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          const style = getComputedStyle(el);
+          return {
+            left: r.left,
+            right: r.right,
+            width: r.width,
+            clientWidth: el.clientWidth,
+            scrollWidth: el.scrollWidth,
+            minWidth: style.minWidth,
+            maxWidth: style.maxWidth,
+            overflowX: style.overflowX,
+            display: style.display,
+          };
+        };
+        return {
+          viewportWidth: window.innerWidth,
+          main: box(main),
+          root: box(root),
+          panels: panels.map(box),
+          wrapper: box(wrapper),
+          table: box(table),
+        };
+        """,
+        root,
+    )
+
+
+def _assert_subscription_mobile_layout(driver, root, *, expect_billing):
+    state = _subscription_layout_snapshot(driver, root)
+    viewport_width = state["viewportWidth"]
+    assert viewport_width <= 390, state
+    for key in ("main", "root"):
+        box = state[key]
+        assert box["left"] >= -1 and box["right"] <= viewport_width + 1, (key, state)
+        assert box["scrollWidth"] <= box["clientWidth"] + 1, (key, state)
+    for index, box in enumerate(state["panels"]):
+        assert box["left"] >= state["root"]["left"] - 1, (index, state)
+        assert box["right"] <= state["root"]["right"] + 1, (index, state)
+        assert box["scrollWidth"] <= box["clientWidth"] + 1, (index, state)
+    if expect_billing:
+        assert state["wrapper"] is not None and state["table"] is not None, state
+        assert state["wrapper"]["scrollWidth"] <= state["wrapper"]["clientWidth"] + 1, state
+        assert state["table"]["minWidth"] == "0px", state
+        assert state["table"]["left"] >= state["wrapper"]["left"] - 1, state
+        assert state["table"]["right"] <= state["wrapper"]["right"] + 1, state
+    else:
+        assert state["wrapper"] is None and state["table"] is None, state
+    return state
 
 
 def _assert_hidden_image(driver, image):
@@ -735,6 +799,15 @@ def test_manufacturer_round2_real_chrome(client, live_server, v2_3_reference_row
         assert driver.find_element(By.TAG_NAME, "html").get_attribute("dir") == "rtl"
         assert driver.find_element(By.TAG_NAME, "html").get_attribute("data-theme") == "dark"
         assert f"#{upgrade.pk}" in driver.find_element(By.TAG_NAME, "body").text
+        layout_evidence = {
+            "reviewed_9bdc433_failure": {
+                "viewportWidth": 390,
+                "entitlementHeading": {"width": 720, "left": -374, "right": 346},
+                "effectivePlan": {"width": 686, "left": -357, "right": 329},
+                "sourceTableMinWidth": "720px",
+            }
+        }
+        layout_evidence["after_ar_populated"] = _assert_subscription_mobile_layout(driver, subscription_root, expect_billing=True)
 
         mobile_entitlement = _panel_by_heading(subscription_root, "الصلاحية الفعلية")
         _shot_group(
@@ -744,27 +817,64 @@ def test_manufacturer_round2_real_chrome(client, live_server, v2_3_reference_row
             mobile_entitlement.find_element(By.CSS_SELECTOR, ".mfr-usage-grid article strong"),
         )
 
+        mobile_usage = _panel_by_heading(subscription_root, "الاستخدام والحدود")
+        usage_values = mobile_usage.find_elements(By.CSS_SELECTOR, ".mfr-usage-grid article strong")
+        assert len(usage_values) == 4
+        _shot_group(driver, EXPECTED[23], mobile_usage.find_element(By.TAG_NAME, "h2"), usage_values[0])
+
+        mobile_renewal = _panel_by_heading(subscription_root, "التجديد والتوقيت")
+        mobile_renewal_label = mobile_renewal.find_element(By.XPATH, './/dt[normalize-space(.)="موعد التجديد / الفوترة التالي"]')
+        mobile_renewal_value = mobile_renewal_label.find_element(By.XPATH, 'following-sibling::dd[1]')
+        _shot_group(driver, EXPECTED[24], mobile_renewal.find_element(By.TAG_NAME, "h2"), mobile_renewal_label, mobile_renewal_value)
+
         mobile_comparison = _panel_by_heading(subscription_root, "مقارنة Starter وPro الحالية")
         mobile_prices = mobile_comparison.find_elements(By.XPATH, './/dt[normalize-space(.)="السعر الشهري"]/following-sibling::dd[1]')
         assert len(mobile_prices) == 2
-        _shot_group(driver, EXPECTED[23], mobile_comparison.find_element(By.TAG_NAME, "h2"), *mobile_prices)
+        _shot_group(driver, EXPECTED[25], mobile_comparison.find_element(By.TAG_NAME, "h2"), *mobile_prices)
+
+        mobile_request = driver.find_element(By.ID, "upgrade-request-status")
+        mobile_request_reference = mobile_request.find_element(By.XPATH, './/strong[contains(normalize-space(.),"مرجع الطلب")]')
+        _shot_group(driver, EXPECTED[26], mobile_request.find_element(By.TAG_NAME, "h2"), mobile_request_reference)
 
         mobile_history = _panel_by_heading(subscription_root, "سجل الفوترة")
         mobile_history_table = mobile_history.find_element(By.CSS_SELECTOR, ".manufacturer-table-wrap")
         mobile_history_rows = mobile_history_table.find_elements(By.CSS_SELECTOR, "tbody tr")
         assert mobile_history_rows
         mobile_history_row = mobile_history_rows[0]
-        assert "round2-browser-confirmation" in mobile_history_row.text
+        mobile_history_cells = mobile_history_row.find_elements(By.TAG_NAME, "td")
+        assert len(mobile_history_cells) == 4
+        assert [cell.get_attribute("data-label") for cell in mobile_history_cells] == ["التاريخ", "الخطة", "المبلغ", "الحالة"]
+        assert str(confirmation.confirmed_at.year) in mobile_history_cells[0].text
+        assert mobile_history_cells[1].text.strip() == f"{confirmation.plan_code} v{confirmation.plan_version}"
+        assert str(confirmation.amount).split(".")[0] in mobile_history_cells[2].text
+        assert confirmation.currency in mobile_history_cells[2].text
+        assert confirmation.status in mobile_history_cells[3].text
+        assert "round2-browser-confirmation" not in mobile_history_row.text
+        _shot_group(driver, EXPECTED[27], mobile_history.find_element(By.TAG_NAME, "h2"), mobile_history_row)
+
         mobile_controls = _panel_by_heading(subscription_root, "إدارة الخطة")
         mobile_control_button = mobile_controls.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
-        _shot_group(
-            driver,
-            EXPECTED[24],
-            mobile_history.find_element(By.TAG_NAME, "h2"),
-            mobile_history_row,
-            mobile_controls.find_element(By.TAG_NAME, "h2"),
-            mobile_control_button,
-        )
+        _shot_group(driver, EXPECTED[28], mobile_controls.find_element(By.TAG_NAME, "h2"), mobile_control_button)
+
+        # English LTR at the same genuine mobile viewport must retain the same containment.
+        driver.get(f"{live_server.url}/manufacturer/subscription/?org={org.pk}&lang=en")
+        english_subscription_root = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-page="manufacturer-subscription"]')))
+        assert driver.find_element(By.TAG_NAME, "html").get_attribute("dir") == "ltr"
+        layout_evidence["after_en_populated"] = _assert_subscription_mobile_layout(driver, english_subscription_root, expect_billing=True)
+        english_history = _panel_by_heading(english_subscription_root, "Billing history")
+        english_cells = english_history.find_elements(By.CSS_SELECTOR, "tbody tr:first-child td")
+        assert [cell.get_attribute("data-label") for cell in english_cells] == ["Date", "Plan", "Amount", "Status"]
+
+        # A separate Manufacturer with no confirmations must remain contained and omit the history region cleanly.
+        _login(driver, live_server, client, no_media_owner)
+        driver.get(f"{live_server.url}/manufacturer/subscription/?org={no_media_org.pk}&lang=en")
+        empty_subscription_root = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-page="manufacturer-subscription"]')))
+        assert driver.find_element(By.TAG_NAME, "html").get_attribute("dir") == "ltr"
+        assert not empty_subscription_root.find_elements(By.CSS_SELECTOR, ".manufacturer-table-wrap")
+        assert "Billing history" not in empty_subscription_root.text
+        layout_evidence["after_en_no_history"] = _assert_subscription_mobile_layout(driver, empty_subscription_root, expect_billing=False)
+
+        (ARTIFACT_DIR / "mobile-subscription-layout.txt").write_text(repr(layout_evidence), encoding="utf-8")
     except Exception:
         _failure_evidence(driver)
         raise
