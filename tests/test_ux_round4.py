@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import RequestFactory
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
@@ -12,7 +12,11 @@ from selenium.webdriver.support.ui import Select
 from apps.media.models import MediaAsset
 from apps.organizations.models import Membership, Organization
 from apps.storefront.models import CustomizationElement
-from apps.subscriptions.models import SubscriptionBillingConfirmation
+from apps.subscriptions.models import (
+    ManufacturerSubscriptionUpgradeRequest,
+    SubscriptionBillingConfirmation,
+    SubscriptionPeriod,
+)
 from apps.subscriptions.services import ensure_subscription_for_organization
 from apps.subscriptions.views import _subscription_action
 
@@ -41,6 +45,12 @@ AR_UPGRADE = (
     "لا يمكن تفعيل خطة Pro إلا بعد تأكيد الدفع عبر مسار الفوترة المعتمد في FABINZI. "
     "وحتى يتم التأكيد، سيظل اشتراكك الحالي دون تغيير."
 )
+MFR_EN_UPGRADE = (
+    "Pro upgrade request recorded. Your current plan remains unchanged while authorized billing processing is pending."
+)
+MFR_AR_UPGRADE = (
+    "تم تسجيل طلب الترقية إلى Pro. ستظل خطتك الحالية دون تغيير أثناء انتظار معالجة الفوترة المخوّلة."
+)
 
 
 @pytest.mark.django_db
@@ -49,8 +59,8 @@ AR_UPGRADE = (
     [
         (Organization.Kind.DESIGNER, "en", EN_UPGRADE),
         (Organization.Kind.DESIGNER, "ar", AR_UPGRADE),
-        (Organization.Kind.MANUFACTURER, "en", EN_UPGRADE),
-        (Organization.Kind.MANUFACTURER, "ar", AR_UPGRADE),
+        (Organization.Kind.MANUFACTURER, "en", MFR_EN_UPGRADE),
+        (Organization.Kind.MANUFACTURER, "ar", MFR_AR_UPGRADE),
     ],
 )
 def test_round4_upgrade_message_is_localized_and_cannot_activate_paid_entitlement(
@@ -76,25 +86,64 @@ def test_round4_upgrade_message_is_localized_and_cannot_activate_paid_entitlemen
         role=Membership.Role.OWNER,
     )
     subscription = ensure_subscription_for_organization(organization)
-    before_plan_id = subscription.current_plan_id
+    before = {
+        "plan_id": subscription.current_plan_id,
+        "status": subscription.status,
+        "policy_snapshot": dict(subscription.policy_snapshot),
+        "price_snapshot": dict(subscription.price_snapshot),
+        "period_start": subscription.current_period_start,
+        "period_end": subscription.current_period_end,
+    }
     billing_before = SubscriptionBillingConfirmation.objects.filter(organization=organization).count()
+    periods_before = SubscriptionPeriod.objects.filter(subscription=subscription).count()
 
     request = RequestFactory().post("/subscription/", {"action": "upgrade"})
     request.user = owner
     request.LANGUAGE_CODE = language
 
-    with pytest.raises(ValidationError) as exc_info:
-        _subscription_action(
-            request,
-            organization,
-            {},
-            designer=kind == Organization.Kind.DESIGNER,
-        )
+    if kind == Organization.Kind.DESIGNER:
+        with pytest.raises(ValidationError) as exc_info:
+            _subscription_action(request, organization, {}, designer=True)
+        assert exc_info.value.messages == [expected]
+        assert ManufacturerSubscriptionUpgradeRequest.objects.filter(organization=organization).count() == 0
+    else:
+        result = _subscription_action(request, organization, {}, designer=False)
+        assert result == expected
+        retry = _subscription_action(request, organization, {}, designer=False)
+        assert "already recorded" in retry or "مسجل بالفعل" in retry
+        assert ManufacturerSubscriptionUpgradeRequest.objects.filter(
+            organization=organization,
+            status=ManufacturerSubscriptionUpgradeRequest.Status.REQUESTED,
+        ).count() == 1
 
-    assert exc_info.value.messages == [expected]
+        non_owner = User.objects.create_user(
+            username=f"round4-{kind}-{language}-operator",
+            password="password12345",
+        )
+        Membership.objects.create(
+            organization=organization,
+            user=non_owner,
+            role=Membership.Role.OPERATOR,
+        )
+        forged = RequestFactory().post("/subscription/", {"action": "upgrade"})
+        forged.user = non_owner
+        forged.LANGUAGE_CODE = language
+        with pytest.raises(PermissionDenied):
+            _subscription_action(forged, organization, {}, designer=False)
+        assert ManufacturerSubscriptionUpgradeRequest.objects.filter(
+            organization=organization,
+            status=ManufacturerSubscriptionUpgradeRequest.Status.REQUESTED,
+        ).count() == 1
+
     subscription.refresh_from_db()
-    assert subscription.current_plan_id == before_plan_id
+    assert subscription.current_plan_id == before["plan_id"]
+    assert subscription.status == before["status"]
+    assert subscription.policy_snapshot == before["policy_snapshot"]
+    assert subscription.price_snapshot == before["price_snapshot"]
+    assert subscription.current_period_start == before["period_start"]
+    assert subscription.current_period_end == before["period_end"]
     assert SubscriptionBillingConfirmation.objects.filter(organization=organization).count() == billing_before
+    assert SubscriptionPeriod.objects.filter(subscription=subscription).count() == periods_before
 
     views_source = (ROOT / "apps/subscriptions/views.py").read_text(encoding="utf-8")
     assert "activate_paid_pro(" not in views_source
