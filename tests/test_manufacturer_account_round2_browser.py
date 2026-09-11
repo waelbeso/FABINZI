@@ -57,9 +57,8 @@ def _shot(driver, name):
     assert driver.save_screenshot(str(ARTIFACT_DIR / name))
 
 
-def _focus(driver, element):
-    driver.execute_script("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", element)
-    state = driver.execute_script(
+def _focus_state(driver, element):
+    return driver.execute_script(
         """
         const el = arguments[0];
         const r = el.getBoundingClientRect();
@@ -73,7 +72,20 @@ def _focus(driver, element):
         """,
         element,
     )
-    assert state["intersects"] and state["unobscured"], (driver.current_url, state)
+
+
+def _focus(driver, element):
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", element)
+    state = {}
+
+    def settled(_driver):
+        state.update(_focus_state(_driver, element))
+        return state.get("intersects") and state.get("unobscured")
+
+    try:
+        _wait(driver).until(settled)
+    except Exception as exc:
+        raise AssertionError((driver.current_url, state)) from exc
 
 
 def _shot_focused(driver, name, element):
