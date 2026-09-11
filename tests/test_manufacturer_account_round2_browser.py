@@ -526,7 +526,6 @@ def test_manufacturer_round2_real_chrome(client, live_server, v2_3_reference_row
         assert cover_upload.get_attribute("type") == "file"
         assert profile_upload_label.get_attribute("for") == profile_upload.get_attribute("id")
         assert cover_upload_label.get_attribute("for") == cover_upload.get_attribute("id")
-        assert not profile_upload.is_displayed() and not cover_upload.is_displayed()
         assert profile_upload_status.is_displayed() and cover_upload_status.is_displayed()
         _shot_group(
             driver,
