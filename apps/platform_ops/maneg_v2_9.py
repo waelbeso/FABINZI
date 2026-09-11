@@ -12,12 +12,19 @@ from apps.integrations.models import IntegrationConfig
 from apps.operations.models import FulfillmentRecord, ProductionJob
 from apps.organizations.models import OnboardingApplication
 from apps.public_profiles.models import ProfessionalPublicState
+from apps.subscriptions.manufacturer_upgrade_services import (
+    cancel_manufacturer_upgrade_request,
+    eligible_billing_confirmations,
+    process_manufacturer_upgrade_request,
+)
 from apps.subscriptions.models import (
+    ManufacturerSubscriptionUpgradeRequest,
     OrganizationSubscription,
     SubscriptionBillingConfirmation,
     SubscriptionPlanPolicy,
     TeamInvitationConfiguration,
 )
+from apps.subscriptions.services import require_subscription_operator
 
 from . import maneg_views
 from .models import ApplicationReviewConfiguration, MaintenanceWindow, PlatformAnnouncement
@@ -25,6 +32,14 @@ from .models import ApplicationReviewConfiguration, MaintenanceWindow, PlatformA
 
 def _can_any(user, *permissions):
     return user.is_superuser or any(user.has_perm(permission) for permission in permissions)
+
+
+def _subscription_operator(user):
+    try:
+        require_subscription_operator(user)
+    except PermissionDenied:
+        return False
+    return True
 
 
 def _update_application_review_target(*, request, config, raw_hours):
@@ -97,8 +112,62 @@ def dashboard(request, extra_context=None):
 
 
 def subscriptions(request):
-    if not _can_any(request.user, "subscriptions.view_organizationsubscription", "subscriptions.view_subscriptionplanpolicy", "subscriptions.view_subscriptionbillingconfirmation"):
+    can_process = _subscription_operator(request.user)
+    if not _can_any(
+        request.user,
+        "subscriptions.view_organizationsubscription",
+        "subscriptions.view_subscriptionplanpolicy",
+        "subscriptions.view_subscriptionbillingconfirmation",
+        "subscriptions.manage_professional_subscription",
+    ):
         raise PermissionDenied("Subscription operational visibility is not allowed for this staff role.")
+
+    if request.method == "POST":
+        require_subscription_operator(request.user)
+        action = request.POST.get("action", "")
+        upgrade = get_object_or_404(
+            ManufacturerSubscriptionUpgradeRequest.objects.select_related("organization", "target_plan_policy"),
+            pk=request.POST.get("upgrade_request_id"),
+        )
+        try:
+            if action == "process_manufacturer_upgrade":
+                confirmation = get_object_or_404(
+                    SubscriptionBillingConfirmation,
+                    pk=request.POST.get("billing_confirmation_id"),
+                )
+                process_manufacturer_upgrade_request(
+                    upgrade_request=upgrade,
+                    actor=request.user,
+                    billing_confirmation=confirmation,
+                    request=request,
+                )
+                messages.success(
+                    request,
+                    maneg_views._text(
+                        request,
+                        "Manufacturer Pro upgrade activated from confirmed billing evidence; the request is completed.",
+                        "تم تفعيل ترقية المصنع إلى Pro من إثبات فوترة مؤكد واكتمل الطلب.",
+                    ),
+                )
+            elif action == "cancel_manufacturer_upgrade":
+                _row, changed = cancel_manufacturer_upgrade_request(
+                    upgrade_request=upgrade,
+                    actor=request.user,
+                    request=request,
+                )
+                messages.success(
+                    request,
+                    maneg_views._text(
+                        request,
+                        "Pending Manufacturer upgrade request cancelled without changing entitlement." if changed else "Manufacturer upgrade request was already cancelled.",
+                        "تم إلغاء طلب ترقية المصنع المعلق دون تغيير الصلاحية." if changed else "كان طلب ترقية المصنع ملغى بالفعل.",
+                    ),
+                )
+            else:
+                raise ValidationError("Unsupported subscription lifecycle action.")
+        except (ValidationError, PermissionDenied) as exc:
+            messages.error(request, str(exc))
+        return HttpResponseRedirect(reverse("fabinzi_admin:maneg-v2-9-subscriptions"))
 
     query = maneg_views._q(request)
     rows = OrganizationSubscription.objects.select_related("organization", "current_plan").order_by("current_period_end", "organization__display_name")
@@ -109,7 +178,26 @@ def subscriptions(request):
         rows = rows.filter(status=status)
 
     plans = SubscriptionPlanPolicy.objects.order_by("audience", "code", "-version") if request.user.has_perm("subscriptions.view_subscriptionplanpolicy") else SubscriptionPlanPolicy.objects.none()
-    confirmations = SubscriptionBillingConfirmation.objects.select_related("organization", "plan_policy", "confirmed_by").order_by("-confirmed_at")[:50] if request.user.has_perm("subscriptions.view_subscriptionbillingconfirmation") else []
+    confirmations = SubscriptionBillingConfirmation.objects.select_related("organization", "plan_policy", "confirmed_by").order_by("-confirmed_at")[:50] if request.user.has_perm("subscriptions.view_subscriptionbillingconfirmation") or can_process else []
+    upgrade_rows = []
+    if can_process:
+        requests = (
+            ManufacturerSubscriptionUpgradeRequest.objects.select_related(
+                "organization",
+                "requested_by",
+                "target_plan_policy",
+                "resolved_by",
+                "billing_confirmation",
+            )
+            .order_by("-requested_at", "-id")[:100]
+        )
+        for upgrade in requests:
+            upgrade_rows.append(
+                {
+                    "request": upgrade,
+                    "eligible_confirmations": eligible_billing_confirmations(upgrade),
+                }
+            )
     context = maneg_views._context(
         request,
         section="subscriptions",
@@ -118,6 +206,8 @@ def subscriptions(request):
         subscriptions=list(rows[:100]),
         subscription_plans=list(plans[:100]),
         billing_confirmations=list(confirmations),
+        manufacturer_upgrade_rows=upgrade_rows,
+        can_process_manufacturer_upgrades=can_process,
         query=query,
         status_filter=status,
         status_choices=OrganizationSubscription.Status.choices,
