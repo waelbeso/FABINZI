@@ -661,15 +661,23 @@ def test_manufacturer_round2_real_chrome(client, live_server, v2_3_reference_row
         control_url = reverse("fabinzi_admin:maneg-v2-5-manufacturer-public-controls")
         driver.get(f"{live_server.url}{control_url}")
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Canonical capability verification"))
-        capability_id = driver.find_element(By.XPATH, f'//*[normalize-space(.)="Capability ID: #{capability.pk}"]')
-        verified_text = driver.find_element(By.XPATH, '//*[normalize-space(.)="Garment Manufacturing · Verified"]')
+        capability_record = driver.find_element(
+            By.XPATH,
+            f'//article[contains(@class,"record-card")][.//input[@name="capability_id" and @value="{capability.pk}"]]',
+        )
+        capability_id = capability_record.find_element(By.XPATH, f'.//p[contains(normalize-space(.),"Capability ID: #{capability.pk}")]')
+        verified_text = capability_record.find_element(By.XPATH, './/*[normalize-space(.)="Garment Manufacturing · Verified"]')
         _shot_group(driver, EXPECTED[15], capability_id, verified_text)
-        revoke_form = driver.find_element(By.XPATH, f'//form[.//input[@name="verification_id" and @value="{verification.pk}"]]')
+        revoke_form = capability_record.find_element(By.XPATH, f'.//form[.//input[@name="verification_id" and @value="{verification.pk}"]]')
         _click_element(driver, revoke_form.find_element(By.CSS_SELECTOR, 'button[value="revoke_capability"]'))
         wait.until(lambda _d: ManufacturerCapabilityVerification.objects.filter(pk=verification.pk, status=ManufacturerCapabilityVerification.Status.REVOKED).exists())
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Garment Manufacturing · Revoked"))
-        revoked_text = driver.find_element(By.XPATH, '//*[normalize-space(.)="Garment Manufacturing · Revoked"]')
-        capability_id = driver.find_element(By.XPATH, f'//*[normalize-space(.)="Capability ID: #{capability.pk}"]')
+        capability_record = driver.find_element(
+            By.XPATH,
+            f'//article[contains(@class,"record-card")][.//input[@name="capability_id" and @value="{capability.pk}"]]',
+        )
+        revoked_text = capability_record.find_element(By.XPATH, './/*[normalize-space(.)="Garment Manufacturing · Revoked"]')
+        capability_id = capability_record.find_element(By.XPATH, f'.//p[contains(normalize-space(.),"Capability ID: #{capability.pk}")]')
         _shot_group(driver, EXPECTED[16], capability_id, revoked_text)
 
         # R41-03: normal Control Center entry -> visible Subscriptions link -> authorized queue.
