@@ -1,12 +1,15 @@
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
 from django.http import HttpResponseRedirect
 from django.urls import path, reverse
+from django.utils import timezone
 
 from apps.audit.services import record_audit_event
 from apps.integrations.admin_site import fabinzi_admin_site
 from .models import (
     ManufacturerOfferUsage,
+    ManufacturerSubscriptionUpgradeRequest,
     OnboardingPlanSelection,
     OrganizationSubscription,
     SubscriptionBillingConfirmation,
@@ -26,6 +29,51 @@ from .services import (
     grant_manufacturer_trial_exception,
     require_subscription_operator,
 )
+
+
+def _operator_allowed(user):
+    try:
+        require_subscription_operator(user)
+    except PermissionDenied:
+        return False
+    return True
+
+
+@transaction.atomic
+def _complete_matching_upgrade_request(*, organization, confirmation, actor, request=None):
+    upgrade = (
+        ManufacturerSubscriptionUpgradeRequest.objects.select_for_update()
+        .filter(
+            organization=organization,
+            status=ManufacturerSubscriptionUpgradeRequest.Status.REQUESTED,
+            target_plan_policy_id=confirmation.plan_policy_id,
+            plan_code=confirmation.plan_code,
+            plan_version=confirmation.plan_version,
+        )
+        .first()
+    )
+    if not upgrade:
+        return None
+    upgrade.status = ManufacturerSubscriptionUpgradeRequest.Status.COMPLETED
+    upgrade.resolved_at = timezone.now()
+    upgrade.resolved_by = actor
+    upgrade.billing_confirmation = confirmation
+    upgrade.full_clean()
+    upgrade.save(update_fields=["status", "resolved_at", "resolved_by", "billing_confirmation"])
+    record_audit_event(
+        actor=actor,
+        action="subscription.manufacturer_upgrade_completed",
+        instance=upgrade,
+        metadata={
+            "organization_id": organization.pk,
+            "request_id": upgrade.pk,
+            "billing_confirmation_id": confirmation.pk,
+            "plan_code": confirmation.plan_code,
+            "plan_version": confirmation.plan_version,
+        },
+        request=request,
+    )
+    return upgrade
 
 
 @admin.register(SubscriptionPlanPolicy, site=fabinzi_admin_site)
@@ -97,6 +145,51 @@ class SubscriptionBillingConfirmationAdmin(admin.ModelAdmin):
         obj.pk = confirmation.pk
 
 
+@admin.register(ManufacturerSubscriptionUpgradeRequest, site=fabinzi_admin_site)
+class ManufacturerSubscriptionUpgradeRequestAdmin(admin.ModelAdmin):
+    list_display = ("organization", "plan_code", "plan_version", "status", "requested_at", "requested_by", "resolved_at", "resolved_by", "billing_confirmation")
+    list_filter = ("status", "plan_code", "plan_version")
+    search_fields = ("organization__display_name", "organization__legal_name", "requested_by__email")
+    readonly_fields = tuple(field.name for field in ManufacturerSubscriptionUpgradeRequest._meta.fields)
+    actions = ("cancel_requested_upgrades",)
+
+    def has_module_permission(self, request): return _operator_allowed(request.user)
+    def has_view_permission(self, request, obj=None): return _operator_allowed(request.user)
+    def has_change_permission(self, request, obj=None): return _operator_allowed(request.user)
+    def has_add_permission(self, request): return False
+    def has_delete_permission(self, request, obj=None): return False
+
+    @admin.action(description="Cancel selected pending Manufacturer upgrade requests")
+    def cancel_requested_upgrades(self, request, queryset):
+        require_subscription_operator(request.user)
+        cancelled = 0
+        with transaction.atomic():
+            rows = ManufacturerSubscriptionUpgradeRequest.objects.select_for_update().filter(
+                pk__in=queryset.values_list("pk", flat=True),
+                status=ManufacturerSubscriptionUpgradeRequest.Status.REQUESTED,
+            )
+            for upgrade in rows:
+                upgrade.status = ManufacturerSubscriptionUpgradeRequest.Status.CANCELLED
+                upgrade.resolved_at = timezone.now()
+                upgrade.resolved_by = request.user
+                upgrade.full_clean()
+                upgrade.save(update_fields=["status", "resolved_at", "resolved_by"])
+                record_audit_event(
+                    actor=request.user,
+                    action="subscription.manufacturer_upgrade_cancelled",
+                    instance=upgrade,
+                    metadata={
+                        "organization_id": upgrade.organization_id,
+                        "request_id": upgrade.pk,
+                        "reason": "operator_cancelled",
+                        "entitlement_changed": False,
+                    },
+                    request=request,
+                )
+                cancelled += 1
+        self.message_user(request, f"Cancelled {cancelled} pending Manufacturer upgrade request(s).", messages.SUCCESS)
+
+
 @admin.register(OrganizationSubscription, site=fabinzi_admin_site)
 class OrganizationSubscriptionAdmin(admin.ModelAdmin):
     list_display = ("organization", "current_plan", "status", "trial_started_at", "trial_ends_at", "current_period_end", "next_billing_at", "updated_at")
@@ -124,6 +217,7 @@ class OrganizationSubscriptionAdmin(admin.ModelAdmin):
             if request.method != "POST": raise ValidationError("Lifecycle actions require POST.")
             confirmation = SubscriptionBillingConfirmation.objects.get(pk=request.POST.get("billing_confirmation_id"), organization=obj.organization)
             activate_paid_pro(organization=obj.organization, actor=request.user, billing_confirmation=confirmation, request=request)
+            _complete_matching_upgrade_request(organization=obj.organization, confirmation=confirmation, actor=request.user, request=request)
         except (ValidationError, PermissionDenied, SubscriptionBillingConfirmation.DoesNotExist) as exc: self.message_user(request, str(exc), messages.ERROR)
         else: self.message_user(request, "Confirmed Pro subscription activated.", messages.SUCCESS)
         return HttpResponseRedirect(reverse("fabinzi_admin:subscriptions_organizationsubscription_change", args=[object_id]))
