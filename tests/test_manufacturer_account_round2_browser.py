@@ -555,9 +555,10 @@ def test_manufacturer_round2_real_chrome(client, live_server, v2_3_reference_row
         assert "Round 2 Approved Factory" in driver.page_source
         assert not driver.find_elements(By.NAME, "public_name_en")
         proposal = driver.find_element(By.CSS_SELECTOR, ".mfr-proposal-preview")
-        pending_name = proposal.find_element(By.XPATH, './/*[contains(normalize-space(.),"Round 2 Pending Factory Name")]')
-        pending_overview = proposal.find_element(By.XPATH, './/*[contains(normalize-space(.),"Pending overview that must remain unpublished until approval.")]')
-        _shot_group(driver, EXPECTED[9], proposal.find_element(By.TAG_NAME, "strong"), pending_name, pending_overview)
+        proposal_heading = proposal.find_element(By.TAG_NAME, "strong")
+        pending_name = proposal.find_element(By.XPATH, './/strong[normalize-space(.)="Round 2 Pending Factory Name"]')
+        pending_overview = proposal.find_element(By.XPATH, './/p[normalize-space(.)="Pending overview that must remain unpublished until approval."]')
+        _shot_group(driver, EXPECTED[9], proposal_heading, pending_name, pending_overview)
 
         # M2-05: actual capability record and canonical verification badge are visible.
         driver.get(f"{live_server.url}/manufacturer/capabilities/?org={org.pk}&lang=en")
@@ -714,8 +715,8 @@ def test_manufacturer_round2_real_chrome(client, live_server, v2_3_reference_row
         assert "Pending production headline" in driver.page_source
         assert not driver.find_elements(By.NAME, "public_name_en")
         mobile_proposal = driver.find_element(By.CSS_SELECTOR, ".mfr-proposal-preview")
-        mobile_pending_name = mobile_proposal.find_element(By.XPATH, './/*[contains(normalize-space(.),"Round 2 Pending Factory Name")]')
-        mobile_pending_headline = mobile_proposal.find_element(By.XPATH, './/*[contains(normalize-space(.),"Pending production headline")]')
+        mobile_pending_name = mobile_proposal.find_element(By.XPATH, './/strong[normalize-space(.)="Round 2 Pending Factory Name"]')
+        mobile_pending_headline = mobile_proposal.find_element(By.XPATH, './/strong[normalize-space(.)="Pending production headline"]')
         _shot_group(driver, EXPECTED[20], mobile_proposal.find_element(By.TAG_NAME, "strong"), mobile_pending_name, mobile_pending_headline)
         lock_notice = driver.find_element(By.XPATH, '//section[contains(@class,"mfr-panel")][.//strong[contains(normalize-space(.),"التحرير متوقف أثناء المراجعة")]]')
         _shot_focused(driver, EXPECTED[21], lock_notice)
@@ -742,14 +743,17 @@ def test_manufacturer_round2_real_chrome(client, live_server, v2_3_reference_row
 
         mobile_history = _panel_by_heading(subscription_root, "سجل الفوترة")
         mobile_history_table = mobile_history.find_element(By.CSS_SELECTOR, ".manufacturer-table-wrap")
-        assert mobile_history_table.find_elements(By.CSS_SELECTOR, "tbody tr")
+        mobile_history_rows = mobile_history_table.find_elements(By.CSS_SELECTOR, "tbody tr")
+        assert mobile_history_rows
+        mobile_history_row = mobile_history_rows[0]
+        assert "round2-browser-confirmation" in mobile_history_row.text
         mobile_controls = _panel_by_heading(subscription_root, "إدارة الخطة")
         mobile_control_button = mobile_controls.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
         _shot_group(
             driver,
             EXPECTED[24],
             mobile_history.find_element(By.TAG_NAME, "h2"),
-            mobile_history_table,
+            mobile_history_row,
             mobile_controls.find_element(By.TAG_NAME, "h2"),
             mobile_control_button,
         )
