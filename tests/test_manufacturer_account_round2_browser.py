@@ -365,7 +365,8 @@ def test_manufacturer_round2_real_chrome(client, live_server, v2_3_reference_row
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Manufacturer Pro upgrade requests"))
         assert f"#{upgrade.pk}" in driver.find_element(By.TAG_NAME, "body").text
         assert "round2-browser-confirmation" in driver.page_source
-        assert driver.find_element(By.CSS_SELECTOR, 'button[value="process_manufacturer_upgrade"]').is_enabled()
+        process_form = driver.find_element(By.XPATH, '//form[.//input[@name="action" and @value="process_manufacturer_upgrade"]]')
+        assert process_form.find_element(By.CSS_SELECTOR, 'button[type="submit"]').is_enabled()
         _shot(driver, EXPECTED[12])
 
         # Mobile/RTL/dark representative evidence across public and internal changed surfaces.
