@@ -29,6 +29,61 @@ def _staff(name, *, change=False):
     return user
 
 
+def _subscription_staff(name, codename=None):
+    user = User.objects.create_user(
+        username=name,
+        email=f"{name}@example.test",
+        password="password123",
+        is_staff=True,
+    )
+    if codename:
+        user.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="subscriptions",
+                codename=codename,
+            )
+        )
+    return user
+
+
+@pytest.mark.django_db
+def test_subscription_navigation_matches_route_authorization_without_permission_broadening(client):
+    index_url = reverse("fabinzi_admin:index")
+    subscriptions_url = reverse("fabinzi_admin:maneg-v2-9-subscriptions")
+
+    operator = _subscription_staff("round2-nav-operator", "manage_professional_subscription")
+    assert operator.has_perm("subscriptions.manage_professional_subscription")
+    assert not operator.has_perm("subscriptions.view_organizationsubscription")
+    assert not operator.has_perm("subscriptions.view_subscriptionplanpolicy")
+    assert not operator.has_perm("subscriptions.view_subscriptionbillingconfirmation")
+    client.force_login(operator)
+    entry = client.get(index_url)
+    assert entry.status_code == 200
+    assert f'href="{subscriptions_url}"'.encode() in entry.content
+    queue = client.get(subscriptions_url)
+    assert queue.status_code == 200
+    assert b'Manufacturer Pro upgrade requests' in queue.content
+    assert f'href="{subscriptions_url}" aria-current="page"'.encode() in queue.content
+
+    read_only = _subscription_staff(
+        "round2-nav-billing-viewer",
+        "view_subscriptionbillingconfirmation",
+    )
+    client.force_login(read_only)
+    read_entry = client.get(index_url)
+    assert read_entry.status_code == 200
+    assert f'href="{subscriptions_url}"'.encode() in read_entry.content
+    assert client.get(subscriptions_url).status_code == 200
+    assert client.post(subscriptions_url, {"action": "cancel_manufacturer_upgrade"}).status_code == 403
+
+    unrelated = _subscription_staff("round2-nav-unrelated")
+    client.force_login(unrelated)
+    unrelated_entry = client.get(index_url)
+    assert unrelated_entry.status_code == 200
+    assert f'href="{subscriptions_url}"'.encode() not in unrelated_entry.content
+    assert client.get(subscriptions_url).status_code == 403
+
+
 @pytest.mark.django_db
 def test_maneg_capability_verify_and_record_specific_revoke_are_permissioned_and_audited(client):
     _owner, organization, _profile, _application = manufacturer("round2-ops-capability")
