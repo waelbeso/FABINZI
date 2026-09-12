@@ -155,15 +155,25 @@ def test_designer_phase4_browser_evidence(client, live_server, tmp_path, monkeyp
         _screenshot(driver, "p4-05-public-profile-readonly-en.png")
 
         _click_element(driver, driver.find_element(By.ID, "public-profile-edit-action"))
-        wait.until(EC.visibility_of_element_located((By.ID, "designer-public-profile-form")))
-        assert driver.find_element(By.ID, "profile-image-upload").get_attribute("type") == "file"
-        assert driver.find_element(By.ID, "cover-image-upload").get_attribute("type") == "file"
+        form = wait.until(EC.visibility_of_element_located((By.ID, "designer-public-profile-form")))
+        profile_upload = driver.find_element(By.ID, "profile-image-upload")
+        cover_upload = driver.find_element(By.ID, "cover-image-upload")
+        assert profile_upload.get_attribute("type") == "file"
+        assert cover_upload.get_attribute("type") == "file"
+        assert form.get_attribute("enctype").lower() == "multipart/form-data"
+        assert "lang=en" in form.get_attribute("action") and "edit=1" in form.get_attribute("action")
+        media_heading = driver.find_element(By.ID, "public-media-title")
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", media_heading)
+        wait.until(lambda _d: profile_upload.is_displayed() and cover_upload.is_displayed())
         _screenshot(driver, "p4-06-public-profile-edit-upload-controls-en.png")
 
-        driver.find_element(By.ID, "profile-image-upload").send_keys(str(invalid_path))
+        profile_upload.send_keys(str(invalid_path))
+        assert invalid_path.name in profile_upload.get_attribute("value")
         _click_element(driver, driver.find_element(By.CSS_SELECTOR, "button[name='action'][value='save_revision']"))
         wait.until(EC.visibility_of_element_located((By.ID, "public-profile-error")))
         assert "valid PNG, JPEG or WebP" in driver.page_source
+        assert driver.find_element(By.ID, "designer-public-profile-form").is_displayed()
+        assert "lang=en" in driver.current_url and "edit=1" in driver.current_url
         _screenshot(driver, "p4-07-public-profile-upload-validation-en.png")
 
         driver.get(f"{live_server.url}/designer/public-profile/?org={org.pk}&edit=1&lang=en")
