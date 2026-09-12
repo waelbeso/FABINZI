@@ -3,11 +3,10 @@ from copy import deepcopy
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.shortcuts import redirect, render
 from django.db.models import Q
+from django.shortcuts import redirect, render
 
 from apps.media.manufacturer_public_services import create_manufacturer_public_image, manufacturer_public_image_eligible, validate_public_image
-
 from apps.media.models import MediaAsset
 from apps.organizations.designer_context import DESIGNER_MANAGE_ROLES, require_active_designer_context
 from apps.organizations.manufacturer_context import MANUFACTURER_MANAGE_ROLES, require_active_manufacturer_context
@@ -87,7 +86,6 @@ def _profile_action(request, organization, *, manufacturer=False):
                 if upload:
                     payload["public_state"][f"{purpose}_image_id"] = None
             payload = normalize_public_profile_data(organization=organization, proposed_data=payload)
-            # Validate both files before the first external side effect.
             for upload in uploads.values():
                 if upload:
                     validate_public_image(upload)
@@ -153,6 +151,32 @@ def _profile_context(organization, *, tolerate_legacy_designer_data=False):
     return latest, deepcopy(editable.proposed_data if editable else current), current
 
 
+def _manufacturer_portal_state(organization, *, requested_edit=False, attempted_data=None, error=""):
+    revision, edit_data, current = _profile_context(organization)
+    locked = bool(
+        revision
+        and revision.status in {
+            PublicProfileRevision.Status.SUBMITTED,
+            PublicProfileRevision.Status.UNDER_REVIEW,
+        }
+    )
+    edit_mode = bool(requested_edit and not locked)
+    if attempted_data is not None:
+        edit_data = attempted_data
+        edit_mode = True
+    proposed = deepcopy(revision.proposed_data) if revision else None
+    return {
+        "current_public_data": current,
+        "edit_public_data": edit_data,
+        "public_revision": revision,
+        "public_revision_data": proposed,
+        "public_profile_edit_mode": edit_mode,
+        "public_profile_edit_locked": locked,
+        "public_profile_error": error,
+        "public_images": _public_images(organization) if edit_mode else [],
+    }
+
+
 @login_required
 def designer_public_profile(request):
     context = require_active_designer_context(request, roles=DESIGNER_MANAGE_ROLES)
@@ -174,14 +198,50 @@ def manufacturer_public_profile(request):
     context = require_active_manufacturer_context(request, roles=MANUFACTURER_MANAGE_ROLES)
     organization = context["manufacturer_organization"]
     state = ensure_public_state(organization)
+    requested_edit = request.GET.get("edit") == "1" or request.method == "POST"
+
     if request.method == "POST":
+        action = request.POST.get("action", "")
+        if action not in {"save_revision", "submit_revision", "hide", "request_visibility"}:
+            messages.error(request, "Unsupported public-profile action.")
+            return redirect(f"/manufacturer/public-profile/?org={organization.pk}")
+        if action in {"hide", "request_visibility"}:
+            try:
+                result = _profile_action(request, organization, manufacturer=True)
+            except (ValidationError, PermissionDenied) as exc:
+                messages.error(request, _error(exc))
+            else:
+                messages.success(request, result)
+            return redirect(f"/manufacturer/public-profile/?org={organization.pk}")
+
+        locked = organization.public_profile_revisions.filter(
+            status__in=[PublicProfileRevision.Status.SUBMITTED, PublicProfileRevision.Status.UNDER_REVIEW]
+        ).exists()
+        if locked:
+            messages.error(request, "A public profile revision is already submitted or under FABINZI review.")
+            return redirect(f"/manufacturer/public-profile/?org={organization.pk}")
         try:
-            messages.success(request, _profile_action(request, organization, manufacturer=True))
+            result = _profile_action(request, organization, manufacturer=True)
         except (ValidationError, PermissionDenied) as exc:
-            messages.error(request, _error(exc))
+            _revision, attempted = _editable_payload(organization)
+            attempted = _apply_post(attempted, request.POST, manufacturer=True)
+            context.update(
+                _manufacturer_portal_state(
+                    organization,
+                    requested_edit=True,
+                    attempted_data=attempted,
+                    error=_error(exc),
+                )
+            )
+            context.update({"public_state": state, "verified_capabilities": verified_canonical_capabilities(organization)})
+            return render(request, "public_profiles/manufacturer_portal.html", context)
+        messages.success(request, result)
+        if action == "save_revision":
+            return redirect(f"/manufacturer/public-profile/?org={organization.pk}&edit=1")
         return redirect(f"/manufacturer/public-profile/?org={organization.pk}")
-    revision, edit_data, current = _profile_context(organization)
-    context.update({"public_state": state, "current_public_data": current, "edit_public_data": edit_data, "public_revision": revision, "public_images": _public_images(organization), "verified_capabilities": verified_canonical_capabilities(organization)})
+
+    context.update(_manufacturer_portal_state(organization, requested_edit=requested_edit))
+    context.update({"public_state": state, "verified_capabilities": verified_canonical_capabilities(organization)})
     return render(request, "public_profiles/manufacturer_portal.html", context)
 
 

@@ -9,11 +9,22 @@ from apps.design.models import GarmentDesign
 from apps.organizations.designer_context import designer_context
 from apps.organizations.manufacturer_context import manufacturer_context
 from apps.organizations.models import Membership, Organization
-from .models import SubscriptionBillingConfirmation, TeamInvitation
+from .manufacturer_upgrade_services import (
+    create_manufacturer_upgrade_request,
+    manufacturer_upgrade_availability,
+    withdraw_manufacturer_upgrade_request,
+)
+from .models import (
+    ManufacturerSubscriptionUpgradeRequest,
+    SubscriptionBillingConfirmation,
+    TeamInvitation,
+)
 from .services import (
     ARTWORK_SLOT_STATUSES,
     DESIGNER_PRO,
     DESIGN_SLOT_STATUSES,
+    MANUFACTURER_PRO,
+    MANUFACTURER_STARTER,
     accept_team_invitation,
     apply_designer_downgrade,
     cancel_subscription,
@@ -88,22 +99,59 @@ def _designer_pro_policy():
         return None
 
 
+def _manufacturer_policy(code):
+    try:
+        return get_effective_plan(code)
+    except ValidationError:
+        return None
+
+
 def _subscription_action(request, organization, context, *, designer):
     if request.method != "POST":
         return None
     action = request.POST.get("action", "")
-    if action not in {"downgrade", "cancel", "upgrade", "retain"}:
+    if action not in {"downgrade", "cancel", "upgrade", "withdraw_upgrade", "retain"}:
         return None
     require_owner(request.user, organization)
     summary = entitlement_summary(organization)
     subscription = summary["subscription"]
     if action == "upgrade":
-        raise ValidationError(
-            _localized(
-                request,
-                "Pro can be activated only after payment is confirmed through FABINZI's authorized billing process. Until confirmation, your current subscription remains unchanged.",
-                "لا يمكن تفعيل خطة Pro إلا بعد تأكيد الدفع عبر مسار الفوترة المعتمد في FABINZI. وحتى يتم التأكيد، سيظل اشتراكك الحالي دون تغيير.",
+        if designer:
+            raise ValidationError(
+                _localized(
+                    request,
+                    "Pro can be activated only after payment is confirmed through FABINZI's authorized billing process. Until confirmation, your current subscription remains unchanged.",
+                    "لا يمكن تفعيل خطة Pro إلا بعد تأكيد الدفع عبر مسار الفوترة المعتمد في FABINZI. وحتى يتم التأكيد، سيظل اشتراكك الحالي دون تغيير.",
+                )
             )
+        _upgrade, created = create_manufacturer_upgrade_request(
+            organization=organization,
+            actor=request.user,
+            request=request,
+        )
+        if created:
+            return _localized(
+                request,
+                "Pro upgrade request recorded. Your current plan remains unchanged while authorized billing processing is pending.",
+                "تم تسجيل طلب الترقية إلى Pro. ستظل خطتك الحالية دون تغيير أثناء انتظار معالجة الفوترة المخوّلة.",
+            )
+        return _localized(
+            request,
+            "Your Pro upgrade request is already recorded. Your current plan remains unchanged while authorized billing processing is pending.",
+            "طلب الترقية إلى Pro مسجل بالفعل. ستظل خطتك الحالية دون تغيير أثناء انتظار معالجة الفوترة المخوّلة.",
+        )
+    if action == "withdraw_upgrade":
+        if designer:
+            raise ValidationError("Unsupported subscription action.")
+        withdraw_manufacturer_upgrade_request(
+            organization=organization,
+            actor=request.user,
+            request=request,
+        )
+        return _localized(
+            request,
+            "Pending Pro upgrade request withdrawn. Your current entitlement was not changed.",
+            "تم سحب طلب الترقية إلى Pro. لم تتغير صلاحية اشتراكك الحالية.",
         )
     if action == "cancel":
         cancel_subscription(subscription=subscription, actor=request.user, request=request)
@@ -173,12 +221,33 @@ def manufacturer_subscription(request):
         if success:
             messages.success(request, success)
             return redirect(f"/manufacturer/subscription/?org={organization.pk}")
+
     summary = entitlement_summary(organization)
+    commercial_context = _commercial_context(organization)
+    commercial = commercial_context["onboarding_commercial"]
+    upgrade_state = manufacturer_upgrade_availability(organization)
+    open_upgrade = upgrade_state["request"]
+    latest_upgrade = (
+        ManufacturerSubscriptionUpgradeRequest.objects.filter(organization=organization)
+        .select_related("target_plan_policy", "requested_by", "resolved_by", "billing_confirmation")
+        .order_by("-requested_at", "-id")
+        .first()
+    )
+    is_owner = context["manufacturer_membership"].role == Membership.Role.OWNER
     context.update({
         "subscription_summary": summary,
-        "is_subscription_owner": context["manufacturer_membership"].role == Membership.Role.OWNER,
+        "is_subscription_owner": is_owner,
+        "renewal_days_remaining": _days_remaining(summary["subscription"].next_billing_at),
+        "payment_window_days_remaining": _days_remaining(commercial.get("payment_due_at")),
+        "manufacturer_starter_policy": _manufacturer_policy(MANUFACTURER_STARTER),
+        "manufacturer_pro_policy": _manufacturer_policy(MANUFACTURER_PRO),
+        "upgrade_request": open_upgrade,
+        "latest_upgrade_request": latest_upgrade,
+        "upgrade_request_reason": upgrade_state["reason"],
+        "paid_onboarding_upgrade_in_progress": upgrade_state["reason"] == "onboarding_payment_window",
+        "can_request_upgrade": bool(is_owner and upgrade_state["can_request"]),
     })
-    context.update(_commercial_context(organization))
+    context.update(commercial_context)
     return render(request, "manufacturer/subscription.html", context)
 
 

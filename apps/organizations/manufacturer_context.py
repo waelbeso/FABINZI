@@ -41,6 +41,7 @@ MANUFACTURER_FINANCE_ROLES = {
 
 MANUFACTURER_ROUTE_SECTIONS = {'manufacturer': 'overview',
  'manufacturer-profile': 'profile',
+ 'manufacturer-subscription': 'subscription',
  'manufacturer-public-profile': 'public-profile',
  'manufacturer-public-products': 'public-products',
  'manufacturer-public-inquiries': 'public-inquiries',

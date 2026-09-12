@@ -4,6 +4,7 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.validators import validate_email
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -391,6 +392,21 @@ def manufacturer_profile(request):
 def manufacturer_team(request):
     context = _require_active(request)
     organization = context["manufacturer_organization"]
+    allowed_roles = [
+        choice
+        for choice in Membership.Role.choices
+        if choice[0]
+        in {
+            Membership.Role.OWNER,
+            Membership.Role.MANAGER,
+            Membership.Role.PRODUCTION_MANAGER,
+            Membership.Role.OPERATOR,
+            Membership.Role.QC,
+            Membership.Role.ACCOUNTANT,
+        }
+    ]
+    team_form = {"email": "", "role": Membership.Role.OPERATOR}
+    team_error = ""
     if request.method == "POST":
         if not context["manufacturer_can_manage"]:
             raise PermissionDenied
@@ -398,19 +414,48 @@ def manufacturer_team(request):
         try:
             if action == "upsert":
                 email = request.POST.get("email", "").strip()
-                user = get_object_or_404(User, email__iexact=email)
+                role = request.POST.get("role", "")
+                team_form = {"email": email, "role": role}
+                try:
+                    validate_email(email)
+                except ValidationError as exc:
+                    raise ValidationError(
+                        _localized(
+                            request,
+                            "Enter a valid FABINZI account email.",
+                            "أدخل بريدًا إلكترونيًا صالحًا لحساب FABINZI.",
+                        )
+                    ) from exc
+                matches = list(User.objects.filter(email__iexact=email).order_by("pk")[:2])
+                if not matches:
+                    raise ValidationError(
+                        _localized(
+                            request,
+                            "No FABINZI identity was found for this email. The team member needs an existing FABINZI user identity, not a separate business account.",
+                            "لم يتم العثور على هوية FABINZI لهذا البريد. يحتاج عضو الفريق إلى هوية مستخدم FABINZI موجودة، وليس إلى حساب نشاط مستقل.",
+                        )
+                    )
+                if len(matches) > 1:
+                    raise ValidationError(
+                        _localized(
+                            request,
+                            "More than one FABINZI identity matches this email. No membership was changed; contact FABINZI support to resolve the identity ambiguity.",
+                            "يوجد أكثر من هوية FABINZI تطابق هذا البريد. لم يتم تغيير أي عضوية؛ تواصل مع دعم FABINZI لحل تعارض الهوية.",
+                        )
+                    )
                 secure_manufacturer_member_upsert(
                     organization=organization,
                     actor=request.user,
-                    user=user,
-                    role=request.POST.get("role", ""),
+                    user=matches[0],
+                    role=role,
                     request=request,
                 )
                 messages.success(
                     request,
                     _localized(request, "Team member updated.", "تم تحديث عضو الفريق."),
                 )
-            elif action == "deactivate":
+                return _redirect_with_org("manufacturer-team", organization)
+            if action == "deactivate":
                 membership = get_object_or_404(
                     Membership,
                     pk=request.POST.get("membership_id"),
@@ -425,25 +470,22 @@ def manufacturer_team(request):
                     request,
                     _localized(request, "Team member deactivated.", "تم إيقاف عضو الفريق."),
                 )
+                return _redirect_with_org("manufacturer-team", organization)
+            raise ValidationError(
+                _localized(request, "Unsupported team action.", "إجراء الفريق غير مدعوم.")
+            )
         except (ValidationError, PermissionDenied) as exc:
-            messages.error(request, _error_text(exc))
-        return _redirect_with_org("manufacturer-team", organization)
+            team_error = _error_text(exc)
 
     members = organization.memberships.select_related("user").order_by("joined_at", "id")
-    allowed_roles = [
-        choice
-        for choice in Membership.Role.choices
-        if choice[0]
-        in {
-            Membership.Role.OWNER,
-            Membership.Role.MANAGER,
-            Membership.Role.PRODUCTION_MANAGER,
-            Membership.Role.OPERATOR,
-            Membership.Role.QC,
-            Membership.Role.ACCOUNTANT,
+    context.update(
+        {
+            "members": members,
+            "allowed_roles": allowed_roles,
+            "team_form": team_form,
+            "team_error": team_error,
         }
-    ]
-    context.update({"members": members, "allowed_roles": allowed_roles})
+    )
     return _render(request, "manufacturer/team.html", context)
 
 
@@ -514,7 +556,7 @@ def manufacturer_capabilities(request):
         return _redirect_with_org("manufacturer-capabilities", organization)
 
     capabilities = (
-        listing.capabilities.order_by("capability_type", "name") if listing else []
+        listing.capabilities.prefetch_related("public_verifications").order_by("capability_type", "name") if listing else []
     )
     context.update(
         {
