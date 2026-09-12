@@ -115,28 +115,19 @@ def _subscription_action(request, organization, context, *, designer):
     if request.method != "POST":
         return None
     action = request.POST.get("action", "")
-    if action not in {"downgrade", "cancel", "upgrade", "withdraw_upgrade", "retain"}:
+    if action not in {"downgrade", "cancel", "upgrade", "request_upgrade", "withdraw_upgrade", "retain"}:
         return None
     require_owner(request.user, organization)
     summary = entitlement_summary(organization)
     subscription = summary["subscription"]
     if action == "upgrade":
         if designer:
-            _upgrade, created = create_designer_upgrade_request(
-                organization=organization,
-                actor=request.user,
-                request=request,
-            )
-            if created:
-                return _localized(
+            raise ValidationError(
+                _localized(
                     request,
-                    "Pro upgrade request recorded for FABINZI review. Your current plan and paid entitlement remain unchanged.",
-                    "تم تسجيل طلب الترقية إلى Pro لمراجعة FABINZI. تظل خطتك الحالية وصلاحية الاشتراك المدفوع دون تغيير.",
+                    "Pro can be activated only after payment is confirmed through FABINZI's authorized billing process. Until confirmation, your current subscription remains unchanged.",
+                    "لا يمكن تفعيل خطة Pro إلا بعد تأكيد الدفع عبر مسار الفوترة المعتمد في FABINZI. وحتى يتم التأكيد، سيظل اشتراكك الحالي دون تغيير.",
                 )
-            return _localized(
-                request,
-                "Your Pro upgrade request is already pending. Your current plan and paid entitlement remain unchanged.",
-                "طلب الترقية إلى Pro قيد المراجعة بالفعل. تظل خطتك الحالية وصلاحية الاشتراك المدفوع دون تغيير.",
             )
         _upgrade, created = create_manufacturer_upgrade_request(
             organization=organization,
@@ -153,6 +144,25 @@ def _subscription_action(request, organization, context, *, designer):
             request,
             "Your Pro upgrade request is already recorded. Your current plan remains unchanged while authorized billing processing is pending.",
             "طلب الترقية إلى Pro مسجل بالفعل. ستظل خطتك الحالية دون تغيير أثناء انتظار معالجة الفوترة المخوّلة.",
+        )
+    if action == "request_upgrade":
+        if not designer:
+            raise ValidationError("Unsupported subscription action.")
+        _upgrade, created = create_designer_upgrade_request(
+            organization=organization,
+            actor=request.user,
+            request=request,
+        )
+        if created:
+            return _localized(
+                request,
+                "Pro upgrade request recorded for FABINZI review. Your current plan and paid entitlement remain unchanged.",
+                "تم تسجيل طلب الترقية إلى Pro لمراجعة FABINZI. تظل خطتك الحالية وصلاحية الاشتراك المدفوع دون تغيير.",
+            )
+        return _localized(
+            request,
+            "Your Pro upgrade request is already pending. Your current plan and paid entitlement remain unchanged.",
+            "طلب الترقية إلى Pro قيد المراجعة بالفعل. تظل خطتك الحالية وصلاحية الاشتراك المدفوع دون تغيير.",
         )
     if action == "withdraw_upgrade":
         if designer:
