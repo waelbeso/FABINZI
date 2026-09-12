@@ -133,6 +133,11 @@ def _clean_public_media_id(value, *, field_name, organization):
 
         if not manufacturer_public_image_eligible(asset, organization):
             raise ValidationError({field_name: "Choose a public image belonging to this Manufacturer. / اختر صورة عامة تابعة لهذا المصنّع."})
+    elif organization.kind == Organization.Kind.DESIGNER:
+        from apps.media.designer_public_services import designer_public_image_eligible
+
+        if not designer_public_image_eligible(asset, organization):
+            raise ValidationError({field_name: "Choose a public image belonging to this Designer. / اختر صورة عامة تابعة لهذا المصمم."})
     return asset_id
 
 

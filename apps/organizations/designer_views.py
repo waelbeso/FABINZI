@@ -6,6 +6,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
+from django.core.validators import validate_email
 from django.db.models import Count, Q, Sum
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -333,37 +334,71 @@ def designer_portal(request):
     return render(request, "designer/dashboard.html", context)
 
 
+def _designer_profile_form_values(organization, profile, post=None):
+    social_links = profile.social_links or {}
+    values = {
+        "display_name": organization.display_name,
+        "email": organization.email,
+        "phone": organization.phone,
+        "website": organization.website,
+        "address_line1": organization.address_line1,
+        "address_line2": organization.address_line2,
+        "city": organization.city,
+        "region": organization.region,
+        "country": organization.country,
+        "studio_name": profile.studio_name,
+        "portfolio_url": profile.portfolio_url,
+        "instagram": social_links.get("instagram", ""),
+        "behance": social_links.get("behance", ""),
+        "linkedin": social_links.get("linkedin", ""),
+    }
+    if post is not None:
+        for key in values:
+            values[key] = post.get(key, "").strip()
+        values["country"] = values["country"].upper() or "EG"
+    return values
+
+
 @login_required
 def designer_profile(request):
     context = _require_active(request)
     organization = context["designer_organization"]
     profile = organization.designer_profile
+    edit_mode = bool(
+        context["designer_can_manage"]
+        and (request.method == "POST" or request.GET.get("edit") == "1")
+    )
+    form_values = _designer_profile_form_values(
+        organization,
+        profile,
+        request.POST if request.method == "POST" else None,
+    )
     if request.method == "POST":
         if not context["designer_can_manage"]:
             raise PermissionDenied
         social_links = {
-            key: request.POST.get(key, "").strip()
+            key: form_values[key]
             for key in ("instagram", "behance", "linkedin")
-            if request.POST.get(key, "").strip()
+            if form_values[key]
         }
         try:
             update_active_designer_profile(
                 organization=organization,
                 actor=request.user,
                 organization_data={
-                    "display_name": request.POST.get("display_name", "").strip(),
-                    "email": request.POST.get("email", "").strip(),
-                    "phone": request.POST.get("phone", "").strip(),
-                    "website": request.POST.get("website", "").strip(),
-                    "address_line1": request.POST.get("address_line1", "").strip(),
-                    "address_line2": request.POST.get("address_line2", "").strip(),
-                    "city": request.POST.get("city", "").strip(),
-                    "region": request.POST.get("region", "").strip(),
-                    "country": request.POST.get("country", "EG").strip().upper(),
+                    "display_name": form_values["display_name"],
+                    "email": form_values["email"],
+                    "phone": form_values["phone"],
+                    "website": form_values["website"],
+                    "address_line1": form_values["address_line1"],
+                    "address_line2": form_values["address_line2"],
+                    "city": form_values["city"],
+                    "region": form_values["region"],
+                    "country": form_values["country"],
                 },
                 profile_data={
-                    "studio_name": request.POST.get("studio_name", "").strip(),
-                    "portfolio_url": request.POST.get("portfolio_url", "").strip(),
+                    "studio_name": form_values["studio_name"],
+                    "portfolio_url": form_values["portfolio_url"],
                     "social_links": social_links,
                 },
                 request=request,
@@ -373,7 +408,14 @@ def designer_profile(request):
         else:
             messages.success(request, _localized(request, "Designer profile updated.", "تم تحديث ملف المصمم."))
             return _redirect_with_org("designer-profile", organization)
-    context.update({"profile": profile, "social_links": profile.social_links or {}})
+    context.update(
+        {
+            "profile": profile,
+            "social_links": profile.social_links or {},
+            "profile_edit_mode": edit_mode,
+            "profile_form": form_values,
+        }
+    )
     return render(request, "designer/profile.html", context)
 
 
@@ -381,6 +423,8 @@ def designer_profile(request):
 def designer_team(request):
     context = _require_active(request)
     organization = context["designer_organization"]
+    team_form = {"email": "", "role": Membership.Role.DESIGNER}
+    team_error = ""
     if request.method == "POST":
         if not context["designer_can_manage"]:
             raise PermissionDenied
@@ -388,26 +432,63 @@ def designer_team(request):
         try:
             if action == "upsert":
                 email = request.POST.get("email", "").strip()
-                user = get_object_or_404(User, email__iexact=email)
                 role = request.POST.get("role", "")
+                team_form = {"email": email, "role": role}
+                try:
+                    validate_email(email)
+                except ValidationError as exc:
+                    raise ValidationError(
+                        _localized(
+                            request,
+                            "Enter a valid FABINZI account email.",
+                            "أدخل بريدًا إلكترونيًا صالحًا لحساب FABINZI.",
+                        )
+                    ) from exc
+                matches = list(User.objects.filter(email__iexact=email).order_by("pk")[:2])
+                if not matches:
+                    raise ValidationError(
+                        _localized(
+                            request,
+                            "No FABINZI account exists for this email. Ask the person to create an account first; a separate Designer subscription is not required.",
+                            "لا توجد هوية FABINZI بهذا البريد. اطلب من الشخص إنشاء حساب أولاً؛ ولا يلزم اشتراك Designer منفصل لعضو الفريق.",
+                        )
+                    )
+                if len(matches) > 1:
+                    raise ValidationError(
+                        _localized(
+                            request,
+                            "This email matches more than one FABINZI identity. Contact FABINZI support before adding this member.",
+                            "هذا البريد مرتبط بأكثر من هوية FABINZI. تواصل مع دعم FABINZI قبل إضافة هذا العضو.",
+                        )
+                    )
                 secure_add_or_update_member(
                     organization=organization,
                     actor=request.user,
-                    user=user,
+                    user=matches[0],
                     role=role,
                     request=request,
                 )
                 messages.success(request, _localized(request, "Team member updated.", "تم تحديث عضو الفريق."))
-            elif action == "deactivate":
+                return _redirect_with_org("designer-team", organization)
+            if action == "deactivate":
                 membership = get_object_or_404(Membership, pk=request.POST.get("membership_id"), organization=organization)
                 secure_deactivate_member(membership=membership, actor=request.user, request=request)
                 messages.success(request, _localized(request, "Team member deactivated.", "تم إيقاف عضو الفريق."))
+                return _redirect_with_org("designer-team", organization)
+            raise ValidationError("Unsupported team action.")
         except (ValidationError, PermissionDenied) as exc:
-            messages.error(request, _error_text(exc))
-        return _redirect_with_org("designer-team", organization)
+            team_error = _error_text(exc)
+            messages.error(request, team_error)
     members = organization.memberships.select_related("user").order_by("joined_at", "id")
     allowed_roles = [choice for choice in Membership.Role.choices if choice[0] in {Membership.Role.OWNER, Membership.Role.MANAGER, Membership.Role.DESIGNER, Membership.Role.DESIGN_MANAGER, Membership.Role.ACCOUNTANT}]
-    context.update({"members": members, "allowed_roles": allowed_roles})
+    context.update(
+        {
+            "members": members,
+            "allowed_roles": allowed_roles,
+            "team_form": team_form,
+            "team_error": team_error,
+        }
+    )
     return render(request, "designer/team.html", context)
 
 

@@ -12,12 +12,14 @@ from apps.integrations.models import IntegrationConfig
 from apps.operations.models import FulfillmentRecord, ProductionJob
 from apps.organizations.models import OnboardingApplication
 from apps.public_profiles.models import ProfessionalPublicState
+from apps.subscriptions.designer_upgrade_services import review_designer_upgrade_request
 from apps.subscriptions.manufacturer_upgrade_services import (
     cancel_manufacturer_upgrade_request,
     eligible_billing_confirmations,
     process_manufacturer_upgrade_request,
 )
 from apps.subscriptions.models import (
+    DesignerSubscriptionUpgradeRequest,
     ManufacturerSubscriptionUpgradeRequest,
     OrganizationSubscription,
     SubscriptionBillingConfirmation,
@@ -125,46 +127,72 @@ def subscriptions(request):
     if request.method == "POST":
         require_subscription_operator(request.user)
         action = request.POST.get("action", "")
-        upgrade = get_object_or_404(
-            ManufacturerSubscriptionUpgradeRequest.objects.select_related("organization", "target_plan_policy"),
-            pk=request.POST.get("upgrade_request_id"),
-        )
         try:
-            if action == "process_manufacturer_upgrade":
-                confirmation = get_object_or_404(
-                    SubscriptionBillingConfirmation,
-                    pk=request.POST.get("billing_confirmation_id"),
+            if action in {"approve_designer_upgrade", "reject_designer_upgrade"}:
+                upgrade = get_object_or_404(
+                    DesignerSubscriptionUpgradeRequest.objects.select_related("organization", "target_plan_policy"),
+                    pk=request.POST.get("designer_upgrade_request_id"),
                 )
-                process_manufacturer_upgrade_request(
+                decision = (
+                    DesignerSubscriptionUpgradeRequest.Status.APPROVED
+                    if action == "approve_designer_upgrade"
+                    else DesignerSubscriptionUpgradeRequest.Status.REJECTED
+                )
+                review_designer_upgrade_request(
                     upgrade_request=upgrade,
                     actor=request.user,
-                    billing_confirmation=confirmation,
+                    decision=decision,
+                    rejection_reason=request.POST.get("rejection_reason", ""),
                     request=request,
                 )
                 messages.success(
                     request,
                     maneg_views._text(
                         request,
-                        "Manufacturer Pro upgrade activated from confirmed billing evidence; the request is completed.",
-                        "تم تفعيل ترقية المصنع إلى Pro من إثبات فوترة مؤكد واكتمل الطلب.",
-                    ),
-                )
-            elif action == "cancel_manufacturer_upgrade":
-                _row, changed = cancel_manufacturer_upgrade_request(
-                    upgrade_request=upgrade,
-                    actor=request.user,
-                    request=request,
-                )
-                messages.success(
-                    request,
-                    maneg_views._text(
-                        request,
-                        "Pending Manufacturer upgrade request cancelled without changing entitlement." if changed else "Manufacturer upgrade request was already cancelled.",
-                        "تم إلغاء طلب ترقية المصنع المعلق دون تغيير الصلاحية." if changed else "كان طلب ترقية المصنع ملغى بالفعل.",
+                        "Designer upgrade intent reviewed. Paid entitlement, billing and current plan were not changed.",
+                        "تمت مراجعة نية ترقية المصمم. لم تتغير الصلاحية المدفوعة أو الفوترة أو الخطة الحالية.",
                     ),
                 )
             else:
-                raise ValidationError("Unsupported subscription lifecycle action.")
+                upgrade = get_object_or_404(
+                    ManufacturerSubscriptionUpgradeRequest.objects.select_related("organization", "target_plan_policy"),
+                    pk=request.POST.get("upgrade_request_id"),
+                )
+                if action == "process_manufacturer_upgrade":
+                    confirmation = get_object_or_404(
+                        SubscriptionBillingConfirmation,
+                        pk=request.POST.get("billing_confirmation_id"),
+                    )
+                    process_manufacturer_upgrade_request(
+                        upgrade_request=upgrade,
+                        actor=request.user,
+                        billing_confirmation=confirmation,
+                        request=request,
+                    )
+                    messages.success(
+                        request,
+                        maneg_views._text(
+                            request,
+                            "Manufacturer Pro upgrade activated from confirmed billing evidence; the request is completed.",
+                            "تم تفعيل ترقية المصنع إلى Pro من إثبات فوترة مؤكد واكتمل الطلب.",
+                        ),
+                    )
+                elif action == "cancel_manufacturer_upgrade":
+                    _row, changed = cancel_manufacturer_upgrade_request(
+                        upgrade_request=upgrade,
+                        actor=request.user,
+                        request=request,
+                    )
+                    messages.success(
+                        request,
+                        maneg_views._text(
+                            request,
+                            "Pending Manufacturer upgrade request cancelled without changing entitlement." if changed else "Manufacturer upgrade request was already cancelled.",
+                            "تم إلغاء طلب ترقية المصنع المعلق دون تغيير الصلاحية." if changed else "كان طلب ترقية المصنع ملغى بالفعل.",
+                        ),
+                    )
+                else:
+                    raise ValidationError("Unsupported subscription lifecycle action.")
         except (ValidationError, PermissionDenied) as exc:
             messages.error(request, str(exc))
         return HttpResponseRedirect(reverse("fabinzi_admin:maneg-v2-9-subscriptions"))
@@ -180,6 +208,7 @@ def subscriptions(request):
     plans = SubscriptionPlanPolicy.objects.order_by("audience", "code", "-version") if request.user.has_perm("subscriptions.view_subscriptionplanpolicy") else SubscriptionPlanPolicy.objects.none()
     confirmations = SubscriptionBillingConfirmation.objects.select_related("organization", "plan_policy", "confirmed_by").order_by("-confirmed_at")[:50] if request.user.has_perm("subscriptions.view_subscriptionbillingconfirmation") or can_process else []
     upgrade_rows = []
+    designer_upgrade_requests = []
     if can_process:
         requests = (
             ManufacturerSubscriptionUpgradeRequest.objects.select_related(
@@ -198,6 +227,14 @@ def subscriptions(request):
                     "eligible_confirmations": eligible_billing_confirmations(upgrade),
                 }
             )
+        designer_upgrade_requests = list(
+            DesignerSubscriptionUpgradeRequest.objects.select_related(
+                "organization",
+                "requested_by",
+                "target_plan_policy",
+                "reviewed_by",
+            ).order_by("-requested_at", "-id")[:100]
+        )
     context = maneg_views._context(
         request,
         section="subscriptions",
@@ -208,6 +245,8 @@ def subscriptions(request):
         billing_confirmations=list(confirmations),
         manufacturer_upgrade_rows=upgrade_rows,
         can_process_manufacturer_upgrades=can_process,
+        designer_upgrade_requests=designer_upgrade_requests,
+        can_review_designer_upgrades=can_process,
         query=query,
         status_filter=status,
         status_choices=OrganizationSubscription.Status.choices,
