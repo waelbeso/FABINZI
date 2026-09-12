@@ -332,13 +332,13 @@ def test_subscription_page_real_usage_owner_request_and_non_owner_denial(client)
     page = client.get(_url("/designer/subscription/", org))
     assert page.status_code == 200 and b"designer-current-plan" in page.content and b"designer-usage" in page.content
     assert b"designer-upgrade-request-form" in page.content
-    assert client.post(_url("/designer/subscription/", org), {"action": "upgrade"}).status_code == 302
+    assert client.post(_url("/designer/subscription/", org), {"action": "request_upgrade"}).status_code == 302
     assert _paid_state(org) == before
     page = client.get(_url("/designer/subscription/", org))
     assert b"Pending" in page.content and b"designer-upgrade-pending-note" in page.content and b"designer-upgrade-request-form" not in page.content
 
     client.force_login(member)
-    denied = client.post(_url("/designer/subscription/", org), {"action": "upgrade"})
+    denied = client.post(_url("/designer/subscription/", org), {"action": "request_upgrade"})
     assert denied.status_code == 200
     assert DesignerSubscriptionUpgradeRequest.objects.filter(organization=org).count() == 1
     assert _paid_state(org) == before
