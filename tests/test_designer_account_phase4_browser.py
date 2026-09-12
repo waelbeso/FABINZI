@@ -113,7 +113,7 @@ def test_designer_phase4_browser_evidence(client, live_server, tmp_path, monkeyp
 
     valid_path = tmp_path / "phase4-valid.png"
     valid_path.write_bytes(VALID_PNG)
-    invalid_path = tmp_path / "phase4-invalid.txt"
+    invalid_path = tmp_path / "phase4-invalid.png"
     invalid_path.write_text("not an image", encoding="utf-8")
 
     driver = _chrome(width=1440, height=1000)
