@@ -1,4 +1,5 @@
 from copy import deepcopy
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -214,6 +215,16 @@ def _designer_portal_state(organization, *, requested_edit=False, attempted_data
     )
 
 
+def _designer_public_profile_url(request, organization, *, edit=False):
+    params = {
+        "org": organization.pk,
+        "lang": getattr(request, "LANGUAGE_CODE", "en"),
+    }
+    if edit:
+        params["edit"] = "1"
+    return f"/designer/public-profile/?{urlencode(params)}"
+
+
 @login_required
 def designer_public_profile(request):
     context = require_active_designer_context(request, roles=DESIGNER_MANAGE_ROLES)
@@ -225,7 +236,7 @@ def designer_public_profile(request):
         action = request.POST.get("action", "")
         if action not in {"save_revision", "submit_revision", "hide", "request_visibility"}:
             messages.error(request, "Unsupported public-profile action.")
-            return redirect(f"/designer/public-profile/?org={organization.pk}")
+            return redirect(_designer_public_profile_url(request, organization))
         if action in {"hide", "request_visibility"}:
             try:
                 result = _profile_action(request, organization, manufacturer=False)
@@ -233,14 +244,14 @@ def designer_public_profile(request):
                 messages.error(request, _error(exc))
             else:
                 messages.success(request, result)
-            return redirect(f"/designer/public-profile/?org={organization.pk}")
+            return redirect(_designer_public_profile_url(request, organization))
 
         locked = organization.public_profile_revisions.filter(
             status__in=[PublicProfileRevision.Status.SUBMITTED, PublicProfileRevision.Status.UNDER_REVIEW]
         ).exists()
         if locked:
             messages.error(request, "A public profile revision is already submitted or under FABINZI review.")
-            return redirect(f"/designer/public-profile/?org={organization.pk}")
+            return redirect(_designer_public_profile_url(request, organization))
         try:
             result = _profile_action(request, organization, manufacturer=False)
         except (ValidationError, PermissionDenied) as exc:
@@ -258,8 +269,8 @@ def designer_public_profile(request):
             return render(request, "public_profiles/designer_portal.html", context)
         messages.success(request, result)
         if action == "save_revision":
-            return redirect(f"/designer/public-profile/?org={organization.pk}&edit=1")
-        return redirect(f"/designer/public-profile/?org={organization.pk}")
+            return redirect(_designer_public_profile_url(request, organization, edit=True))
+        return redirect(_designer_public_profile_url(request, organization))
 
     context.update(_designer_portal_state(organization, requested_edit=requested_edit))
     context.update({"public_state": state})
