@@ -7,6 +7,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.urls import reverse
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 
 from apps.manufacturer_marketplace.models import ManufacturerCapability, ManufacturerListing
@@ -53,6 +54,13 @@ EXPECTED = [
     "17c-subscription-history-controls-mobile-ar-rtl-dark.png",
     "17c2-subscription-plan-controls-mobile-ar-rtl-dark.png",
 ]
+SUPPLEMENTAL = [
+    "18a-subscription-billing-768-en-scroll.png",
+    "18b-subscription-billing-1024-en-scroll.png",
+    "18c-subscription-billing-768-ar-rtl-dark-scroll.png",
+    "18d-subscription-billing-1024-ar-rtl-dark-scroll.png",
+]
+BREAKPOINT_WIDTHS = (700, 701, 768, 980, 981, 1024)
 
 
 def _shot(driver, name):
@@ -209,6 +217,8 @@ def _subscription_layout_snapshot(driver, root):
         const panels = Array.from(root.children).filter((el) => el.classList.contains('mfr-panel'));
         const wrapper = root.querySelector('.manufacturer-table-wrap');
         const table = wrapper ? wrapper.querySelector('.manufacturer-table') : null;
+        const billingPanel = wrapper ? wrapper.closest('.mfr-panel') : null;
+        const cells = table ? Array.from(table.querySelectorAll('tbody tr:first-child td')) : [];
         const box = (el) => {
           if (!el) return null;
           const r = el.getBoundingClientRect();
@@ -219,29 +229,58 @@ def _subscription_layout_snapshot(driver, root):
             width: r.width,
             clientWidth: el.clientWidth,
             scrollWidth: el.scrollWidth,
+            scrollLeft: el.scrollLeft,
             minWidth: style.minWidth,
             maxWidth: style.maxWidth,
             overflowX: style.overflowX,
             display: style.display,
           };
         };
+        const clippingAncestors = [];
+        if (table) {
+          let node = table.parentElement;
+          while (node) {
+            const style = getComputedStyle(node);
+            if (style.overflowX !== 'visible' || node === document.body || node === document.documentElement) {
+              clippingAncestors.push({
+                tag: node.tagName,
+                className: node.className || '',
+                overflowX: style.overflowX,
+                box: box(node),
+              });
+            }
+            node = node.parentElement;
+          }
+        }
         return {
           viewportWidth: window.innerWidth,
+          direction: document.documentElement.dir,
+          document: {
+            clientWidth: document.documentElement.clientWidth,
+            scrollWidth: document.documentElement.scrollWidth,
+          },
           main: box(main),
           root: box(root),
           panels: panels.map(box),
+          billingPanel: box(billingPanel),
           wrapper: box(wrapper),
+          wrapperMeta: wrapper ? {
+            tabIndex: wrapper.tabIndex,
+            role: wrapper.getAttribute('role'),
+            ariaLabel: wrapper.getAttribute('aria-label'),
+          } : null,
           table: box(table),
+          cells: cells.map(box),
+          clippingAncestors,
         };
         """,
         root,
     )
 
 
-def _assert_subscription_mobile_layout(driver, root, *, expect_billing):
-    state = _subscription_layout_snapshot(driver, root)
+def _assert_subscription_shell_contained(state):
     viewport_width = state["viewportWidth"]
-    assert viewport_width <= 390, state
+    assert state["document"]["scrollWidth"] <= state["document"]["clientWidth"] + 1, state
     for key in ("main", "root"):
         box = state[key]
         assert box["left"] >= -1 and box["right"] <= viewport_width + 1, (key, state)
@@ -250,15 +289,157 @@ def _assert_subscription_mobile_layout(driver, root, *, expect_billing):
         assert box["left"] >= state["root"]["left"] - 1, (index, state)
         assert box["right"] <= state["root"]["right"] + 1, (index, state)
         assert box["scrollWidth"] <= box["clientWidth"] + 1, (index, state)
-    if expect_billing:
-        assert state["wrapper"] is not None and state["table"] is not None, state
-        assert state["wrapper"]["scrollWidth"] <= state["wrapper"]["clientWidth"] + 1, state
+
+
+def _exercise_billing_scroll(driver, wrapper):
+    assert wrapper.get_attribute("tabindex") == "0"
+    assert wrapper.get_attribute("role") == "region"
+    assert (wrapper.get_attribute("aria-label") or "").strip()
+    metrics = driver.execute_script(
+        "return {clientWidth: arguments[0].clientWidth, scrollWidth: arguments[0].scrollWidth};",
+        wrapper,
+    )
+    interaction = {
+        "scrollable": metrics["scrollWidth"] > metrics["clientWidth"] + 1,
+        "keyboardMoved": False,
+        "keyboardScrollLeft": 0,
+        "cellAccess": [],
+    }
+    if not interaction["scrollable"]:
+        return interaction
+
+    driver.execute_script("arguments[0].scrollLeft = 0; arguments[0].focus();", wrapper)
+    assert driver.execute_script("return document.activeElement === arguments[0];", wrapper)
+    key = Keys.ARROW_LEFT if driver.find_element(By.TAG_NAME, "html").get_attribute("dir") == "rtl" else Keys.ARROW_RIGHT
+    for _ in range(3):
+        wrapper.send_keys(key)
+    _wait(driver).until(lambda _d: abs(_d.execute_script("return arguments[0].scrollLeft;", wrapper)) > 0.5)
+    interaction["keyboardMoved"] = True
+    interaction["keyboardScrollLeft"] = driver.execute_script("return arguments[0].scrollLeft;", wrapper)
+
+    interaction["cellAccess"] = driver.execute_script(
+        """
+        const wrap = arguments[0];
+        const cells = Array.from(wrap.querySelectorAll('tbody tr:first-child td'));
+        const result = [];
+        for (const cell of cells) {
+          cell.scrollIntoView({block: 'nearest', inline: 'nearest', behavior: 'instant'});
+          const wr = wrap.getBoundingClientRect();
+          const cr = cell.getBoundingClientRect();
+          result.push({
+            text: cell.innerText,
+            left: cr.left,
+            right: cr.right,
+            fullyVisible: cr.left >= wr.left - 1 && cr.right <= wr.right + 1,
+            scrollLeft: wrap.scrollLeft,
+          });
+        }
+        return result;
+        """,
+        wrapper,
+    )
+    assert len(interaction["cellAccess"]) == 4, interaction
+    assert all(item["fullyVisible"] for item in interaction["cellAccess"]), interaction
+    return interaction
+
+
+def _assert_subscription_layout(driver, root, *, expect_billing, record_layout):
+    state = _subscription_layout_snapshot(driver, root)
+    _assert_subscription_shell_contained(state)
+    if not expect_billing:
+        assert state["wrapper"] is None and state["table"] is None and not state["cells"], state
+        return state
+
+    assert state["wrapper"] is not None and state["table"] is not None, state
+    assert state["billingPanel"] is not None and len(state["cells"]) == 4, state
+    assert state["wrapper"]["left"] >= state["billingPanel"]["left"] - 1, state
+    assert state["wrapper"]["right"] <= state["billingPanel"]["right"] + 1, state
+    assert state["wrapperMeta"]["tabIndex"] == 0, state
+    assert state["wrapperMeta"]["role"] == "region", state
+    assert state["wrapperMeta"]["ariaLabel"], state
+
+    if record_layout:
         assert state["table"]["minWidth"] == "0px", state
+        assert state["wrapper"]["scrollWidth"] <= state["wrapper"]["clientWidth"] + 1, state
         assert state["table"]["left"] >= state["wrapper"]["left"] - 1, state
         assert state["table"]["right"] <= state["wrapper"]["right"] + 1, state
-    else:
-        assert state["wrapper"] is None and state["table"] is None, state
+        state["interaction"] = _exercise_billing_scroll(driver, root.find_element(By.CSS_SELECTOR, ".manufacturer-table-wrap"))
+        assert not state["interaction"]["scrollable"], state
+        return state
+
+    assert state["table"]["minWidth"] == "720px", state
+    assert state["wrapper"]["overflowX"] in {"auto", "scroll"}, state
+    assert any(
+        "manufacturer-table-wrap" in ancestor["className"].split() and ancestor["overflowX"] in {"auto", "scroll"}
+        for ancestor in state["clippingAncestors"]
+    ), state
+    state["interaction"] = _exercise_billing_scroll(driver, root.find_element(By.CSS_SELECTOR, ".manufacturer-table-wrap"))
+    if state["wrapper"]["scrollWidth"] > state["wrapper"]["clientWidth"] + 1:
+        assert state["interaction"]["scrollable"] and state["interaction"]["keyboardMoved"], state
     return state
+
+
+def _assert_subscription_mobile_layout(driver, root, *, expect_billing):
+    state = _assert_subscription_layout(driver, root, expect_billing=expect_billing, record_layout=True)
+    assert state["viewportWidth"] <= 390, state
+    return state
+
+
+def _replay_prior_billing_overflow(driver, root):
+    driver.execute_script(
+        """
+        document.getElementById('round2-prior-billing-overflow-replay')?.remove();
+        const style = document.createElement('style');
+        style.id = 'round2-prior-billing-overflow-replay';
+        style.textContent = '[data-page="manufacturer-subscription"] .manufacturer-table-wrap{overflow-x:visible!important}';
+        document.head.appendChild(style);
+        """
+    )
+    state = _subscription_layout_snapshot(driver, root)
+    driver.execute_script("document.getElementById('round2-prior-billing-overflow-replay')?.remove();")
+    return state
+
+
+def _measure_subscription_breakpoints(
+    driver,
+    live_server,
+    *,
+    organization_id,
+    language,
+    expected_dir,
+    expected_theme,
+    expect_billing,
+    replay_prior,
+    screenshots=None,
+):
+    screenshots = screenshots or {}
+    results = {}
+    for width in BREAKPOINT_WIDTHS:
+        driver.set_window_size(width, 900)
+        driver.get(f"{live_server.url}/manufacturer/subscription/?org={organization_id}&lang={language}")
+        root = _wait(driver).until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-page="manufacturer-subscription"]')))
+        assert driver.find_element(By.TAG_NAME, "html").get_attribute("dir") == expected_dir
+        assert driver.find_element(By.TAG_NAME, "html").get_attribute("data-theme") == expected_theme
+        prior = None
+        if replay_prior and expect_billing:
+            prior = _replay_prior_billing_overflow(driver, root)
+            if width in (701, 768, 981, 1024):
+                assert prior["wrapper"]["scrollWidth"] > prior["wrapper"]["clientWidth"] + 1, prior
+                assert prior["billingPanel"]["scrollWidth"] > prior["billingPanel"]["clientWidth"] + 1, prior
+            if width in (700, 980):
+                assert prior["wrapper"]["scrollWidth"] <= prior["wrapper"]["clientWidth"] + 1, prior
+        final = _assert_subscription_layout(
+            driver,
+            root,
+            expect_billing=expect_billing,
+            record_layout=width <= 700,
+        )
+        results[str(width)] = {"priorReplay": prior, "final": final}
+        if width in screenshots:
+            history_panel = _panel_by_heading(root, "سجل الفوترة" if language == "ar" else "Billing history")
+            wrapper = history_panel.find_element(By.CSS_SELECTOR, ".manufacturer-table-wrap")
+            _shot_group(driver, screenshots[width], history_panel.find_element(By.TAG_NAME, "h2"), wrapper)
+    return results
 
 
 def _assert_hidden_image(driver, image):
@@ -450,6 +631,9 @@ def test_manufacturer_round2_real_chrome(client, live_server, v2_3_reference_row
     )
 
     no_media_owner, no_media_org, _no_profile, _no_app = manufacturer("round2-no-media")
+    no_media_owner.theme_preference = User.Theme.LIGHT
+    no_media_owner.language_preference = User.Language.ENGLISH
+    no_media_owner.save(update_fields=["theme_preference", "language_preference"])
     no_media_org.city = "Alexandria With A Deliberately Long Public Location Label"
     no_media_org.region = "Alexandria Governorate"
     no_media_org.save(update_fields=["city", "region", "updated_at"])
@@ -534,6 +718,14 @@ def test_manufacturer_round2_real_chrome(client, live_server, v2_3_reference_row
         assert subscription.current_plan.code != MANUFACTURER_PRO
         confirmation.refresh_from_db()
         assert confirmation.consumed_period_id is None
+        layout_evidence = {
+            "reviewed_9bdc433_failure": {
+                "viewportWidth": 390,
+                "entitlementHeading": {"width": 720, "left": -374, "right": 346},
+                "effectivePlan": {"width": 686, "left": -357, "right": 329},
+                "sourceTableMinWidth": "720px",
+            }
+        }
 
         subscription_root = driver.find_element(By.CSS_SELECTOR, '[data-page="manufacturer-subscription"]')
         renewal_panel = _panel_by_heading(subscription_root, "Renewal & timing")
@@ -555,6 +747,19 @@ def test_manufacturer_round2_real_chrome(client, live_server, v2_3_reference_row
         history_table = history_panel.find_element(By.CSS_SELECTOR, ".manufacturer-table-wrap")
         assert history_table.find_elements(By.CSS_SELECTOR, "tbody tr")
         _shot_group(driver, EXPECTED[4], history_panel.find_element(By.TAG_NAME, "h2"), history_table)
+
+        layout_evidence["breakpoints_en_populated"] = _measure_subscription_breakpoints(
+            driver,
+            live_server,
+            organization_id=org.pk,
+            language="en",
+            expected_dir="ltr",
+            expected_theme="light",
+            expect_billing=True,
+            replay_prior=True,
+            screenshots={768: SUPPLEMENTAL[0], 1024: SUPPLEMENTAL[1]},
+        )
+        driver.set_window_size(1440, 1100)
 
         # M2-03: inline identity error keeps entered data and never leaves the workspace.
         driver.get(f"{live_server.url}/manufacturer/team/?org={org.pk}&lang=en")
@@ -764,11 +969,23 @@ def test_manufacturer_round2_real_chrome(client, live_server, v2_3_reference_row
         assert nav_state["intersects"] and nav_state["unobscured"], nav_state
         _shot(driver, EXPECTED[17])
 
-        # Mobile/RTL/dark evidence: focus actual changed content, not the workspace navigation panel.
+        # RTL/dark breakpoint evidence and existing 390px mobile evidence.
         owner.theme_preference = User.Theme.DARK
         owner.language_preference = User.Language.ARABIC
         owner.save(update_fields=["theme_preference", "language_preference"])
         _login(driver, live_server, client, owner)
+        layout_evidence["breakpoints_ar_populated"] = _measure_subscription_breakpoints(
+            driver,
+            live_server,
+            organization_id=org.pk,
+            language="ar",
+            expected_dir="rtl",
+            expected_theme="dark",
+            expect_billing=True,
+            replay_prior=True,
+            screenshots={768: SUPPLEMENTAL[2], 1024: SUPPLEMENTAL[3]},
+        )
+
         driver.set_window_size(390, 844)
         driver.get(f"{live_server.url}{reverse('manufacturer-marketplace')}?lang=ar")
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "مصنع الجولة الثانية بوسائط معتمدة"))
@@ -799,14 +1016,6 @@ def test_manufacturer_round2_real_chrome(client, live_server, v2_3_reference_row
         assert driver.find_element(By.TAG_NAME, "html").get_attribute("dir") == "rtl"
         assert driver.find_element(By.TAG_NAME, "html").get_attribute("data-theme") == "dark"
         assert f"#{upgrade.pk}" in driver.find_element(By.TAG_NAME, "body").text
-        layout_evidence = {
-            "reviewed_9bdc433_failure": {
-                "viewportWidth": 390,
-                "entitlementHeading": {"width": 720, "left": -374, "right": 346},
-                "effectivePlan": {"width": 686, "left": -357, "right": 329},
-                "sourceTableMinWidth": "720px",
-            }
-        }
         layout_evidence["after_ar_populated"] = _assert_subscription_mobile_layout(driver, subscription_root, expect_billing=True)
 
         mobile_entitlement = _panel_by_heading(subscription_root, "الصلاحية الفعلية")
@@ -865,14 +1074,40 @@ def test_manufacturer_round2_real_chrome(client, live_server, v2_3_reference_row
         english_cells = english_history.find_elements(By.CSS_SELECTOR, "tbody tr:first-child td")
         assert [cell.get_attribute("data-label") for cell in english_cells] == ["Date", "Plan", "Amount", "Status"]
 
-        # A separate Manufacturer with no confirmations must remain contained and omit the history region cleanly.
+        # No-history state: 390px plus both directions across the same breakpoint matrix.
         _login(driver, live_server, client, no_media_owner)
+        driver.set_window_size(390, 844)
         driver.get(f"{live_server.url}/manufacturer/subscription/?org={no_media_org.pk}&lang=en")
         empty_subscription_root = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-page="manufacturer-subscription"]')))
         assert driver.find_element(By.TAG_NAME, "html").get_attribute("dir") == "ltr"
         assert not empty_subscription_root.find_elements(By.CSS_SELECTOR, ".manufacturer-table-wrap")
         assert "Billing history" not in empty_subscription_root.text
         layout_evidence["after_en_no_history"] = _assert_subscription_mobile_layout(driver, empty_subscription_root, expect_billing=False)
+        layout_evidence["breakpoints_en_no_history"] = _measure_subscription_breakpoints(
+            driver,
+            live_server,
+            organization_id=no_media_org.pk,
+            language="en",
+            expected_dir="ltr",
+            expected_theme="light",
+            expect_billing=False,
+            replay_prior=False,
+        )
+
+        no_media_owner.theme_preference = User.Theme.DARK
+        no_media_owner.language_preference = User.Language.ARABIC
+        no_media_owner.save(update_fields=["theme_preference", "language_preference"])
+        _login(driver, live_server, client, no_media_owner)
+        layout_evidence["breakpoints_ar_no_history"] = _measure_subscription_breakpoints(
+            driver,
+            live_server,
+            organization_id=no_media_org.pk,
+            language="ar",
+            expected_dir="rtl",
+            expected_theme="dark",
+            expect_billing=False,
+            replay_prior=False,
+        )
 
         (ARTIFACT_DIR / "mobile-subscription-layout.txt").write_text(repr(layout_evidence), encoding="utf-8")
     except Exception:
@@ -881,4 +1116,4 @@ def test_manufacturer_round2_real_chrome(client, live_server, v2_3_reference_row
     finally:
         driver.quit()
 
-    assert sorted(path.name for path in ARTIFACT_DIR.glob("*.png")) == EXPECTED
+    assert sorted(path.name for path in ARTIFACT_DIR.glob("*.png")) == sorted(EXPECTED + SUPPLEMENTAL)
