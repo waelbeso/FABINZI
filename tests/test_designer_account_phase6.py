@@ -458,3 +458,168 @@ def test_phase6_product_media_isolated_from_profile_picker_and_profile_media_sti
     )
     assert designer_public_image_eligible(product_media, org) is False
     assert designer_public_image_eligible(profile_media, org) is True
+
+
+@pytest.mark.django_db
+def test_phase6_same_organization_reuse_preserves_origin_independent_galleries_and_tenant_boundary():
+    owner, org, store, first = _catalog("same-org-reuse")
+    second = create_store_product(
+        storefront=store,
+        actor=owner,
+        designed_product=first.designed_product,
+        slug="same-org-reuse-second",
+        title_en="Same organization second product",
+        base_price="500.00",
+    )
+    add_variant(product=second, actor=owner, sku="SAME-ORG-REUSE-SECOND-M", size="M")
+
+    shared = _classified_media(org=org, product=first, actor=owner, key="shared-origin-first")
+    first_extra = _classified_media(org=org, product=first, actor=owner, key="first-extra")
+    second_primary = _classified_media(org=org, product=second, actor=owner, key="second-primary")
+
+    assert shared.metadata["store_product_id"] == first.pk
+    assert designer_store_product_image_eligible(shared, org) is True
+    assert designer_public_image_eligible(shared, org) is False
+
+    first_shared = add_product_image(product=first, actor=owner, media_asset=shared)
+    add_product_image(product=first, actor=owner, media_asset=first_extra)
+    add_product_image(product=second, actor=owner, media_asset=second_primary)
+    second_shared = add_product_image(product=second, actor=owner, media_asset=shared)
+
+    assert first_shared.pk != second_shared.pk
+    assert first_shared.media_asset_id == second_shared.media_asset_id == shared.pk
+    assert list(first.images.order_by("sort_order", "id").values_list("media_asset_id", flat=True)) == [shared.pk, first_extra.pk]
+    assert list(second.images.order_by("sort_order", "id").values_list("media_asset_id", flat=True)) == [second_primary.pk, shared.pk]
+    assert list(first.images.order_by("sort_order", "id").values_list("sort_order", flat=True)) == [0, 1]
+    assert list(second.images.order_by("sort_order", "id").values_list("sort_order", flat=True)) == [0, 1]
+
+    detach_product_image(product=first, actor=owner, image_id=first_shared.pk)
+    assert not StoreProductImage.objects.filter(pk=first_shared.pk).exists()
+    assert StoreProductImage.objects.filter(pk=second_shared.pk, product=second, media_asset=shared).exists()
+    assert MediaAsset.objects.filter(pk=shared.pk).exists()
+    assert list(first.images.order_by("sort_order", "id").values_list("media_asset_id", flat=True)) == [first_extra.pk]
+    assert list(first.images.order_by("sort_order", "id").values_list("sort_order", flat=True)) == [0]
+    assert list(second.images.order_by("sort_order", "id").values_list("media_asset_id", flat=True)) == [second_primary.pk, shared.pk]
+
+    first_shared_reused = add_product_image(product=first, actor=owner, media_asset=shared)
+    set_primary_product_image(product=first, actor=owner, image_id=first_shared_reused.pk)
+    assert list(first.images.order_by("sort_order", "id").values_list("media_asset_id", flat=True)) == [shared.pk, first_extra.pk]
+    assert list(second.images.order_by("sort_order", "id").values_list("media_asset_id", flat=True)) == [second_primary.pk, shared.pk]
+    assert shared.metadata["store_product_id"] == first.pk
+
+    publish_storefront(storefront=store, actor=owner)
+    publish_store_product(product=first, actor=owner)
+    publish_store_product(product=second, actor=owner)
+    first.refresh_from_db()
+    second.refresh_from_db()
+    assert first.status == StoreProduct.Status.PUBLISHED
+    assert second.status == StoreProduct.Status.PUBLISHED
+
+    other_owner, other_org, _other_store, other_product = _catalog("same-org-reuse-other")
+    before_relations = other_product.images.count()
+    assert designer_store_product_image_eligible(shared, other_org) is False
+    with pytest.raises(ValidationError):
+        add_product_image(product=other_product, actor=other_owner, media_asset=shared)
+    assert other_product.images.count() == before_relations
+    assert StoreProductImage.objects.filter(pk=second_shared.pk, product=second, media_asset=shared).exists()
+    assert MediaAsset.objects.filter(pk=shared.pk).exists()
+    assert shared.metadata["store_product_id"] == first.pk
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("role", "can_manage"),
+    [
+        (Membership.Role.OWNER, True),
+        (Membership.Role.MANAGER, True),
+        (Membership.Role.DESIGN_MANAGER, True),
+        (Membership.Role.DESIGNER, False),
+        (Membership.Role.ACCOUNTANT, False),
+    ],
+)
+def test_phase6_template_media_actions_respect_role_state_and_reuse_provenance(client, role, can_manage):
+    owner, org, store, origin = _catalog(f"template-{role}")
+    target = create_store_product(
+        storefront=store,
+        actor=owner,
+        designed_product=origin.designed_product,
+        slug=f"template-{role}-target",
+        title_en=f"Template {role} target",
+        base_price="500.00",
+    )
+    add_variant(product=target, actor=owner, sku=f"TEMPLATE-{str(role).upper()}-TARGET-M", size="M")
+    target_primary = _classified_media(org=org, product=target, actor=owner, key=f"template-{role}-primary")
+    reused = _classified_media(org=org, product=origin, actor=owner, key=f"template-{role}-reused")
+    add_product_image(product=target, actor=owner, media_asset=target_primary)
+    reused_relation = add_product_image(product=target, actor=owner, media_asset=reused)
+    assert reused.metadata["store_product_id"] == origin.pk
+    assert reused.metadata["store_product_id"] != target.pk
+
+    actor = owner
+    if role != Membership.Role.OWNER:
+        actor = User.objects.create_user(username=f"template-{role}-actor", password="password12345")
+        Membership.objects.create(organization=org, user=actor, role=role, is_active=True)
+    client.force_login(actor)
+    url = f"/designer/store/products/{target.pk}/?org={org.pk}&lang=en"
+
+    response = client.get(url)
+    assert response.status_code == 200
+    body = response.content
+    assert reused.original_filename.encode() in body
+    assert b"Legacy image" not in body
+    assert b"Product image" in body
+    assert str(reused_relation.pk).encode() in body
+    if can_manage:
+        assert b"data-store-media-upload-form" in body
+        assert b'name="media_action" value="detach"' in body
+        assert b'name="media_action" value="set_primary"' in body
+    else:
+        assert b"data-store-media-upload-form" not in body
+        assert b'name="media_action"' not in body
+
+    publish_storefront(storefront=store, actor=owner)
+    publish_store_product(product=target, actor=owner)
+    response = client.get(url)
+    assert response.status_code == 200
+    body = response.content
+    assert b"data-store-media-readonly" in body
+    assert b"data-store-media-upload-form" not in body
+    assert b'name="media_action"' not in body
+
+
+@pytest.mark.django_db
+def test_phase6_non_product_media_categories_remain_ineligible():
+    owner, org, _store, product = _catalog("non-product-categories")
+    category_metadata = [
+        {"organization_id": org.pk, "purpose": "artwork_preview", "designer_public_upload": True},
+        {"organization_id": org.pk, "purpose": "design_front", "designer_public_upload": True},
+        {"organization_id": org.pk, "purpose": "storefront_logo"},
+        {"organization_id": org.pk, "purpose": "profile", "designer_public_upload": True},
+        {"organization_id": org.pk, "purpose": "cover", "designer_public_upload": True},
+        {"organization_id": org.pk, "purpose": "manufacturer_profile", "manufacturer_public_upload": True},
+        {},
+    ]
+    for index, metadata in enumerate(category_metadata):
+        media = _classified_media(
+            org=org,
+            product=product,
+            actor=owner,
+            key=f"non-product-{index}",
+            metadata=metadata,
+        )
+        assert designer_store_product_image_eligible(media, org) is False
+        before = product.images.count()
+        with pytest.raises(ValidationError):
+            add_product_image(product=product, actor=owner, media_asset=media)
+        assert product.images.count() == before
+
+    private_product_media = _classified_media(
+        org=org,
+        product=product,
+        actor=owner,
+        key="non-product-private",
+        access=MediaAsset.Access.PRIVATE,
+    )
+    assert designer_store_product_image_eligible(private_product_media, org) is False
+    with pytest.raises(ValidationError):
+        add_product_image(product=product, actor=owner, media_asset=private_product_media)
