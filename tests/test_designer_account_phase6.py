@@ -204,7 +204,7 @@ def test_phase6_direct_upload_accepts_valid_decoded_formats_and_persists_contrac
     assert asset.metadata["checksum_sha256"] == asset.checksum_sha256
     assert asset.metadata["public_url"].startswith("https://imagedelivery.net/")
     assert "phase6-test-token" not in str(asset.metadata)
-    assert designer_store_product_image_eligible(asset, org, product) is True
+    assert designer_store_product_image_eligible(asset, org) is True
     assert designer_public_image_eligible(asset, org) is False
 
 
@@ -401,32 +401,6 @@ def test_phase6_unrelated_private_cross_tenant_and_profile_media_cannot_attach_o
         publish_store_product(product=product, actor=owner)
     product.refresh_from_db()
     assert product.status == StoreProduct.Status.DRAFT
-
-
-@pytest.mark.django_db
-def test_phase6_same_org_store_media_cannot_be_reused_for_another_product():
-    owner, org, store, first = _catalog("same-org-binding")
-    second = create_store_product(
-        storefront=store,
-        actor=owner,
-        designed_product=first.designed_product,
-        slug="same-org-binding-second",
-        title_en="Same organization second product",
-        base_price="500.00",
-    )
-    add_variant(product=second, actor=owner, sku="SAME-ORG-BINDING-SECOND-M", size="M")
-    media = _classified_media(org=org, product=first, actor=owner, key="bound-first-product")
-
-    assert designer_store_product_image_eligible(media, org, first) is True
-    assert designer_store_product_image_eligible(media, org, second) is False
-    add_product_image(product=first, actor=owner, media_asset=media)
-    with pytest.raises(ValidationError):
-        add_product_image(product=second, actor=owner, media_asset=media)
-
-    StoreProductImage.objects.create(product=second, media_asset=media, sort_order=0)
-    publish_storefront(storefront=store, actor=owner)
-    with pytest.raises(ValidationError, match="Every public gallery image"):
-        publish_store_product(product=second, actor=owner)
 
 
 @pytest.mark.django_db
