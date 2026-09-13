@@ -60,35 +60,89 @@ def _public_products_for_designer(organization):
 
 
 def designer_directory(request):
-    designers = list(public_professional_queryset(kind=Organization.Kind.DESIGNER).order_by("display_name"))
+    designers = list(
+        public_professional_queryset(kind=Organization.Kind.DESIGNER)
+        .select_related("public_state__profile_image")
+        .order_by("display_name")
+    )
     items = []
+    cards = []
     for index, organization in enumerate(designers, 1):
         state = organization.public_state
-        name = state.public_name_ar if getattr(request, "LANGUAGE_CODE", "en") == "ar" and state.public_name_ar else state.public_name_en or organization.display_name
-        items.append({
-            "@type": "ListItem",
-            "position": index,
-            "name": name,
-            "url": absolute_url(reverse("designer-public-detail", args=[state.slug])),
-        })
-    return render(request, "public_profiles/designer_directory.html", {
-        "designers": designers,
-        "page_seo": page_seo(
-            title=_localized(request, "Designers | FABINZI", "المصممون | FABINZI"),
-            description=_localized(request, "Discover FABINZI-approved public Designer profiles independently of Storefront publication.", "اكتشف ملفات المصممين العامة المعتمدة من FABINZI بشكل مستقل عن نشر المتجر."),
-            json_ld={"@context": "https://schema.org", "@type": "CollectionPage", "name": _localized(request, "FABINZI Designer Directory", "دليل مصممي FABINZI"), "url": absolute_url(request.path), "mainEntity": {"@type": "ItemList", "itemListElement": items}},
-        ),
-    })
+        name = (
+            state.public_name_ar
+            if getattr(request, "LANGUAGE_CODE", "en") == "ar" and state.public_name_ar
+            else state.public_name_en or organization.display_name
+        )
+        url = reverse("designer-public-detail", args=[state.slug])
+        cards.append(
+            {
+                "organization": organization,
+                "state": state,
+                "name": name,
+                "location_parts": _location_parts(organization),
+                "specializations": list(state.specializations or []),
+                "profile_image_url": _asset_path(state.profile_image),
+                "url": url,
+            }
+        )
+        items.append(
+            {
+                "@type": "ListItem",
+                "position": index,
+                "name": name,
+                "url": absolute_url(url),
+            }
+        )
+    return render(
+        request,
+        "public_profiles/designer_directory.html",
+        {
+            "designers": designers,
+            "designer_cards": cards,
+            "page_seo": page_seo(
+                title=_localized(request, "Designers | FABINZI", "المصممون | FABINZI"),
+                description=_localized(
+                    request,
+                    "Discover FABINZI-approved public Designer profiles independently of Storefront publication.",
+                    "اكتشف ملفات المصممين العامة المعتمدة من FABINZI بشكل مستقل عن نشر المتجر.",
+                ),
+                json_ld={
+                    "@context": "https://schema.org",
+                    "@type": "CollectionPage",
+                    "name": _localized(
+                        request,
+                        "FABINZI Designer Directory",
+                        "دليل مصممي FABINZI",
+                    ),
+                    "url": absolute_url(request.path),
+                    "mainEntity": {
+                        "@type": "ItemList",
+                        "itemListElement": items,
+                    },
+                },
+            ),
+        },
+    )
 
 
 def designer_public_detail(request, slug):
     organization = get_object_or_404(
-        public_professional_queryset(kind=Organization.Kind.DESIGNER),
+        public_professional_queryset(kind=Organization.Kind.DESIGNER).select_related(
+            "public_state__profile_image",
+            "public_state__cover_image",
+        ),
         public_state__slug=slug,
     )
     state = organization.public_state
     products = _public_products_for_designer(organization)
-    artworks = decorate_public_artworks(list(public_artwork_queryset().filter(organization=organization).order_by("-updated_at")[:12]))
+    artworks = decorate_public_artworks(
+        list(
+            public_artwork_queryset()
+            .filter(organization=organization)
+            .order_by("-updated_at")[:12]
+        )
+    )
     garments, ready_products, garment_ids, ready_ids = [], [], set(), set()
     for product in products:
         designed = product.designed_product
@@ -99,28 +153,87 @@ def designer_public_detail(request, slug):
         if design.pk not in garment_ids:
             garment_ids.add(design.pk)
             garments.append(design)
-    name = state.public_name_ar if getattr(request, "LANGUAGE_CODE", "en") == "ar" and state.public_name_ar else state.public_name_en or organization.display_name
-    bio = state.bio_ar if getattr(request, "LANGUAGE_CODE", "en") == "ar" and state.bio_ar else state.bio_en
+    name = (
+        state.public_name_ar
+        if getattr(request, "LANGUAGE_CODE", "en") == "ar" and state.public_name_ar
+        else state.public_name_en or organization.display_name
+    )
+    bio = (
+        state.bio_ar
+        if getattr(request, "LANGUAGE_CODE", "en") == "ar" and state.bio_ar
+        else state.bio_en
+    )
     image = _asset_path(state.profile_image)
-    return render(request, "public_profiles/designer_detail.html", {
-        "designer": organization,
-        "public_state": state,
-        "public_products": products,
-        "public_artworks": artworks,
-        "public_garment_designs": garments,
-        "public_ready_products": ready_products,
-        "profile_image_url": image,
-        "cover_image_url": _asset_path(state.cover_image),
-        "page_seo": page_seo(
-            title=f"{name} | FABINZI",
-            description=(bio[:220] if bio else _localized(request, "Approved public Designer profile on FABINZI.", "ملف مصمم عام معتمد على FABINZI.")),
-            image=image or None,
-            json_ld=[
-                {"@context": "https://schema.org", "@type": "Organization", "name": name, "url": absolute_url(request.path), **({"description": bio} if bio else {}), **({"image": absolute_url(image)} if image else {}), **({"address": {"@type": "PostalAddress", "addressLocality": organization.city, "addressRegion": organization.region, "addressCountry": organization.country}} if organization.city or organization.region else {})},
-                {"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": _localized(request, "Designers", "المصممون"), "item": absolute_url(reverse("designer-directory"))}, {"@type": "ListItem", "position": 2, "name": name, "item": absolute_url(request.path)}]},
-            ],
-        ),
-    })
+    return render(
+        request,
+        "public_profiles/designer_detail.html",
+        {
+            "designer": organization,
+            "public_state": state,
+            "public_name": name,
+            "public_bio": bio,
+            "public_location_parts": _location_parts(organization),
+            "public_products": products,
+            "public_artworks": artworks,
+            "public_garment_designs": garments,
+            "public_ready_products": ready_products,
+            "profile_image_url": image,
+            "cover_image_url": _asset_path(state.cover_image),
+            "page_seo": page_seo(
+                title=f"{name} | FABINZI",
+                description=(
+                    bio[:220]
+                    if bio
+                    else _localized(
+                        request,
+                        "Approved public Designer profile on FABINZI.",
+                        "ملف مصمم عام معتمد على FABINZI.",
+                    )
+                ),
+                image=image or None,
+                json_ld=[
+                    {
+                        "@context": "https://schema.org",
+                        "@type": "Organization",
+                        "name": name,
+                        "url": absolute_url(request.path),
+                        **({"description": bio} if bio else {}),
+                        **({"image": absolute_url(image)} if image else {}),
+                        **(
+                            {
+                                "address": {
+                                    "@type": "PostalAddress",
+                                    "addressLocality": organization.city,
+                                    "addressRegion": organization.region,
+                                    "addressCountry": organization.country,
+                                }
+                            }
+                            if organization.city or organization.region
+                            else {}
+                        ),
+                    },
+                    {
+                        "@context": "https://schema.org",
+                        "@type": "BreadcrumbList",
+                        "itemListElement": [
+                            {
+                                "@type": "ListItem",
+                                "position": 1,
+                                "name": _localized(request, "Designers", "المصممون"),
+                                "item": absolute_url(reverse("designer-directory")),
+                            },
+                            {
+                                "@type": "ListItem",
+                                "position": 2,
+                                "name": name,
+                                "item": absolute_url(request.path),
+                            },
+                        ],
+                    },
+                ],
+            ),
+        },
+    )
 
 
 def manufacturer_directory(request):
