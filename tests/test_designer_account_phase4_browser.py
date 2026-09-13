@@ -10,7 +10,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from apps.media.models import MediaAsset
-from apps.organizations.models import DesignerProfile, Membership, OnboardingApplication, Organization
+from apps.organizations.models import DesignerProfile, Membership, OnboardingApplication, Organization, PublicProfileRevision
 from apps.public_profiles.services import ensure_public_state
 from apps.subscriptions.designer_upgrade_services import create_designer_upgrade_request
 from apps.subscriptions.models import DesignerSubscriptionUpgradeRequest
@@ -249,12 +249,26 @@ def test_designer_phase4_browser_evidence(client, live_server, tmp_path, monkeyp
         driver.find_element(By.ID, "profile-image-upload").send_keys(str(valid_path))
         driver.find_element(By.ID, "cover-image-upload").send_keys(str(valid_path))
         _click_element(driver, driver.find_element(By.CSS_SELECTOR, "button[name='action'][value='save_revision']"))
-        wait.until(lambda _d: org.public_profile_revisions.filter(status="draft").exists())
+        wait.until(
+            lambda _d: org.public_profile_revisions.exists()
+            or bool(driver.find_elements(By.ID, "public-profile-error"))
+            or "Server Error" in driver.page_source
+            or "Forbidden" in driver.page_source
+        )
+        valid_errors = driver.find_elements(By.ID, "public-profile-error")
+        if valid_errors:
+            pytest.fail(
+                f"Valid Designer public-image upload returned a controlled error: {valid_errors[0].text!r}; "
+                f"provider_post_calls={post.call_count}"
+            )
+        assert "Server Error" not in driver.page_source
+        assert "Forbidden" not in driver.page_source
+        assert post.call_count == 2
+        revision = org.public_profile_revisions.get()
+        assert revision.status == PublicProfileRevision.Status.DRAFT
         wait.until(EC.visibility_of_element_located((By.ID, "designer-public-profile-form")))
-        revision = org.public_profile_revisions.get(status="draft")
         assert revision.proposed_data["public_state"]["profile_image_id"]
         assert revision.proposed_data["public_state"]["cover_image_id"]
-        assert post.call_count == 2
         assert "phase4-browser-test-token" not in driver.page_source
         assert "imagedelivery.net" not in driver.page_source
         _screenshot(driver, "p4-08-public-profile-upload-draft-en.png")
