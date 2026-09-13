@@ -124,7 +124,37 @@ def test_designer_phase4_browser_evidence(client, live_server, tmp_path, monkeyp
     if os.getenv("CI") != "true":
         pytest.skip("Phase 4 real-browser evidence is CI-only.")
 
-    monkeypatch.setattr("apps.public_profiles.portal_views.create_designer_public_image", _fake_public_creator)
+    from unittest.mock import Mock
+    from apps.integrations.models import IntegrationConfig
+    from apps.media import designer_public_services as designer_images
+
+    IntegrationConfig.objects.update_or_create(
+        provider=IntegrationConfig.Provider.CLOUDFLARE_IMAGES,
+        defaults={"enabled": True, "config": {"account_id": "a" * 32}},
+    )
+    monkeypatch.setattr(
+        IntegrationConfig,
+        "get_secrets",
+        lambda self: {"api_token": "phase4-browser-test-token"},
+    )
+    responses = [
+        Mock(
+            ok=True,
+            json=lambda purpose=purpose: {
+                "success": True,
+                "result": {
+                    "id": f"phase4-browser-{purpose}",
+                    "requireSignedURLs": False,
+                    "variants": [f"https://imagedelivery.net/browser/phase4-browser-{purpose}/public"],
+                },
+            },
+        )
+        for purpose in ("profile", "cover")
+    ]
+    post = Mock(side_effect=responses)
+    monkeypatch.setattr(designer_images.requests, "post", post)
+    monkeypatch.setattr(designer_images.requests, "delete", Mock())
+
     owner = User.objects.create_user(
         username="phase4-browser-owner",
         email="phase4-browser-owner@example.test",
@@ -205,10 +235,13 @@ def test_designer_phase4_browser_evidence(client, live_server, tmp_path, monkeyp
         profile_upload.send_keys(str(invalid_path))
         assert invalid_path.name in profile_upload.get_attribute("value")
         _click_element(driver, driver.find_element(By.CSS_SELECTOR, "button[name='action'][value='save_revision']"))
-        wait.until(EC.visibility_of_element_located((By.ID, "public-profile-error")))
+        error = wait.until(EC.visibility_of_element_located((By.ID, "public-profile-error")))
         assert "valid PNG, JPEG or WebP" in driver.page_source
         assert driver.find_element(By.ID, "designer-public-profile-form").is_displayed()
         assert "lang=en" in driver.current_url and "edit=1" in driver.current_url
+        assert post.call_count == 0
+        _center_in_viewport(driver, error)
+        wait.until(lambda _d: _inside_viewport(driver, error))
         _screenshot(driver, "p4-07-public-profile-upload-validation-en.png")
 
         driver.get(f"{live_server.url}/designer/public-profile/?org={org.pk}&edit=1&lang=en")
@@ -221,6 +254,9 @@ def test_designer_phase4_browser_evidence(client, live_server, tmp_path, monkeyp
         revision = org.public_profile_revisions.get(status="draft")
         assert revision.proposed_data["public_state"]["profile_image_id"]
         assert revision.proposed_data["public_state"]["cover_image_id"]
+        assert post.call_count == 2
+        assert "phase4-browser-test-token" not in driver.page_source
+        assert "imagedelivery.net" not in driver.page_source
         _screenshot(driver, "p4-08-public-profile-upload-draft-en.png")
 
         driver.get(f"{live_server.url}/designer/subscription/?org={org.pk}&lang=en")
