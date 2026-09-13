@@ -8,7 +8,7 @@ from urllib.parse import quote, urlsplit
 
 import requests
 from cryptography.fernet import InvalidToken
-from django.core.exceptions import ImproperlyConfigured, ValidationError
+from django.core.exceptions import ImproperlyConfigured, PermissionDenied, ValidationError
 from django.db import DatabaseError, transaction
 from django.views.decorators.debug import sensitive_variables
 
@@ -21,6 +21,29 @@ from .models import MediaAsset
 
 logger = logging.getLogger(__name__)
 SAFE_ERROR = "Public image upload is unavailable. Please try again later. / رفع الصورة العامة غير متاح. يرجى المحاولة لاحقاً."
+STORE_PRODUCT_PURPOSE = "store_product_image"
+STORE_EDIT_ROLES = [Membership.Role.OWNER, Membership.Role.MANAGER, Membership.Role.DESIGN_MANAGER]
+
+
+def _metadata(asset):
+    return asset.metadata if asset and isinstance(asset.metadata, dict) else {}
+
+
+def designer_store_product_image_eligible(asset, organization):
+    """Return whether a PUBLIC image is explicitly classified for this Designer's Store products."""
+    if (
+        organization.kind != Organization.Kind.DESIGNER
+        or not asset
+        or asset.access != MediaAsset.Access.PUBLIC
+        or not asset.mime_type.startswith("image/")
+    ):
+        return False
+    metadata = _metadata(asset)
+    return bool(
+        metadata.get("designer_store_product_upload") is True
+        and metadata.get("purpose") == STORE_PRODUCT_PURPOSE
+        and str(metadata.get("organization_id", "")) == str(organization.pk)
+    )
 
 
 def designer_public_image_eligible(asset, organization):
@@ -32,7 +55,12 @@ def designer_public_image_eligible(asset, organization):
         or not asset.mime_type.startswith("image/")
     ):
         return False
-    metadata = asset.metadata if isinstance(asset.metadata, dict) else {}
+    metadata = _metadata(asset)
+    # Phase 6 Store-product photography is a distinct public-media purpose and
+    # must never become selectable as a Designer Profile/Cover image merely
+    # because it carries the same organization_id.
+    if metadata.get("designer_store_product_upload") is True or metadata.get("purpose") == STORE_PRODUCT_PURPOSE:
+        return False
     if "organization_id" in metadata:
         return str(metadata["organization_id"]) == str(organization.pk)
     if metadata.get("designer_public_upload") or metadata.get("manufacturer_public_upload"):
@@ -82,25 +110,14 @@ def _compensate(endpoint, image_id, headers, organization_id):
         if not response.ok or response.json().get("success") is not True:
             raise ValueError
     except (requests.RequestException, ValueError, AttributeError):
-        logger.error(
-            "Designer image cleanup failed organization=%s image=%s",
-            organization_id,
-            image_id,
-        )
+        # Provider identifiers and credentials stay out of logs. The organization
+        # scope is sufficient for operator correlation with the surrounding audit.
+        logger.error("Designer image cleanup failed organization=%s", organization_id)
+        return False
+    return True
 
 
-@sensitive_variables("secrets", "token", "headers", "payload")
-def create_designer_public_image(*, upload, organization, actor, purpose, request=None):
-    if (
-        organization.kind != Organization.Kind.DESIGNER
-        or organization.verification_status != Organization.VerificationStatus.ACTIVE
-    ):
-        raise ValidationError(SAFE_ERROR)
-    require_org_access(actor, organization, roles=[Membership.Role.OWNER, Membership.Role.MANAGER])
-    if purpose not in {"profile", "cover"}:
-        raise ValidationError(SAFE_ERROR)
-
-    payload, mime, extension, width, height = validate_public_image(upload)
+def _provider_context():
     integration = IntegrationConfig.objects.filter(
         provider=IntegrationConfig.Provider.CLOUDFLARE_IMAGES,
         enabled=True,
@@ -120,15 +137,15 @@ def create_designer_public_image(*, upload, organization, actor, purpose, reques
             raise ValueError
     except (ImproperlyConfigured, InvalidToken, ValueError, TypeError, AttributeError):
         raise ValidationError(SAFE_ERROR) from None
+    return (
+        f"https://api.cloudflare.com/client/v4/accounts/{account_id}/images/v1",
+        {"Authorization": f"Bearer {token}"},
+    )
 
-    endpoint = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/images/v1"
-    headers = {"Authorization": f"Bearer {token}"}
-    metadata = {
-        "organization_id": organization.pk,
-        "actor_id": actor.pk,
-        "purpose": purpose,
-        "designer_public_upload": True,
-    }
+
+@sensitive_variables("headers", "payload")
+def _create_provider_image(*, payload, mime, extension, actor, metadata, purpose, organization_id):
+    endpoint, headers = _provider_context()
     try:
         response = requests.post(
             endpoint,
@@ -153,34 +170,80 @@ def create_designer_public_image(*, upload, organization, actor, purpose, reques
         ):
             raise ValueError
     except (requests.RequestException, ValueError, AttributeError, TypeError):
-        logger.warning(
-            "Designer image upload failed organization=%s purpose=%s",
-            organization.pk,
-            purpose,
-        )
+        logger.warning("Designer image upload failed organization=%s purpose=%s", organization_id, purpose)
         raise ValidationError(SAFE_ERROR) from None
 
     try:
         if result.get("requireSignedURLs") is not False:
             raise ValidationError(SAFE_ERROR)
         public_url = _delivery_url(result.get("variants"))
+    except ValidationError:
+        _compensate(endpoint, image_id, headers, organization_id)
+        raise
+    return endpoint, headers, image_id, public_url
+
+
+def _public_media_asset(*, upload, payload, mime, width, height, image_id, public_url, actor, metadata):
+    return MediaAsset(
+        provider=MediaAsset.Provider.CLOUDFLARE_IMAGES,
+        provider_asset_id=image_id,
+        original_filename=str(upload.name).replace("\\", "/").rsplit("/", 1)[-1][:255],
+        mime_type=mime,
+        size_bytes=len(payload),
+        checksum_sha256=hashlib.sha256(payload).hexdigest(),
+        access=MediaAsset.Access.PUBLIC,
+        uploaded_by=actor,
+        metadata={
+            **metadata,
+            "public_url": public_url,
+            "width": width,
+            "height": height,
+        },
+    )
+
+
+@sensitive_variables("payload")
+def create_designer_public_image(*, upload, organization, actor, purpose, request=None):
+    if (
+        organization.kind != Organization.Kind.DESIGNER
+        or organization.verification_status != Organization.VerificationStatus.ACTIVE
+    ):
+        raise ValidationError(SAFE_ERROR)
+    require_org_access(actor, organization, roles=[Membership.Role.OWNER, Membership.Role.MANAGER])
+    if purpose not in {"profile", "cover"}:
+        raise ValidationError(SAFE_ERROR)
+
+    payload, mime, extension, width, height = validate_public_image(upload)
+    metadata = {
+        "organization_id": organization.pk,
+        "actor_id": actor.pk,
+        "purpose": purpose,
+        "designer_public_upload": True,
+    }
+    endpoint, headers, image_id, public_url = _create_provider_image(
+        payload=payload,
+        mime=mime,
+        extension=extension,
+        actor=actor,
+        metadata=metadata,
+        purpose=purpose,
+        organization_id=organization.pk,
+    )
+
+    try:
         with transaction.atomic():
-            asset = MediaAsset.objects.create(
-                provider=MediaAsset.Provider.CLOUDFLARE_IMAGES,
-                provider_asset_id=image_id,
-                original_filename=str(upload.name).replace("\\", "/").rsplit("/", 1)[-1][:255],
-                mime_type=mime,
-                size_bytes=len(payload),
-                checksum_sha256=hashlib.sha256(payload).hexdigest(),
-                access=MediaAsset.Access.PUBLIC,
-                uploaded_by=actor,
-                metadata={
-                    **metadata,
-                    "public_url": public_url,
-                    "width": width,
-                    "height": height,
-                },
+            asset = _public_media_asset(
+                upload=upload,
+                payload=payload,
+                mime=mime,
+                width=width,
+                height=height,
+                image_id=image_id,
+                public_url=public_url,
+                actor=actor,
+                metadata=metadata,
             )
+            asset.save()
             record_audit_event(
                 actor=actor,
                 action="designer.public_image.uploaded",
@@ -194,5 +257,99 @@ def create_designer_public_image(*, upload, organization, actor, purpose, reques
             )
         return asset
     except (DatabaseError, ValidationError):
+        _compensate(endpoint, image_id, headers, organization.pk)
+        raise ValidationError(SAFE_ERROR) from None
+
+
+@sensitive_variables("payload")
+def create_designer_store_product_image(*, upload, product, organization, actor, alt_en="", alt_ar="", request=None):
+    """Upload, classify and attach genuine Store-product photography atomically."""
+    from apps.storefront.models import StoreProduct
+    from apps.storefront.services import add_product_image
+
+    if (
+        organization.kind != Organization.Kind.DESIGNER
+        or organization.verification_status != Organization.VerificationStatus.ACTIVE
+    ):
+        raise ValidationError(SAFE_ERROR)
+    require_org_access(actor, organization, roles=STORE_EDIT_ROLES)
+    current = StoreProduct.objects.select_related("storefront__organization").filter(
+        pk=product.pk,
+        storefront__organization=organization,
+    ).first()
+    if current is None or current.status not in {StoreProduct.Status.DRAFT, StoreProduct.Status.HIDDEN}:
+        raise ValidationError(
+            "Hide the published product before changing public product images. / أخفِ المنتج المنشور قبل تغيير صور المنتج العامة."
+        )
+
+    # Actual-byte validation and all authorization/state checks happen before the
+    # first provider request.
+    payload, mime, extension, width, height = validate_public_image(upload)
+    checksum = hashlib.sha256(payload).hexdigest()
+    metadata = {
+        "organization_id": organization.pk,
+        "store_product_id": current.pk,
+        "actor_id": actor.pk,
+        "purpose": STORE_PRODUCT_PURPOSE,
+        "designer_store_product_upload": True,
+        "validated_format": extension,
+        "width": width,
+        "height": height,
+        "checksum_sha256": checksum,
+    }
+    endpoint, headers, image_id, public_url = _create_provider_image(
+        payload=payload,
+        mime=mime,
+        extension=extension,
+        actor=actor,
+        metadata=metadata,
+        purpose=STORE_PRODUCT_PURPOSE,
+        organization_id=organization.pk,
+    )
+
+    try:
+        with transaction.atomic():
+            locked = StoreProduct.objects.select_for_update().select_related("storefront__organization").get(pk=current.pk)
+            if (
+                locked.storefront.organization_id != organization.pk
+                or locked.status not in {StoreProduct.Status.DRAFT, StoreProduct.Status.HIDDEN}
+            ):
+                raise ValidationError(
+                    "The product changed while the image was uploading. Try again after hiding the product. / تغيّرت حالة المنتج أثناء رفع الصورة. حاول مرة أخرى بعد إخفاء المنتج."
+                )
+            asset = _public_media_asset(
+                upload=upload,
+                payload=payload,
+                mime=mime,
+                width=width,
+                height=height,
+                image_id=image_id,
+                public_url=public_url,
+                actor=actor,
+                metadata=metadata,
+            )
+            asset.checksum_sha256 = checksum
+            asset.save()
+            image = add_product_image(
+                product=locked,
+                actor=actor,
+                media_asset=asset,
+                alt_en=alt_en,
+                alt_ar=alt_ar,
+                request=request,
+            )
+            record_audit_event(
+                actor=actor,
+                action="designer.store_product_image.uploaded",
+                instance=image,
+                metadata={
+                    "organization_id": organization.pk,
+                    "store_product_id": locked.pk,
+                    "media_asset_id": asset.pk,
+                },
+                request=request,
+            )
+        return asset, image
+    except (DatabaseError, ValidationError, PermissionDenied):
         _compensate(endpoint, image_id, headers, organization.pk)
         raise ValidationError(SAFE_ERROR) from None
