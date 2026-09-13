@@ -29,12 +29,10 @@ def _metadata(asset):
     return asset.metadata if asset and isinstance(asset.metadata, dict) else {}
 
 
-def designer_store_product_image_eligible(asset, organization, product):
-    """Return whether a PUBLIC image is explicitly bound to this Designer Store product."""
+def designer_store_product_image_eligible(asset, organization):
+    """Return whether a PUBLIC image is explicitly classified for this Designer's Store products."""
     if (
         organization.kind != Organization.Kind.DESIGNER
-        or not product
-        or product.storefront.organization_id != organization.pk
         or not asset
         or asset.access != MediaAsset.Access.PUBLIC
         or not asset.mime_type.startswith("image/")
@@ -45,7 +43,6 @@ def designer_store_product_image_eligible(asset, organization, product):
         metadata.get("designer_store_product_upload") is True
         and metadata.get("purpose") == STORE_PRODUCT_PURPOSE
         and str(metadata.get("organization_id", "")) == str(organization.pk)
-        and str(metadata.get("store_product_id", "")) == str(product.pk)
     )
 
 
