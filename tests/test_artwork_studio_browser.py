@@ -20,6 +20,7 @@ from apps.media.models import MediaAsset
 from apps.organizations.models import Membership, Organization
 from apps.storefront.models import CustomizationElement, StudioProject
 from apps.storefront.services import add_product_image, add_variant, create_store_product, create_storefront, publish_store_product, publish_storefront
+from .v2_6_helpers import product_image_metadata
 
 User = get_user_model()
 ARTIFACT_DIR = Path("artifacts/browser-qa")
@@ -43,7 +44,18 @@ def _creative_catalog(prefix="visualqa"):
     publish_storefront(storefront=store, actor=owner)
     product = create_store_product(storefront=store, actor=owner, designed_product=designed, slug=f"{prefix}-tee", title_en="Northstar Essential Tee", title_ar="تيشيرت نورث ستار", description_en="Real browser QA customizable product.", description_ar="منتج فعلي لاختبار التخصيص عبر المتصفح.", base_price="650.00", customization_enabled=True)
     variant = add_variant(product=product, actor=owner, sku=f"{prefix.upper()}-M-BLK", size="M", color_name="Black", color_hex="#111111")
-    product_image = MediaAsset.objects.create(provider=MediaAsset.Provider.LOCAL_DEV, provider_asset_id="/static/brand/fabinzi-logo.svg", original_filename="product-reference.svg", mime_type="image/svg+xml", size_bytes=100, access=MediaAsset.Access.PUBLIC, uploaded_by=owner, metadata={"public_url": "/static/brand/fabinzi-logo.svg"})
+    public_url = f"https://imagedelivery.net/test/{prefix}-store-product/public"
+    product_image = MediaAsset.objects.create(
+        provider=MediaAsset.Provider.CLOUDFLARE_IMAGES,
+        provider_asset_id=f"{prefix}-store-product",
+        original_filename="product-reference.png",
+        mime_type="image/png",
+        size_bytes=100,
+        checksum_sha256="0" * 64,
+        access=MediaAsset.Access.PUBLIC,
+        uploaded_by=owner,
+        metadata=product_image_metadata(organization=org, product=product, actor=owner, public_url=public_url),
+    )
     add_product_image(product=product, actor=owner, media_asset=product_image, alt_en=product.title_en, alt_ar=product.title_ar)
     publish_store_product(product=product, actor=owner)
     return {"owner": owner, "org": org, "zone": zone, "artwork": artwork, "version": version, "store": store, "product": product, "variant": variant}
