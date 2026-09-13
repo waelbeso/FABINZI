@@ -395,7 +395,7 @@ class Command(BaseCommand):
         if selected and not hasattr(rfq, "selection"):
             quote.status = ManufacturerQuote.Status.ACCEPTED
             quote.save(update_fields=["status", "updated_at"])
-            ManufacturerSelection.objects.create(rfq=rfq, quote=q, manufacturer=manufacturer_org, selected_by=designer)
+            ManufacturerSelection.objects.create(rfq=rfq, quote=quote, manufacturer=manufacturer_org, selected_by=designer)
             rfq.status = RFQ.Status.SELECTED
             rfq.selected_at = timezone.now()
             rfq.save(update_fields=["status", "selected_at", "updated_at"])
@@ -635,7 +635,7 @@ class Command(BaseCommand):
             custom_project = StudioProject.objects.create(customer=customer, product=catalog["womens-tshirt"], variant=womens_variants[0], status=StudioProject.Status.DRAFT, quantity=1, customer_notes="FABINZI_DEMO_CUSTOMIZABLE_PROJECT")
         customization, _ = CustomerCustomization.objects.get_or_create(project=custom_project, defaults={"enabled":True})
         zone = designs["womens-tshirt"]["zones"]["Front Chest"]
-        element, _ = CustomizationElement.objects.get_or_create(customization=custom_project.customization, decoration_zone=zone, kind=CustomizationElement.Kind.TEXT, text="FABINZI QA")
+        element, _ = CustomizationElement.objects.get_or_create(customization=customization, decoration_zone=zone, kind=CustomizationElement.Kind.TEXT, text="FABINZI QA")
         element.transform = {"x":0.5,"y":0.45,"scale":1.0,"rotation":0}
         element.style = {"font":"sans-serif","size":32}
         element.full_clean()
