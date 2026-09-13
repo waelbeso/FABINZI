@@ -24,6 +24,22 @@ from apps.checkout.services import update_checkout_shipping
 User = get_user_model()
 
 
+def product_image_metadata(*, organization, product, actor, public_url):
+    """Explicit Phase 6 Store-product-media provenance for test fixtures."""
+    return {
+        "organization_id": organization.pk,
+        "store_product_id": product.pk,
+        "actor_id": actor.pk,
+        "purpose": "store_product_image",
+        "designer_store_product_upload": True,
+        "public_url": public_url,
+        "validated_format": "png",
+        "width": 1,
+        "height": 1,
+        "checksum_sha256": "0" * 64,
+    }
+
+
 def make_catalog(prefix, *, ready=False, customization=False, currency="EGP", base_price="500.00", stock_quantity=None):
     owner = User.objects.create_user(username=f"{prefix}-owner", password="password12345")
     org = Organization.objects.create(
@@ -104,14 +120,22 @@ def make_catalog(prefix, *, ready=False, customization=False, currency="EGP", ba
         size="M",
         stock_quantity=stock_quantity,
     )
+    public_url = f"https://imagedelivery.net/test/{prefix}-image/public"
     image = MediaAsset.objects.create(
         provider="cloudflare_images",
         provider_asset_id=f"{prefix}-image",
         original_filename=f"{prefix}.png",
         mime_type="image/png",
         size_bytes=1,
+        checksum_sha256="0" * 64,
         access="public",
         uploaded_by=owner,
+        metadata=product_image_metadata(
+            organization=org,
+            product=product,
+            actor=owner,
+            public_url=public_url,
+        ),
     )
     add_product_image(product=product, actor=owner, media_asset=image)
     publish_store_product(product=product, actor=owner)
