@@ -85,6 +85,40 @@ def _screenshot(driver, name):
     assert _no_overflow(driver)
 
 
+def _center_in_viewport(driver, element):
+    driver.execute_script(
+        """
+        const el = arguments[0];
+        el.scrollIntoView({block: 'center', inline: 'nearest'});
+        for (let node = el.parentElement; node; node = node.parentElement) {
+            const style = window.getComputedStyle(node);
+            if (node.scrollHeight > node.clientHeight && /(auto|scroll)/.test(style.overflowY)) {
+                const er = el.getBoundingClientRect();
+                const nr = node.getBoundingClientRect();
+                node.scrollTop += er.top - nr.top - Math.max(0, (node.clientHeight - er.height) / 2);
+            }
+        }
+        const rect = el.getBoundingClientRect();
+        if (rect.top < 96 || rect.bottom > window.innerHeight - 24) {
+            window.scrollBy(0, rect.top - Math.max(96, (window.innerHeight - rect.height) / 2));
+        }
+        """,
+        element,
+    )
+
+
+def _inside_viewport(driver, element):
+    return bool(
+        driver.execute_script(
+            """
+            const rect = arguments[0].getBoundingClientRect();
+            return rect.top >= 76 && rect.bottom <= window.innerHeight - 12 && rect.left >= 0 && rect.right <= window.innerWidth;
+            """,
+            element,
+        )
+    )
+
+
 @pytest.mark.django_db(transaction=True)
 def test_designer_phase4_browser_evidence(client, live_server, tmp_path, monkeypatch):
     if os.getenv("CI") != "true":
@@ -162,9 +196,10 @@ def test_designer_phase4_browser_evidence(client, live_server, tmp_path, monkeyp
         assert cover_upload.get_attribute("type") == "file"
         assert form.get_attribute("enctype").lower() == "multipart/form-data"
         assert "lang=en" in form.get_attribute("action") and "edit=1" in form.get_attribute("action")
-        media_heading = driver.find_element(By.ID, "public-media-title")
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", media_heading)
+        media_grid = driver.find_element(By.XPATH, '//*[@id="public-media-title"]/following::div[contains(@class,"round2-media-grid")][1]')
+        _center_in_viewport(driver, media_grid)
         wait.until(lambda _d: profile_upload.is_displayed() and cover_upload.is_displayed())
+        wait.until(lambda _d: _inside_viewport(driver, profile_upload) and _inside_viewport(driver, cover_upload))
         _screenshot(driver, "p4-06-public-profile-edit-upload-controls-en.png")
 
         profile_upload.send_keys(str(invalid_path))
