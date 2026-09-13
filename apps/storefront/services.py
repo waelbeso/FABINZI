@@ -99,9 +99,9 @@ def add_product_image(*, product, actor, media_asset, alt_en="", alt_ar="", sort
 
     ``sort_order`` remains in the signature for existing callers but is not a
     caller-controlled business ordering input. Phase 6 derives ordering from the
-    current gallery so the first genuine image becomes primary and later images
-    append deterministically.
+    locked current gallery so concurrent callers cannot create competing primaries.
     """
+    product = StoreProduct.objects.select_for_update().select_related("storefront__organization").get(pk=product.pk)
     organization = require_store_product_image_access(product=product, actor=actor)
     if not store_product_image_eligible(media_asset, organization):
         raise ValidationError(PRODUCT_IMAGE_CONTRACT_ERROR)
@@ -146,6 +146,11 @@ def add_product_image(*, product, actor, media_asset, alt_en="", alt_ar="", sort
 
 @transaction.atomic
 def publish_store_product(*, product, actor, request=None):
+    # Serialize publication with Store-product media mutation. Direct uploads,
+    # reuse, primary changes and detach all lock the same product row.
+    product = StoreProduct.objects.select_for_update().select_related(
+        "storefront__organization", "designed_product"
+    ).get(pk=product.pk)
     require_store_access(actor, product.storefront)
     if product.storefront.status != Storefront.Status.PUBLISHED:
         raise ValidationError("Publish the Storefront first.")
@@ -155,7 +160,12 @@ def publish_store_product(*, product, actor, request=None):
         raise ValidationError("At least one active product variant is required.")
 
     organization = product.storefront.organization
-    images = list(product.images.select_related("media_asset").order_by("sort_order", "id"))
+    images = list(
+        StoreProductImage.objects.select_for_update()
+        .filter(product=product)
+        .select_related("media_asset")
+        .order_by("sort_order", "id")
+    )
     if not images:
         raise ValidationError("At least one genuine Store product image is required. / يلزم وجود صورة منتج متجر حقيقية واحدة على الأقل.")
     if not store_product_image_eligible(images[0].media_asset, organization):
