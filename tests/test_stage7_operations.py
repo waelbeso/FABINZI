@@ -23,6 +23,7 @@ from apps.storefront.services import (
     publish_store_product,
     publish_storefront,
 )
+from .v2_6_helpers import product_image_metadata
 
 User = get_user_model()
 
@@ -51,7 +52,18 @@ def confirmed_order(stock=False):
         customization_enabled=True,
     )
     v = add_variant(product=p, actor=owner, sku="WT-M", stock_quantity=10 if stock else None)
-    image = MediaAsset.objects.create(provider="cloudflare_images", provider_asset_id="/static/brand/fabinzi-logo.svg", original_filename="x.png", mime_type="image/png", size_bytes=1, access="public", uploaded_by=owner)
+    public_url = "https://imagedelivery.net/test/stage7-product/public"
+    image = MediaAsset.objects.create(
+        provider="cloudflare_images",
+        provider_asset_id="stage7-product-image",
+        original_filename="x.png",
+        mime_type="image/png",
+        size_bytes=1,
+        checksum_sha256="0" * 64,
+        access="public",
+        uploaded_by=owner,
+        metadata=product_image_metadata(organization=org, product=p, actor=owner, public_url=public_url),
+    )
     add_product_image(product=p, actor=owner, media_asset=image)
     publish_store_product(product=p, actor=owner)
 
