@@ -52,7 +52,7 @@ def set_primary_product_image(*, product, actor, image_id, request=None):
         .order_by("sort_order", "id")
     )
     target = next((row for row in rows if str(row.pk) == str(image_id)), None)
-    if target is None or not store_product_image_eligible(target.media_asset, organization):
+    if target is None or not store_product_image_eligible(target.media_asset, organization, product):
         raise ValidationError("Choose a genuine image attached to this product. / اختر صورة منتج حقيقية مرفقة بهذا المنتج.")
     ordered = [target] + [row for row in rows if row.pk != target.pk]
     _renumber(ordered)
