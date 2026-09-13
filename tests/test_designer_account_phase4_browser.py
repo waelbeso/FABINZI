@@ -248,7 +248,10 @@ def test_designer_phase4_browser_evidence(client, live_server, tmp_path, monkeyp
         wait.until(EC.visibility_of_element_located((By.ID, "designer-public-profile-form")))
         driver.find_element(By.ID, "profile-image-upload").send_keys(str(valid_path))
         driver.find_element(By.ID, "cover-image-upload").send_keys(str(valid_path))
-        _click_element(driver, driver.find_element(By.CSS_SELECTOR, "button[name='action'][value='save_revision']"))
+        save_button = driver.find_element(By.CSS_SELECTOR, "button[name='action'][value='save_revision']")
+        _center_in_viewport(driver, save_button)
+        wait.until(lambda _d: save_button.is_displayed() and save_button.is_enabled())
+        save_button.click()
         wait.until(
             lambda _d: org.public_profile_revisions.exists()
             or bool(driver.find_elements(By.ID, "public-profile-error"))
