@@ -1,1 +1,84 @@
-{% extends "base.html" %}{% load static %}{% block extra_head %}{{ block.super }}<link rel="stylesheet" href="{% static 'css/v2-5-public.css' %}">{% endblock %}{% block content %}{% if cover_image_url %}<div class="v25-profile-cover"><img src="{{ cover_image_url }}" alt=""></div>{% endif %}<section class="section--tight"><div class="v25-profile-head">{% if profile_image_url %}<img class="v25-profile-avatar" src="{{ profile_image_url }}" alt="">{% endif %}<div><div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}مصمم على FABINZI{% else %}FABINZI DESIGNER{% endif %}</div><h1 class="page-title">{% if request.LANGUAGE_CODE == 'ar' and public_state.public_name_ar %}{{ public_state.public_name_ar }}{% else %}{{ public_state.public_name_en|default:designer.display_name }}{% endif %}</h1><p class="muted">{{ designer.city }}{% if designer.region %} · {{ designer.region }}{% endif %} · {{ designer.country }}</p></div></div>{% if request.LANGUAGE_CODE == 'ar' and public_state.bio_ar %}<p class="lead">{{ public_state.bio_ar }}</p>{% elif public_state.bio_en %}<p class="lead">{{ public_state.bio_en }}</p>{% endif %}{% if public_state.specializations %}<div class="tag-row">{% for item in public_state.specializations %}<span class="badge">{{ item }}</span>{% endfor %}</div>{% endif %}<p><a class="button" href="{% url 'designer-public-inquiry' public_state.slug %}">{% if request.LANGUAGE_CODE == 'ar' %}إرسال استفسار عبر FABINZI{% else %}Send inquiry through FABINZI{% endif %}</a></p></section><section class="content-section"><h2>{% if request.LANGUAGE_CODE == 'ar' %}أعمال عامة معتمدة{% else %}Approved public work{% endif %}</h2><div class="v25-grid"><div><h3>{% if request.LANGUAGE_CODE == 'ar' %}تصميمات الملابس{% else %}Garment Designs{% endif %}</h3>{% for design in public_garment_designs %}<article class="card"><strong>{{ design.title }}</strong></article>{% empty %}<p class="muted">—</p>{% endfor %}</div><div><h3>{% if request.LANGUAGE_CODE == 'ar' %}الأعمال الفنية{% else %}Artwork{% endif %}</h3>{% for artwork in public_artworks %}<article class="card"><a href="{% url 'artwork-detail' artwork.pk %}">{{ artwork.title }}</a></article>{% empty %}<p class="muted">—</p>{% endfor %}</div></div><h3>{% if request.LANGUAGE_CODE == 'ar' %}منتجات عامة مصممة{% else %}Public Ready Designed Products{% endif %}</h3><div class="card-grid">{% for product in public_products %}<article class="card"><a href="{% url 'public-store-product' product.storefront.slug product.slug %}">{% if request.LANGUAGE_CODE == 'ar' and product.title_ar %}{{ product.title_ar }}{% else %}{{ product.title_en }}{% endif %}</a></article>{% empty %}<p class="muted">—</p>{% endfor %}</div></section>{% endblock %}
+{% extends "base.html" %}
+{% load static %}
+{% block extra_head %}{{ block.super }}<link rel="stylesheet" href="{% static 'css/v2-5-public.css' %}">{% endblock %}
+{% block content %}
+<div class="v25-designer-shell" id="designer-public-shell">
+  {% if cover_image_url %}
+    <div class="v25-designer-cover" id="designer-public-cover" data-public-image-frame>
+      <img src="{{ cover_image_url }}" alt="" data-public-profile-image>
+      <div class="v25-image-fallback v25-image-fallback--cover v25-designer-cover-fallback" data-public-image-fallback hidden aria-label="{% if request.LANGUAGE_CODE == 'ar' %}غلاف المصمم غير متاح{% else %}Designer cover unavailable{% endif %}"><span aria-hidden="true">FABINZI</span></div>
+    </div>
+  {% endif %}
+
+  <section class="v25-designer-hero" id="designer-public-hero" aria-labelledby="designer-public-name">
+    <div class="v25-designer-avatar-frame" id="designer-profile-frame" data-public-image-frame>
+      {% if profile_image_url %}
+        <img class="v25-designer-avatar" src="{{ profile_image_url }}" alt="{{ public_name }}" data-public-profile-image>
+        <div class="v25-image-fallback v25-designer-profile-fallback" data-public-image-fallback hidden role="img" aria-label="{% if request.LANGUAGE_CODE == 'ar' %}صورة الملف غير متاحة للمصمم {{ public_name }}{% else %}Profile image unavailable for {{ public_name }}{% endif %}"><span aria-hidden="true">DSG</span></div>
+      {% else %}
+        <div class="v25-image-fallback v25-designer-profile-fallback" data-public-image-fallback role="img" aria-label="{% if request.LANGUAGE_CODE == 'ar' %}صورة الملف غير متاحة للمصمم {{ public_name }}{% else %}Profile image unavailable for {{ public_name }}{% endif %}"><span aria-hidden="true">DSG</span></div>
+      {% endif %}
+    </div>
+
+    <div class="v25-designer-identity">
+      <span class="badge badge--success">{% if request.LANGUAGE_CODE == 'ar' %}مصمم معتمد من FABINZI{% else %}FABINZI-approved Designer{% endif %}</span>
+      <h1 class="page-title" id="designer-public-name">{{ public_name }}</h1>
+      {% if public_location_parts %}<p class="muted v25-designer-location">{{ public_location_parts|join:" · " }}</p>{% endif %}
+      {% if public_bio %}<p class="lead v25-designer-bio">{{ public_bio }}</p>{% endif %}
+      {% if public_state.specializations %}
+        <div class="tag-row v25-designer-tags" aria-label="{% if request.LANGUAGE_CODE == 'ar' %}التخصصات العامة المعتمدة{% else %}Approved public specializations{% endif %}">
+          {% for item in public_state.specializations %}<span class="badge">{{ item }}</span>{% endfor %}
+        </div>
+      {% endif %}
+      <div class="action-row v25-designer-actions">
+        <a class="button" id="designer-public-inquiry-cta" href="{% url 'designer-public-inquiry' public_state.slug %}?lang={{ request.LANGUAGE_CODE }}">{% if request.LANGUAGE_CODE == 'ar' %}إرسال استفسار عبر FABINZI{% else %}Send inquiry through FABINZI{% endif %}</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="v25-designer-work-section" id="designer-approved-work" aria-labelledby="designer-approved-work-title">
+    <div class="v25-designer-section-head">
+      <div>
+        <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}الأعمال العامة{% else %}PUBLIC WORK{% endif %}</div>
+        <h2 id="designer-approved-work-title">{% if request.LANGUAGE_CODE == 'ar' %}أعمال عامة معتمدة{% else %}Approved public work{% endif %}</h2>
+      </div>
+    </div>
+
+    <div class="v25-designer-work-grid">
+      <section class="v25-designer-work-panel" aria-labelledby="designer-garment-work-title">
+        <h3 id="designer-garment-work-title">{% if request.LANGUAGE_CODE == 'ar' %}تصميمات الملابس{% else %}Garment Designs{% endif %}</h3>
+        <div class="v25-designer-work-list">
+          {% for design in public_garment_designs %}
+            <article class="v25-designer-work-item"><strong>{{ design.title }}</strong></article>
+          {% empty %}
+            <div class="v25-designer-work-empty" id="designer-work-empty-garments">{% if request.LANGUAGE_CODE == 'ar' %}لا توجد تصميمات ملابس عامة معتمدة حاليًا.{% else %}No approved public Garment Designs right now.{% endif %}</div>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="v25-designer-work-panel" aria-labelledby="designer-artwork-work-title">
+        <h3 id="designer-artwork-work-title">{% if request.LANGUAGE_CODE == 'ar' %}الأعمال الفنية{% else %}Artwork{% endif %}</h3>
+        <div class="v25-designer-work-list">
+          {% for artwork in public_artworks %}
+            <article class="v25-designer-work-item"><a href="{% url 'artwork-detail' artwork.pk %}?lang={{ request.LANGUAGE_CODE }}">{{ artwork.title }}</a></article>
+          {% empty %}
+            <div class="v25-designer-work-empty" id="designer-work-empty-artwork">{% if request.LANGUAGE_CODE == 'ar' %}لا توجد أعمال فنية عامة معتمدة حاليًا.{% else %}No approved public Artwork right now.{% endif %}</div>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="v25-designer-work-panel" aria-labelledby="designer-ready-work-title">
+        <h3 id="designer-ready-work-title">{% if request.LANGUAGE_CODE == 'ar' %}منتجات عامة مصممة{% else %}Public Ready Designed Products{% endif %}</h3>
+        <div class="v25-designer-work-list">
+          {% for product in public_products %}
+            <article class="v25-designer-work-item"><a href="{% url 'public-store-product' product.storefront.slug product.slug %}?lang={{ request.LANGUAGE_CODE }}">{% if request.LANGUAGE_CODE == 'ar' and product.title_ar %}{{ product.title_ar }}{% else %}{{ product.title_en }}{% endif %}</a></article>
+          {% empty %}
+            <div class="v25-designer-work-empty" id="designer-work-empty-ready">{% if request.LANGUAGE_CODE == 'ar' %}لا توجد منتجات عامة مصممة ومعتمدة حاليًا.{% else %}No approved public Ready Designed Products right now.{% endif %}</div>
+          {% endfor %}
+        </div>
+      </section>
+    </div>
+  </section>
+</div>
+<script src="{% static 'js/manufacturer-public-media.js' %}" defer></script>
+{% endblock %}

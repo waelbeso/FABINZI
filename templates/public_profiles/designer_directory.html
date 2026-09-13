@@ -1,1 +1,44 @@
-{% extends "base.html" %}{% load static %}{% block extra_head %}{{ block.super }}<link rel="stylesheet" href="{% static 'css/v2-5-public.css' %}">{% endblock %}{% block content %}<section class="section--tight"><div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}دليل المصممين{% else %}DESIGNER DIRECTORY{% endif %}</div><h1 class="page-title">{% if request.LANGUAGE_CODE == 'ar' %}مصممون معتمدون بملفات عامة على FABINZI{% else %}FABINZI-approved public Designer profiles{% endif %}</h1><p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}الملف المهني العام مستقل عن وجود متجر منشور. لا نعرض بيانات الاتصال أو الهوية القانونية أو الملفات التقنية الخاصة.{% else %}A professional public profile does not require a published Storefront. Contact, legal identity and private technical files remain private.{% endif %}</p></section><section class="content-section"><div class="card-grid">{% for designer in designers %}{% with state=designer.public_state %}<article class="card directory-card"><div><span class="badge badge--success">{% if request.LANGUAGE_CODE == 'ar' %}ملف معتمد{% else %}Approved public profile{% endif %}</span><h2>{% if request.LANGUAGE_CODE == 'ar' and state.public_name_ar %}{{ state.public_name_ar }}{% else %}{{ state.public_name_en|default:designer.display_name }}{% endif %}</h2><p class="muted">{{ designer.city }}{% if designer.region %} · {{ designer.region }}{% endif %} · {{ designer.country }}</p></div>{% if state.specializations %}<p>{{ state.specializations|join:" · " }}</p>{% endif %}<a class="button button--ghost" href="{% url 'designer-public-detail' state.slug %}">{% if request.LANGUAGE_CODE == 'ar' %}عرض الملف{% else %}View profile{% endif %}</a></article>{% endwith %}{% empty %}<div class="empty-state"><h2>{% if request.LANGUAGE_CODE == 'ar' %}لا توجد ملفات مصممين عامة معتمدة حاليًا{% else %}No approved public Designer profiles right now{% endif %}</h2></div>{% endfor %}</div></section>{% endblock %}
+{% extends "base.html" %}
+{% load static %}
+{% block extra_head %}{{ block.super }}<link rel="stylesheet" href="{% static 'css/v2-5-public.css' %}">{% endblock %}
+{% block content %}
+<section class="section--tight v25-designer-directory-intro" aria-labelledby="designer-directory-title">
+  <div class="eyebrow">{% if request.LANGUAGE_CODE == 'ar' %}دليل المصممين{% else %}DESIGNER DIRECTORY{% endif %}</div>
+  <h1 class="page-title" id="designer-directory-title">{% if request.LANGUAGE_CODE == 'ar' %}مصممون معتمدون بملفات عامة على FABINZI{% else %}FABINZI-approved public Designer profiles{% endif %}</h1>
+  <p class="lead">{% if request.LANGUAGE_CODE == 'ar' %}الملف المهني العام مستقل عن وجود متجر منشور. لا نعرض بيانات الاتصال أو الهوية القانونية أو الملفات التقنية الخاصة.{% else %}A professional public profile does not require a published Storefront. Contact, legal identity and private technical files remain private.{% endif %}</p>
+</section>
+
+<section class="content-section" aria-label="{% if request.LANGUAGE_CODE == 'ar' %}ملفات المصممين العامة المعتمدة{% else %}Approved public Designer profiles{% endif %}">
+  <div class="v25-designer-directory" id="designer-directory-grid">
+    {% for card in designer_cards %}
+      <article class="card v25-designer-card" id="designer-card-{{ card.state.slug }}">
+        <div class="v25-designer-card-logo" data-public-image-frame>
+          {% if card.profile_image_url %}
+            <img src="{{ card.profile_image_url }}" alt="{{ card.name }}" data-public-profile-image>
+            <div class="v25-image-fallback v25-designer-profile-fallback" data-public-image-fallback hidden role="img" aria-label="{% if request.LANGUAGE_CODE == 'ar' %}صورة الملف غير متاحة للمصمم {{ card.name }}{% else %}Profile image unavailable for {{ card.name }}{% endif %}"><span aria-hidden="true">DSG</span></div>
+          {% else %}
+            <div class="v25-image-fallback v25-designer-profile-fallback" data-public-image-fallback role="img" aria-label="{% if request.LANGUAGE_CODE == 'ar' %}صورة الملف غير متاحة للمصمم {{ card.name }}{% else %}Profile image unavailable for {{ card.name }}{% endif %}"><span aria-hidden="true">DSG</span></div>
+          {% endif %}
+        </div>
+
+        <div class="v25-designer-card-body">
+          <span class="badge badge--success">{% if request.LANGUAGE_CODE == 'ar' %}مصمم معتمد على FABINZI{% else %}FABINZI-approved Designer{% endif %}</span>
+          <h2>{{ card.name }}</h2>
+          {% if card.location_parts %}<p class="muted v25-designer-location">{{ card.location_parts|join:" · " }}</p>{% endif %}
+          {% if card.specializations %}
+            <div class="tag-row v25-designer-tags" aria-label="{% if request.LANGUAGE_CODE == 'ar' %}التخصصات العامة المعتمدة{% else %}Approved public specializations{% endif %}">
+              {% for item in card.specializations %}<span class="badge">{{ item }}</span>{% endfor %}
+            </div>
+          {% endif %}
+          <a class="button button--ghost v25-designer-card-cta" href="{{ card.url }}?lang={{ request.LANGUAGE_CODE }}">{% if request.LANGUAGE_CODE == 'ar' %}عرض الملف{% else %}View profile{% endif %}</a>
+        </div>
+      </article>
+    {% empty %}
+      <div class="empty-state v25-designer-directory-empty">
+        <h2>{% if request.LANGUAGE_CODE == 'ar' %}لا توجد ملفات مصممين عامة معتمدة حاليًا{% else %}No approved public Designer profiles right now{% endif %}</h2>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+<script src="{% static 'js/manufacturer-public-media.js' %}" defer></script>
+{% endblock %}
