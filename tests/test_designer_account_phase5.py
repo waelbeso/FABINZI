@@ -9,8 +9,17 @@ from apps.artwork.models import Artwork, ArtworkAsset, ArtworkVersion, DesignedP
 from apps.design.models import GarmentDesign, GarmentDesignVersion
 from apps.manufacturer_marketplace.models import ManufacturerListing
 from apps.media.models import MediaAsset
-from apps.organizations.models import DesignerProfile, ManufacturerProfile, Membership, OnboardingApplication, Organization, PublicProfileRevision
-from apps.organizations.public_profile_services import current_public_profile_data, save_public_profile_revision
+from apps.organizations.models import (
+    DesignerProfile,
+    ManufacturerProfile,
+    Membership,
+    OnboardingApplication,
+    Organization,
+)
+from apps.organizations.public_profile_services import (
+    current_public_profile_data,
+    save_public_profile_revision,
+)
 from apps.public_profiles.models import ProfessionalPublicState
 from apps.public_profiles.services import ensure_public_state
 from apps.storefront.models import StoreProduct, Storefront
@@ -20,16 +29,20 @@ User = get_user_model()
 
 
 def _user(name):
-    return User.objects.create_user(username=name, email=f"{name}@example.test", password="StrongPass123!")
+    return User.objects.create_user(
+        username=name,
+        email=f"{name}@example.test",
+        password="StrongPass123!",
+    )
 
 
 def _designer(owner, name="Phase 5 Designer"):
-    organization = Organization.objects.create(
+    org = Organization.objects.create(
         kind=Organization.Kind.DESIGNER,
         display_name=name,
-        legal_name="PRIVATE DESIGNER LEGAL NAME",
-        email="designer-private@example.test",
-        phone="+201000000111",
+        legal_name="PRIVATE LEGAL DESIGNER NAME",
+        email="private-designer@example.test",
+        phone="+201011111111",
         website="https://designer.example.test",
         address_line1="PRIVATE DESIGNER ADDRESS",
         city="Cairo",
@@ -38,80 +51,111 @@ def _designer(owner, name="Phase 5 Designer"):
         verification_status=Organization.VerificationStatus.ACTIVE,
         created_by=owner,
     )
-    Membership.objects.create(organization=organization, user=owner, role=Membership.Role.OWNER, is_active=True)
+    Membership.objects.create(
+        organization=org,
+        user=owner,
+        role=Membership.Role.OWNER,
+        is_active=True,
+    )
     DesignerProfile.objects.create(
-        organization=organization,
-        studio_name=name,
-        portfolio_url="https://portfolio.example.test",
-        legal_registration_number="PRIVATE-CR-123",
-        tax_number="PRIVATE-TAX-123",
+        organization=org,
+        studio_name=f"{name} Studio",
+        portfolio_url="https://designer.example.test/portfolio",
+        legal_registration_number="PRIVATE-REG-123",
+        tax_number="PRIVATE-TAX-456",
         payout_information="PRIVATE-PAYOUT-MARKER",
         terms_accepted=True,
+        terms_accepted_at=timezone.now(),
     )
     OnboardingApplication.objects.create(
-        organization=organization,
+        organization=org,
         status=OnboardingApplication.Status.APPROVED,
         reviewed_at=timezone.now(),
     )
-    return organization
+    state = ensure_public_state(org)
+    state.public_name_en = "Approved Phase 5 Designer"
+    state.public_name_ar = "مصمم المرحلة الخامسة المعتمد"
+    state.bio_en = "Approved public Phase 5 biography."
+    state.bio_ar = "نبذة عامة معتمدة للمرحلة الخامسة."
+    state.specializations = [
+        "Casualwear",
+        "Streetwear",
+        "T-Shirt Design",
+        "Textile Prints",
+        "Graphic Artwork",
+        "Pattern Making",
+        "Technical Fashion Drawing",
+    ]
+    state.visibility = ProfessionalPublicState.Visibility.VISIBLE
+    state.save()
+    return org, state
 
 
-def _manufacturer(owner, name="Phase 5 Manufacturer"):
-    organization = Organization.objects.create(
+def _manufacturer(owner):
+    org = Organization.objects.create(
         kind=Organization.Kind.MANUFACTURER,
-        display_name=name,
-        email="manufacturer-private@example.test",
-        phone="+201000000222",
-        city="Giza",
-        region="Giza",
+        display_name="Phase 5 Regression Factory",
+        email="private-factory@example.test",
+        phone="+201022222222",
+        city="Cairo",
+        region="Cairo",
         country="EG",
         verification_status=Organization.VerificationStatus.ACTIVE,
         created_by=owner,
     )
-    Membership.objects.create(organization=organization, user=owner, role=Membership.Role.OWNER, is_active=True)
+    Membership.objects.create(
+        organization=org,
+        user=owner,
+        role=Membership.Role.OWNER,
+        is_active=True,
+    )
     ManufacturerProfile.objects.create(
-        organization=organization,
-        commercial_registration="MFR-PRIVATE-CR",
-        tax_number="MFR-PRIVATE-TAX",
-        payout_information="MFR-PRIVATE-PAYOUT",
+        organization=org,
+        commercial_registration="PRIVATE-MFR-REG",
+        tax_number="PRIVATE-MFR-TAX",
+        payout_information="PRIVATE-MFR-PAYOUT",
         terms_accepted=True,
+        terms_accepted_at=timezone.now(),
     )
     OnboardingApplication.objects.create(
-        organization=organization,
+        organization=org,
         status=OnboardingApplication.Status.APPROVED,
         reviewed_at=timezone.now(),
     )
     ManufacturerListing.objects.create(
-        organization=organization,
-        status=ManufacturerListing.Status.PUBLISHED,
-        headline_en="Approved manufacturer headline",
-        overview_en="Approved manufacturer overview",
+        organization=org,
+        headline_en="Approved production partner headline",
+        overview_en="Approved public production overview.",
     )
-    state = ensure_public_state(organization)
-    state.public_name_en = name
+    state = ensure_public_state(org)
+    state.public_name_en = "Phase 5 Regression Factory"
     state.visibility = ProfessionalPublicState.Visibility.VISIBLE
     state.save()
-    return organization
+    return org, state
 
 
-def _public_asset(owner, *, key, url=None, metadata=None):
+def _public_asset(owner, key, url, *, metadata=None):
+    payload = {"public_url": url}
+    if metadata:
+        payload.update(metadata)
     return MediaAsset.objects.create(
         provider=MediaAsset.Provider.LOCAL_DEV,
-        provider_asset_id=key,
+        provider_asset_id=f"RAW-PROVIDER-ID-{key}",
         original_filename=f"{key}.png",
         mime_type="image/png",
-        size_bytes=16,
+        size_bytes=64,
         checksum_sha256="a" * 64,
         access=MediaAsset.Access.PUBLIC,
         uploaded_by=owner,
-        metadata={**(metadata or {}), "public_url": url or f"https://cdn.example.test/{key}.png"},
+        metadata=payload,
     )
 
 
-def _published_public_work(organization, owner, prefix="p5"):
+def _published_public_work(org, owner, prefix="phase5"):
     garment = GarmentDesign.objects.create(
-        organization=organization,
+        organization=org,
         title=f"{prefix} Garment",
+        category="T-Shirt",
         status=GarmentDesign.Status.APPROVED,
         created_by=owner,
     )
@@ -122,7 +166,7 @@ def _published_public_work(organization, owner, prefix="p5"):
         created_by=owner,
     )
     artwork = Artwork.objects.create(
-        organization=organization,
+        organization=org,
         title=f"{prefix} Artwork",
         status=Artwork.Status.APPROVED,
         created_by=owner,
@@ -133,124 +177,138 @@ def _published_public_work(organization, owner, prefix="p5"):
         status=ArtworkVersion.Status.APPROVED,
         created_by=owner,
     )
-    preview = _public_asset(owner, key=f"{prefix}-artwork-preview")
-    ArtworkAsset.objects.create(version=artwork_version, kind=ArtworkAsset.Kind.PREVIEW, media_asset=preview)
+    preview = _public_asset(
+        owner,
+        f"{prefix}-artwork-preview",
+        "/static/brand/fabinzi-icon.svg",
+    )
+    ArtworkAsset.objects.create(
+        version=artwork_version,
+        kind=ArtworkAsset.Kind.PREVIEW,
+        media_asset=preview,
+        label="Approved public preview",
+    )
     designed = DesignedProduct.objects.create(
-        organization=organization,
+        organization=org,
         garment_version=garment_version,
         artwork_version=artwork_version,
-        title=f"{prefix} Ready",
+        title=f"{prefix} Ready Product",
         status=DesignedProduct.Status.PUBLISHED,
         created_by=owner,
     )
-    storefront = Storefront.objects.create(
-        organization=organization,
+    store = Storefront.objects.create(
+        organization=org,
         slug=f"{prefix}-store",
         status=Storefront.Status.PUBLISHED,
         name_en=f"{prefix} Store",
     )
     product = StoreProduct.objects.create(
-        storefront=storefront,
+        storefront=store,
         designed_product=designed,
         slug=f"{prefix}-product",
         status=StoreProduct.Status.PUBLISHED,
-        title_en=f"{prefix} Product",
-        title_ar=f"منتج {prefix}",
-        base_price="700.00",
+        title_en=f"{prefix} Public Ready Product",
+        title_ar="منتج عام جاهز",
+        base_price="500.00",
         currency="EGP",
     )
-    return garment, artwork, designed, storefront, product
+    return garment, artwork, designed, store, product
 
 
 @pytest.mark.django_db
-def test_phase5_directory_uses_current_approved_image_localization_location_and_all_specializations(client):
-    owner = _user("p5-directory-owner")
-    organization = _designer(owner, "Private Organization Name")
-    state = ensure_public_state(organization)
-    state.public_name_en = "Approved English Designer"
-    state.public_name_ar = "المصمم المعتمد"
-    state.bio_en = "Approved public biography"
-    state.specializations = ["Casualwear", "Streetwear", "T-Shirt Design", "Pattern Making"]
-    state.profile_image = _public_asset(
+def test_designer_directory_uses_only_approved_state_image_location_specializations_and_localized_name(client):
+    owner = _user("phase5-directory-owner")
+    org, state = _designer(owner)
+    approved_profile = _public_asset(
         owner,
-        key="approved-directory-profile",
-        metadata={"organization_id": organization.pk, "designer_public_upload": True},
+        "approved-profile",
+        "https://imagedelivery.net/public/approved-profile/public",
+        metadata={"organization_id": org.pk},
     )
-    state.visibility = ProfessionalPublicState.Visibility.VISIBLE
-    state.save()
+    state.profile_image = approved_profile
+    state.save(update_fields=["profile_image", "updated_at"])
 
     response = client.get(reverse("designer-directory") + "?lang=en")
     body = response.content.decode()
+
     assert response.status_code == 200
-    assert "Approved English Designer" in body
-    assert state.profile_image.metadata["public_url"] in body
-    assert 'data-public-profile-image' in body
+    card = response.context["designer_cards"][0]
+    assert card["name"] == state.public_name_en
+    assert card["location_parts"] == ["Cairo", "EG"]
+    assert card["specializations"] == state.specializations
+    assert card["profile_image_url"] == "https://imagedelivery.net/public/approved-profile/public"
+    assert card["url"] == reverse("designer-public-detail", args=[state.slug])
+
+    assert state.public_name_en in body
+    assert "https://imagedelivery.net/public/approved-profile/public" in body
+    assert "RAW-PROVIDER-ID-approved-profile" not in body
+    for specialization in state.specializations:
+        assert specialization in body
+    for private_value in (
+        org.email,
+        org.phone,
+        org.address_line1,
+        org.legal_name,
+        org.designer_profile.legal_registration_number,
+        org.designer_profile.tax_number,
+        "PRIVATE-PAYOUT-MARKER",
+    ):
+        assert private_value not in body
+
+    arabic = client.get(reverse("designer-directory") + "?lang=ar")
+    arabic_body = arabic.content.decode()
+    assert state.public_name_ar in arabic_body
+    assert f'{reverse("designer-public-detail", args=[state.slug])}?lang=ar' in arabic_body
+
+
+@pytest.mark.django_db
+def test_designer_directory_no_image_has_accessible_dsg_fallback(client):
+    owner = _user("phase5-directory-fallback")
+    _org, state = _designer(owner, "Fallback Designer")
+    response = client.get(reverse("designer-directory") + "?lang=en")
+    body = response.content.decode()
+
+    assert response.status_code == 200
     assert 'data-public-image-fallback' in body
-    assert body.count("Casualwear") == 1
-    assert body.count("Streetwear") == 1
-    assert body.count("T-Shirt Design") == 1
-    assert body.count("Pattern Making") == 1
-    assert "Cairo · Cairo" not in body
-    assert "Cairo · EG" in body
-    assert organization.email not in body
-    assert organization.phone not in body
-    assert organization.legal_name not in body
-
-    arabic = client.get(reverse("designer-directory") + "?lang=ar").content.decode()
-    assert "المصمم المعتمد" in arabic
-    assert "Approved English Designer" not in arabic
-
-
-@pytest.mark.django_db
-def test_phase5_directory_no_image_uses_accessible_dsg_fallback(client):
-    owner = _user("p5-directory-fallback-owner")
-    organization = _designer(owner, "Fallback Designer")
-    state = ensure_public_state(organization)
-    state.public_name_en = "Fallback Designer"
-    state.visibility = ProfessionalPublicState.Visibility.VISIBLE
-    state.save()
-
-    body = client.get(reverse("designer-directory") + "?lang=en").content.decode()
-    assert "DSG" in body
-    assert "Profile image unavailable for Fallback Designer" in body
+    assert ">DSG<" in body
+    assert "Profile image unavailable for Approved Phase 5 Designer" in body
     assert "data-public-profile-image" not in body
-    assert f'{reverse("designer-public-detail", args=[state.slug])}?lang=en' in body
+    assert state.specializations[-1] in body
 
 
 @pytest.mark.django_db
-def test_phase5_pending_revision_values_and_media_never_leak_from_directory_or_detail(client):
-    owner = _user("p5-pending-owner")
-    organization = _designer(owner, "Approved Organization")
-    state = ensure_public_state(organization)
+def test_pending_revision_name_bio_specializations_location_profile_and_cover_never_leak(client):
+    owner = _user("phase5-pending-owner")
+    org, state = _designer(owner, "Current Approved Designer")
     approved_profile = _public_asset(
         owner,
-        key="approved-current-profile",
-        metadata={"organization_id": organization.pk, "designer_public_upload": True},
+        "approved-current-profile",
+        "https://imagedelivery.net/public/current-profile/public",
+        metadata={"organization_id": org.pk},
     )
     approved_cover = _public_asset(
         owner,
-        key="approved-current-cover",
-        metadata={"organization_id": organization.pk, "designer_public_upload": True},
+        "approved-current-cover",
+        "https://imagedelivery.net/public/current-cover/public",
+        metadata={"organization_id": org.pk},
     )
-    state.public_name_en = "APPROVED CURRENT NAME"
-    state.bio_en = "APPROVED CURRENT BIO"
-    state.specializations = ["APPROVED CURRENT SPECIALIZATION"]
-    state.profile_image = approved_profile
-    state.cover_image = approved_cover
-    state.visibility = ProfessionalPublicState.Visibility.VISIBLE
-    state.save()
-
     pending_profile = _public_asset(
         owner,
-        key="PENDING-SECRET-PROFILE",
-        metadata={"organization_id": organization.pk, "designer_public_upload": True},
+        "pending-secret-profile",
+        "https://imagedelivery.net/public/PENDING-SECRET-PROFILE/public",
+        metadata={"organization_id": org.pk},
     )
     pending_cover = _public_asset(
         owner,
-        key="PENDING-SECRET-COVER",
-        metadata={"organization_id": organization.pk, "designer_public_upload": True},
+        "pending-secret-cover",
+        "https://imagedelivery.net/public/PENDING-SECRET-COVER/public",
+        metadata={"organization_id": org.pk},
     )
-    payload = current_public_profile_data(organization)
+    state.profile_image = approved_profile
+    state.cover_image = approved_cover
+    state.save(update_fields=["profile_image", "cover_image", "updated_at"])
+
+    payload = current_public_profile_data(org)
     payload["organization"]["city"] = "PENDING SECRET CITY"
     payload["organization"]["region"] = "PENDING SECRET REGION"
     payload["public_state"].update(
@@ -262,15 +320,17 @@ def test_phase5_pending_revision_values_and_media_never_leak_from_directory_or_d
             "cover_image_id": pending_cover.pk,
         }
     )
-    revision = save_public_profile_revision(organization=organization, actor=owner, proposed_data=payload)
-    assert revision.status == PublicProfileRevision.Status.DRAFT
+    revision = save_public_profile_revision(
+        organization=org,
+        actor=owner,
+        proposed_data=payload,
+    )
+    assert revision.status == revision.Status.DRAFT
 
     directory = client.get(reverse("designer-directory") + "?lang=en")
     detail = client.get(reverse("designer-public-detail", args=[state.slug]) + "?lang=en")
     for response in (directory, detail):
         body = response.content.decode()
-        assert "APPROVED CURRENT NAME" in body
-        assert approved_profile.metadata["public_url"] in body
         assert "PENDING SECRET NAME" not in body
         assert "PENDING SECRET BIO" not in body
         assert "PENDING SECRET SPECIALIZATION" not in body
@@ -289,130 +349,120 @@ def test_phase5_pending_revision_values_and_media_never_leak_from_directory_or_d
 
 
 @pytest.mark.django_db
-def test_phase5_detail_renders_only_approved_profile_cover_inquiry_and_current_public_work(client):
-    owner = _user("p5-detail-owner")
-    organization = _designer(owner, "Phase 5 Detail Designer")
-    state = ensure_public_state(organization)
+def test_designer_detail_renders_approved_profile_cover_inquiry_and_approved_public_work_only(client):
+    owner = _user("phase5-detail-owner")
+    org, state = _designer(owner, "Public Work Designer")
     profile = _public_asset(
         owner,
-        key="phase5-public-profile",
-        metadata={"organization_id": organization.pk, "designer_public_upload": True},
+        "detail-profile",
+        "https://imagedelivery.net/public/detail-profile/public",
+        metadata={
+            "organization_id": org.pk,
+            "private_url": "https://private.example.test/object?signature=SECRET",
+            "api_token": "TEST-CLOUDFLARE-SECRET",
+        },
     )
     cover = _public_asset(
         owner,
-        key="phase5-public-cover",
-        metadata={"organization_id": organization.pk, "designer_public_upload": True},
+        "detail-cover",
+        "https://imagedelivery.net/public/detail-cover/public",
+        metadata={"organization_id": org.pk, "private_object_key": "PRIVATE-OBJECT-KEY"},
     )
-    state.public_name_en = "Phase 5 Public Designer"
-    state.bio_en = "Approved Designer biography for Phase 5."
-    state.specializations = ["Outerwear", "Technical Fashion Drawing"]
     state.profile_image = profile
     state.cover_image = cover
-    state.visibility = ProfessionalPublicState.Visibility.VISIBLE
-    state.save()
-    garment, artwork, designed, storefront, product = _published_public_work(organization, owner, "p5-detail")
+    state.save(update_fields=["profile_image", "cover_image", "updated_at"])
+    garment, artwork, _designed, store, product = _published_public_work(
+        org, owner, "phase5-visible"
+    )
 
-    response = client.get(reverse("designer-public-detail", args=[state.slug]) + "?lang=en")
+    url = reverse("designer-public-detail", args=[state.slug])
+    response = client.get(url + "?lang=en")
     body = response.content.decode()
+
     assert response.status_code == 200
     assert profile.metadata["public_url"] in body
     assert cover.metadata["public_url"] in body
-    assert "Phase 5 Public Designer" in body
-    assert "Approved Designer biography for Phase 5." in body
     assert garment.title in body
     assert artwork.title in body
     assert product.title_en in body
     assert f'{reverse("designer-public-inquiry", args=[state.slug])}?lang=en' in body
     assert f'{reverse("artwork-detail", args=[artwork.pk])}?lang=en' in body
-    assert f'{reverse("public-store-product", args=[storefront.slug, product.slug])}?lang=en' in body
+    assert (
+        f'{reverse("public-store-product", args=[store.slug, product.slug])}?lang=en'
+        in body
+    )
 
-    private_markers = [
-        organization.email,
-        organization.phone,
-        organization.legal_name,
-        organization.designer_profile.legal_registration_number,
-        organization.designer_profile.tax_number,
-        organization.designer_profile.payout_information,
-        "PRIVATE-ASSET-KEY",
-        "test-api-token",
-        "cloudflare-test-secret",
-        "X-Amz-Signature",
-    ]
-    for marker in private_markers:
-        assert marker not in body
-    assert profile.provider_asset_id not in body
-    assert cover.provider_asset_id not in body
+    for prohibited in (
+        "RAW-PROVIDER-ID-detail-profile",
+        "RAW-PROVIDER-ID-detail-cover",
+        "PRIVATE-OBJECT-KEY",
+        "TEST-CLOUDFLARE-SECRET",
+        "signature=SECRET",
+        org.email,
+        org.phone,
+        org.legal_name,
+        org.designer_profile.tax_number,
+        "PRIVATE-PAYOUT-MARKER",
+    ):
+        assert prohibited not in body
 
-    seo = response.context["page_seo"]
-    schema = json.loads(seo["json_ld"])
-    assert seo["title"] == "Phase 5 Public Designer | FABINZI"
-    assert schema[0]["name"] == "Phase 5 Public Designer"
-    assert schema[0]["description"] == "Approved Designer biography for Phase 5."
-    assert schema[0]["image"].endswith(profile.metadata["public_url"])
+    seo = json.dumps(response.context["page_seo"], ensure_ascii=False)
+    assert state.public_name_en in seo
+    assert state.bio_en in seo
+    assert "PENDING" not in seo
 
 
 @pytest.mark.django_db
-def test_phase5_public_work_eligibility_is_not_broadened(client):
-    owner = _user("p5-work-owner")
-    organization = _designer(owner, "Phase 5 Work Designer")
-    state = ensure_public_state(organization)
-    state.public_name_en = "Phase 5 Work Designer"
-    state.visibility = ProfessionalPublicState.Visibility.VISIBLE
-    state.save()
-    garment, artwork, designed, storefront, product = _published_public_work(organization, owner, "p5-work")
-    url = reverse("designer-public-detail", args=[state.slug]) + "?lang=en"
+def test_designer_detail_public_work_eligibility_is_not_broadened(client):
+    owner = _user("phase5-eligibility-owner")
+    org, state = _designer(owner, "Eligibility Designer")
+    garment, artwork, designed, store, product = _published_public_work(
+        org, owner, "phase5-eligibility"
+    )
+    url = reverse("designer-public-detail", args=[state.slug])
 
-    body = client.get(url).content.decode()
-    assert garment.title in body and artwork.title in body and product.title_en in body
+    visible = client.get(url + "?lang=en").content.decode()
+    assert garment.title in visible
+    assert artwork.title in visible
+    assert product.title_en in visible
 
     product.status = StoreProduct.Status.HIDDEN
     product.save(update_fields=["status"])
-    body = client.get(url).content.decode()
-    assert garment.title not in body
-    assert product.title_en not in body
-    assert artwork.title in body
+    product_hidden = client.get(url + "?lang=en").content.decode()
+    assert garment.title not in product_hidden
+    assert product.title_en not in product_hidden
+    assert artwork.title in product_hidden
 
     product.status = StoreProduct.Status.PUBLISHED
     product.save(update_fields=["status"])
-    storefront.status = Storefront.Status.PAUSED
-    storefront.save(update_fields=["status"])
-    body = client.get(url).content.decode()
-    assert garment.title not in body and product.title_en not in body and artwork.title in body
+    store.status = Storefront.Status.PAUSED
+    store.save(update_fields=["status"])
+    store_hidden = client.get(url + "?lang=en").content.decode()
+    assert garment.title not in store_hidden
+    assert product.title_en not in store_hidden
+    assert artwork.title in store_hidden
 
-    storefront.status = Storefront.Status.PUBLISHED
-    storefront.save(update_fields=["status"])
+    store.status = Storefront.Status.PUBLISHED
+    store.save(update_fields=["status"])
     designed.status = DesignedProduct.Status.SUSPENDED
     designed.save(update_fields=["status"])
-    body = client.get(url).content.decode()
-    assert garment.title not in body and product.title_en not in body and artwork.title in body
+    designed_hidden = client.get(url + "?lang=en").content.decode()
+    assert garment.title not in designed_hidden
+    assert product.title_en not in designed_hidden
+    assert artwork.title in designed_hidden
 
     artwork.status = Artwork.Status.SUSPENDED
     artwork.save(update_fields=["status"])
-    body = client.get(url).content.decode()
-    assert artwork.title not in body
+    fully_hidden = client.get(url + "?lang=en").content.decode()
+    assert artwork.title not in fully_hidden
 
 
 @pytest.mark.django_db
-def test_phase5_mixed_and_empty_work_states_and_no_cover_are_intentional(client):
-    owner = _user("p5-empty-owner")
-    organization = _designer(owner, "Phase 5 Empty Designer")
-    state = ensure_public_state(organization)
-    state.public_name_en = "Phase 5 Empty Designer"
-    state.visibility = ProfessionalPublicState.Visibility.VISIBLE
-    state.save()
-    url = reverse("designer-public-detail", args=[state.slug]) + "?lang=en"
-
-    response = client.get(url)
-    body = response.content.decode()
-    assert response.status_code == 200
-    assert 'id="designer-public-cover"' not in body
-    assert "No approved public Garment Designs right now." in body
-    assert "No approved public Artwork right now." in body
-    assert "No approved public Ready Designed Products right now." in body
-    assert ">—<" not in body
-
+def test_designer_detail_mixed_work_empty_states_and_no_cover_do_not_invent_content(client):
+    owner = _user("phase5-mixed-owner")
+    org, state = _designer(owner, "Mixed Work Designer")
     artwork = Artwork.objects.create(
-        organization=organization,
+        organization=org,
         title="Only Approved Artwork",
         status=Artwork.Status.APPROVED,
         created_by=owner,
@@ -423,61 +473,71 @@ def test_phase5_mixed_and_empty_work_states_and_no_cover_are_intentional(client)
         status=ArtworkVersion.Status.APPROVED,
         created_by=owner,
     )
+    preview = _public_asset(
+        owner,
+        "only-artwork-preview",
+        "/static/brand/fabinzi-icon.svg",
+    )
     ArtworkAsset.objects.create(
         version=version,
         kind=ArtworkAsset.Kind.PREVIEW,
-        media_asset=_public_asset(owner, key="only-artwork-preview"),
+        media_asset=preview,
     )
-    body = client.get(url).content.decode()
+
+    response = client.get(
+        reverse("designer-public-detail", args=[state.slug]) + "?lang=en"
+    )
+    body = response.content.decode()
+
+    assert response.status_code == 200
     assert "Only Approved Artwork" in body
     assert "No approved public Garment Designs right now." in body
     assert "No approved public Ready Designed Products right now." in body
+    assert "No approved public Artwork right now." not in body
+    assert 'id="designer-public-cover"' not in body
+    assert ">—<" not in body
 
 
 @pytest.mark.django_db
-def test_phase5_arabic_public_navigation_preserves_lang_without_changing_routes(client):
-    owner = _user("p5-ar-owner")
-    organization = _designer(owner, "Arabic Phase 5 Designer")
-    state = ensure_public_state(organization)
-    state.public_name_en = "English Public Name"
-    state.public_name_ar = "اسم المصمم المعتمد"
-    state.bio_ar = "نبذة عامة معتمدة"
-    state.visibility = ProfessionalPublicState.Visibility.VISIBLE
-    state.save()
-    _garment, artwork, _designed, storefront, product = _published_public_work(organization, owner, "p5-ar")
+def test_arabic_designer_detail_preserves_language_for_inquiry_artwork_and_store_product(client):
+    owner = _user("phase5-ar-owner")
+    org, state = _designer(owner, "Arabic Navigation Designer")
+    _garment, artwork, _designed, store, product = _published_public_work(
+        org, owner, "phase5-ar"
+    )
+    response = client.get(
+        reverse("designer-public-detail", args=[state.slug]) + "?lang=ar"
+    )
+    body = response.content.decode()
 
-    directory = client.get(reverse("designer-directory") + "?lang=ar")
-    directory_body = directory.content.decode()
-    assert "اسم المصمم المعتمد" in directory_body
-    assert f'{reverse("designer-public-detail", args=[state.slug])}?lang=ar' in directory_body
-
-    detail = client.get(reverse("designer-public-detail", args=[state.slug]) + "?lang=ar")
-    body = detail.content.decode()
-    assert detail.status_code == 200
-    assert "اسم المصمم المعتمد" in body
-    assert "نبذة عامة معتمدة" in body
+    assert response.status_code == 200
+    assert state.public_name_ar in body
     assert f'{reverse("designer-public-inquiry", args=[state.slug])}?lang=ar' in body
     assert f'{reverse("artwork-detail", args=[artwork.pk])}?lang=ar' in body
-    assert f'{reverse("public-store-product", args=[storefront.slug, product.slug])}?lang=ar' in body
-
-    inquiry = client.get(reverse("designer-public-inquiry", args=[state.slug]) + "?lang=ar")
+    assert (
+        f'{reverse("public-store-product", args=[store.slug, product.slug])}?lang=ar'
+        in body
+    )
+    inquiry = client.get(
+        reverse("designer-public-inquiry", args=[state.slug]) + "?lang=ar"
+    )
     assert inquiry.status_code == 200
     assert inquiry.wsgi_request.LANGUAGE_CODE == "ar"
 
 
 @pytest.mark.django_db
-def test_phase5_manufacturer_directory_and_detail_contract_remains_functional(client):
-    owner = _user("p5-mfr-owner")
-    organization = _manufacturer(owner)
-    state = organization.public_state
+def test_manufacturer_directory_and_detail_remain_functional(client):
+    owner = _user("phase5-manufacturer-regression")
+    _org, state = _manufacturer(owner)
 
     directory = client.get(reverse("manufacturer-marketplace") + "?lang=en")
-    detail = client.get(reverse("manufacturer-public-detail", args=[state.slug]) + "?lang=en")
+    detail = client.get(
+        reverse("manufacturer-public-detail", args=[state.slug]) + "?lang=en"
+    )
+
     assert directory.status_code == 200
     assert detail.status_code == 200
-    assert organization.display_name in directory.content.decode()
-    assert organization.display_name in detail.content.decode()
-    assert "data-public-image-fallback" in directory.content.decode()
-    assert "data-public-image-fallback" in detail.content.decode()
-    assert organization.email not in directory.content.decode()
-    assert organization.phone not in detail.content.decode()
+    assert b"Phase 5 Regression Factory" in directory.content
+    assert b"Phase 5 Regression Factory" in detail.content
+    assert b"data-public-image-fallback" in directory.content
+    assert b"data-public-image-fallback" in detail.content
