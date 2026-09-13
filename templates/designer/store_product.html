@@ -60,20 +60,22 @@
           <div class="designer-product-media__details">
             <div class="cluster">
               <strong>{{ image.alt_en|default:product.title_en }}</strong>
-              {% if meta.designer_store_product_upload and meta.purpose == 'store_product_image' and meta.organization_id == designer_organization.id %}
+              {% if meta.designer_store_product_upload and meta.purpose == 'store_product_image' and meta.organization_id == designer_organization.id and meta.store_product_id == product.id %}
                 {% if forloop.first %}<span class="badge badge--success" data-store-media-primary>{% if request.LANGUAGE_CODE == 'ar' %}أساسية{% else %}Primary{% endif %}</span>{% else %}<span class="badge">{% if request.LANGUAGE_CODE == 'ar' %}صورة منتج{% else %}Product image{% endif %}</span>{% endif %}
               {% else %}
                 <span class="badge badge--warning" data-store-media-legacy>{% if request.LANGUAGE_CODE == 'ar' %}صورة قديمة — غير مؤهلة للنشر{% else %}Legacy image — not eligible for publication{% endif %}</span>
               {% endif %}
             </div>
             <small class="muted">{{ image.media_asset.original_filename }}</small>
-            {% if product.status != 'published' and designer_membership.role == 'owner' or product.status != 'published' and designer_membership.role == 'manager' or product.status != 'published' and designer_membership.role == 'design_manager' %}
-              <div class="designer-product-media__actions">
-                {% if meta.designer_store_product_upload and meta.purpose == 'store_product_image' and meta.organization_id == designer_organization.id and not forloop.first %}
-                  <form method="post">{% csrf_token %}<input type="hidden" name="action" value="update"><input type="hidden" name="media_action" value="set_primary"><input type="hidden" name="image_id" value="{{ image.id }}"><button class="button button--ghost button--sm" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}تعيين كأساسية{% else %}Set primary{% endif %}</button></form>
-                {% endif %}
-                <form method="post">{% csrf_token %}<input type="hidden" name="action" value="update"><input type="hidden" name="media_action" value="detach"><input type="hidden" name="image_id" value="{{ image.id }}"><button class="button button--ghost button--sm" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}فصل الصورة{% else %}Detach image{% endif %}</button></form>
-              </div>
+            {% if product.status != 'published' %}
+              {% if designer_membership.role == 'owner' or designer_membership.role == 'manager' or designer_membership.role == 'design_manager' %}
+                <div class="designer-product-media__actions">
+                  {% if meta.designer_store_product_upload and meta.purpose == 'store_product_image' and meta.organization_id == designer_organization.id and meta.store_product_id == product.id and not forloop.first %}
+                    <form method="post">{% csrf_token %}<input type="hidden" name="action" value="update"><input type="hidden" name="media_action" value="set_primary"><input type="hidden" name="image_id" value="{{ image.id }}"><button class="button button--ghost button--sm" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}تعيين كأساسية{% else %}Set primary{% endif %}</button></form>
+                  {% endif %}
+                  <form method="post">{% csrf_token %}<input type="hidden" name="action" value="update"><input type="hidden" name="media_action" value="detach"><input type="hidden" name="image_id" value="{{ image.id }}"><button class="button button--ghost button--sm" type="submit">{% if request.LANGUAGE_CODE == 'ar' %}فصل الصورة{% else %}Detach image{% endif %}</button></form>
+                </div>
+              {% endif %}
             {% endif %}
           </div>
         </article>
