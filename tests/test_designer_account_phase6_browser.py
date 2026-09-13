@@ -33,12 +33,14 @@ def _shot_checked(driver, name):
 
 
 def _large_png(path):
-    # Real, incompressible-enough raster payload so Chrome's throttled multipart
-    # upload remains observable between 0 and 100 percent.
-    width = height = 900
+    # Use a near-limit, genuinely decoded random raster. Combined with Chrome's
+    # real upload throttling this keeps an intermediate xhr.upload progress value
+    # observable long enough for deterministic screenshot evidence without
+    # fabricating or injecting a progress percentage.
+    width = height = 1650
     image = Image.frombytes("RGB", (width, height), os.urandom(width * height * 3))
     image.save(path, format="PNG", compress_level=1)
-    assert 1_500_000 < path.stat().st_size < 10 * 1024 * 1024
+    assert 7_000_000 < path.stat().st_size < 10 * 1024 * 1024
 
 
 def _small_png(path, color):
@@ -149,12 +151,13 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         upload_form = driver.find_element(By.CSS_SELECTOR, "[data-store-media-upload-form]")
         _click_element(driver, upload_form.find_element(By.CSS_SELECTOR, "[data-store-media-submit]"))
         progress = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-progress]")))
-        wait.until(lambda _d: 0 < float(progress.get_attribute("value") or 0) < 100)
+        progress_wait = WebDriverWait(driver, 30, poll_frequency=0.05)
+        progress_wait.until(lambda _d: 0 < float(progress.get_attribute("value") or 0) < 100)
         percent_text = driver.find_element(By.CSS_SELECTOR, "[data-store-media-percent]").text
         assert "%" in percent_text and percent_text != "100%"
         _shot_checked(driver, "p6-03-product-image-upload-progress-en.png")
 
-        assert provider_started.wait(timeout=25), "Provider was not reached after real multipart upload"
+        assert provider_started.wait(timeout=45), "Provider was not reached after real multipart upload"
         wait.until(lambda _d: "Processing image" in driver.find_element(By.CSS_SELECTOR, "[data-store-media-status]").text)
         assert float(progress.get_attribute("value") or 0) == 100
         _shot_checked(driver, "p6-04-product-image-processing-en.png")
