@@ -71,6 +71,45 @@ def _focus(driver, element):
     )
 
 
+def _position_complete_directory_card(driver, card, fallback):
+    driver.execute_script(
+        """
+        const card = arguments[0];
+        const header = document.querySelector('header');
+        const headerBottom = header ? Math.max(0, header.getBoundingClientRect().bottom) : 0;
+        const targetTop = Math.max(headerBottom + 24, 140);
+        const rect = card.getBoundingClientRect();
+        const targetY = Math.max(0, window.scrollY + rect.top - targetTop);
+        window.scrollTo(0, targetY);
+        """,
+        card,
+    )
+    _wait(driver).until(
+        lambda _d: bool(
+            _d.execute_script(
+                """
+                const cardRect = arguments[0].getBoundingClientRect();
+                const fallbackRect = arguments[1].getBoundingClientRect();
+                const header = document.querySelector('header');
+                const headerBottom = header ? Math.max(0, header.getBoundingClientRect().bottom) : 0;
+                const usableTop = headerBottom + 8;
+                const usableBottom = innerHeight - 12;
+                return cardRect.top >= usableTop &&
+                    cardRect.bottom <= usableBottom &&
+                    cardRect.left >= 0 &&
+                    cardRect.right <= innerWidth &&
+                    fallbackRect.top >= usableTop &&
+                    fallbackRect.bottom <= usableBottom &&
+                    fallbackRect.left >= 0 &&
+                    fallbackRect.right <= innerWidth;
+                """,
+                card,
+                fallback,
+            )
+        )
+    )
+
+
 def _designer(owner, display_name, *, city="Cairo", region="Cairo Governorate"):
     org = Organization.objects.create(
         kind=Organization.Kind.DESIGNER,
@@ -299,7 +338,12 @@ def test_designer_phase5_public_presentation_browser_evidence(live_server):
         assert not fallback_card.find_elements(
             By.CSS_SELECTOR, "[data-public-profile-image]"
         )
-        _focus(driver, fallback_card)
+        assert "Fallback Atelier" in fallback_card.text
+        assert "FABINZI-approved Designer" in fallback_card.text
+        assert fallback_card.find_element(
+            By.CSS_SELECTOR, ".v25-designer-card-cta"
+        ).is_displayed()
+        _position_complete_directory_card(driver, fallback_card, fallback)
         _shot(driver, "p5-02-designer-directory-en-desktop-fallback.png")
 
         broken_card = driver.find_element(By.ID, f"designer-card-{broken_state.slug}")
