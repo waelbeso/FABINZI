@@ -350,6 +350,9 @@ def create_designer_store_product_image(*, upload, product, organization, actor,
                 request=request,
             )
         return asset, image
-    except (DatabaseError, ValidationError, PermissionDenied):
+    except Exception:
+        # After the provider has accepted the image, every database/attachment/
+        # ordering/audit failure must leave local state rolled back and attempt
+        # provider compensation. The Designer receives only the controlled error.
         _compensate(endpoint, image_id, headers, organization.pk)
         raise ValidationError(SAFE_ERROR) from None
