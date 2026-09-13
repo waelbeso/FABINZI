@@ -38,8 +38,8 @@ def require_store_product_image_access(*, product, actor):
     return organization
 
 
-def store_product_image_eligible(media_asset, organization):
-    return designer_store_product_image_eligible(media_asset, organization)
+def store_product_image_eligible(media_asset, organization, product):
+    return designer_store_product_image_eligible(media_asset, organization, product)
 
 
 @transaction.atomic
@@ -103,7 +103,7 @@ def add_product_image(*, product, actor, media_asset, alt_en="", alt_ar="", sort
     """
     product = StoreProduct.objects.select_for_update().select_related("storefront__organization").get(pk=product.pk)
     organization = require_store_product_image_access(product=product, actor=actor)
-    if not store_product_image_eligible(media_asset, organization):
+    if not store_product_image_eligible(media_asset, organization, product):
         raise ValidationError(PRODUCT_IMAGE_CONTRACT_ERROR)
     if StoreProductImage.objects.filter(product=product, media_asset=media_asset).exists():
         raise ValidationError("This product image is already attached. / صورة المنتج هذه مرفقة بالفعل.")
@@ -114,7 +114,7 @@ def add_product_image(*, product, actor, media_asset, alt_en="", alt_ar="", sort
         .select_related("media_asset")
         .order_by("sort_order", "id")
     )
-    has_genuine_primary = any(store_product_image_eligible(row.media_asset, organization) for row in rows)
+    has_genuine_primary = any(store_product_image_eligible(row.media_asset, organization, product) for row in rows)
     if has_genuine_primary:
         next_order = max((row.sort_order for row in rows), default=-1) + 1
     else:
@@ -168,9 +168,9 @@ def publish_store_product(*, product, actor, request=None):
     )
     if not images:
         raise ValidationError("At least one genuine Store product image is required. / يلزم وجود صورة منتج متجر حقيقية واحدة على الأقل.")
-    if not store_product_image_eligible(images[0].media_asset, organization):
+    if not store_product_image_eligible(images[0].media_asset, organization, product):
         raise ValidationError(PRODUCT_GALLERY_ERROR)
-    if any(not store_product_image_eligible(row.media_asset, organization) for row in images):
+    if any(not store_product_image_eligible(row.media_asset, organization, product) for row in images):
         raise ValidationError(PRODUCT_GALLERY_ERROR)
 
     product.status = StoreProduct.Status.PUBLISHED
