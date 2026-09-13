@@ -291,6 +291,89 @@ class ManufacturerSubscriptionUpgradeRequest(models.Model):
         return f"{self.organization} · {self.plan_code} v{self.plan_version} · {self.status}"
 
 
+class DesignerSubscriptionUpgradeRequest(models.Model):
+    """Designer Owner upgrade intent. Review is not billing evidence or activation."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    organization = models.ForeignKey(
+        "organizations.Organization",
+        on_delete=models.PROTECT,
+        related_name="designer_subscription_upgrade_requests",
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="requested_designer_subscription_upgrades",
+    )
+    target_plan_policy = models.ForeignKey(
+        SubscriptionPlanPolicy,
+        on_delete=models.PROTECT,
+        related_name="designer_upgrade_requests",
+    )
+    plan_code = models.CharField(max_length=64, editable=False)
+    plan_version = models.PositiveIntegerField(editable=False)
+    policy_snapshot = models.JSONField(default=dict, editable=False)
+    price_snapshot = models.JSONField(default=dict, editable=False)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True)
+    requested_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="reviewed_designer_subscription_upgrades",
+    )
+    rejection_reason = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("-requested_at", "-id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization"],
+                condition=Q(status="pending"),
+                name="unique_pending_dsr_upgrade",
+            )
+        ]
+        indexes = [models.Index(fields=["status", "requested_at"], name="dsr_upg_status_req_idx")]
+
+    def clean(self):
+        super().clean()
+        from apps.organizations.models import Organization
+
+        if self.organization_id and self.organization.kind != Organization.Kind.DESIGNER:
+            raise ValidationError({"organization": "Upgrade requests require a Designer Organization."})
+        if self.target_plan_policy_id:
+            if self.target_plan_policy.audience != SubscriptionPlanPolicy.Audience.DESIGNER:
+                raise ValidationError({"target_plan_policy": "Upgrade target must be a Designer plan."})
+            if self.target_plan_policy.code != "designer_pro":
+                raise ValidationError({"target_plan_policy": "Upgrade target must be the Designer Pro plan."})
+            if self.plan_code and self.plan_code != self.target_plan_policy.code:
+                raise ValidationError({"plan_code": "Stored upgrade plan code must match the target policy."})
+            if self.plan_version and self.plan_version != self.target_plan_policy.version:
+                raise ValidationError({"plan_version": "Stored upgrade plan version must match the target policy."})
+        if self.status == self.Status.PENDING:
+            if self.reviewed_at or self.reviewed_by_id or self.rejection_reason:
+                raise ValidationError("A pending Designer upgrade request cannot contain review evidence.")
+        elif self.status == self.Status.APPROVED:
+            if not self.reviewed_at or not self.reviewed_by_id:
+                raise ValidationError("An approved Designer upgrade request requires reviewer evidence.")
+            if self.rejection_reason:
+                raise ValidationError({"rejection_reason": "Approved requests cannot contain a rejection reason."})
+        elif self.status == self.Status.REJECTED:
+            if not self.reviewed_at or not self.reviewed_by_id:
+                raise ValidationError("A rejected Designer upgrade request requires reviewer evidence.")
+            if not str(self.rejection_reason or "").strip():
+                raise ValidationError({"rejection_reason": "Rejected requests require a rejection reason."})
+
+    def __str__(self):
+        return f"{self.organization} · {self.plan_code} v{self.plan_version} · {self.status}"
+
+
 class ManufacturerOfferUsage(models.Model):
     subscription = models.ForeignKey(OrganizationSubscription, on_delete=models.PROTECT, related_name="manufacturer_offer_usage")
     organization = models.ForeignKey("organizations.Organization", on_delete=models.PROTECT, related_name="manufacturer_offer_usage")

@@ -9,12 +9,17 @@ from apps.design.models import GarmentDesign
 from apps.organizations.designer_context import designer_context
 from apps.organizations.manufacturer_context import manufacturer_context
 from apps.organizations.models import Membership, Organization
+from .designer_upgrade_services import (
+    create_designer_upgrade_request,
+    designer_upgrade_availability,
+)
 from .manufacturer_upgrade_services import (
     create_manufacturer_upgrade_request,
     manufacturer_upgrade_availability,
     withdraw_manufacturer_upgrade_request,
 )
 from .models import (
+    DesignerSubscriptionUpgradeRequest,
     ManufacturerSubscriptionUpgradeRequest,
     SubscriptionBillingConfirmation,
     TeamInvitation,
@@ -110,7 +115,7 @@ def _subscription_action(request, organization, context, *, designer):
     if request.method != "POST":
         return None
     action = request.POST.get("action", "")
-    if action not in {"downgrade", "cancel", "upgrade", "withdraw_upgrade", "retain"}:
+    if action not in {"downgrade", "cancel", "upgrade", "request_upgrade", "withdraw_upgrade", "retain"}:
         return None
     require_owner(request.user, organization)
     summary = entitlement_summary(organization)
@@ -139,6 +144,25 @@ def _subscription_action(request, organization, context, *, designer):
             request,
             "Your Pro upgrade request is already recorded. Your current plan remains unchanged while authorized billing processing is pending.",
             "طلب الترقية إلى Pro مسجل بالفعل. ستظل خطتك الحالية دون تغيير أثناء انتظار معالجة الفوترة المخوّلة.",
+        )
+    if action == "request_upgrade":
+        if not designer:
+            raise ValidationError("Unsupported subscription action.")
+        _upgrade, created = create_designer_upgrade_request(
+            organization=organization,
+            actor=request.user,
+            request=request,
+        )
+        if created:
+            return _localized(
+                request,
+                "Pro upgrade request recorded for FABINZI review. Your current plan and paid entitlement remain unchanged.",
+                "تم تسجيل طلب الترقية إلى Pro لمراجعة FABINZI. تظل خطتك الحالية وصلاحية الاشتراك المدفوع دون تغيير.",
+            )
+        return _localized(
+            request,
+            "Your Pro upgrade request is already pending. Your current plan and paid entitlement remain unchanged.",
+            "طلب الترقية إلى Pro قيد المراجعة بالفعل. تظل خطتك الحالية وصلاحية الاشتراك المدفوع دون تغيير.",
         )
     if action == "withdraw_upgrade":
         if designer:
@@ -197,14 +221,26 @@ def designer_subscription(request):
     commercial = commercial_context["onboarding_commercial"]
     active_designs = GarmentDesign.objects.filter(organization=organization, status__in=DESIGN_SLOT_STATUSES).order_by("created_at", "id")
     active_artworks = Artwork.objects.filter(organization=organization, status__in=ARTWORK_SLOT_STATUSES).order_by("created_at", "id")
+    upgrade_state = designer_upgrade_availability(organization)
+    latest_upgrade = (
+        DesignerSubscriptionUpgradeRequest.objects.filter(organization=organization)
+        .select_related("target_plan_policy", "requested_by", "reviewed_by")
+        .order_by("-requested_at", "-id")
+        .first()
+    )
+    is_owner = context["designer_membership"].role == Membership.Role.OWNER
     context.update({
         "subscription_summary": summary,
         "active_designs_for_retention": active_designs,
         "active_artworks_for_retention": active_artworks,
-        "is_subscription_owner": context["designer_membership"].role == Membership.Role.OWNER,
+        "is_subscription_owner": is_owner,
         "renewal_days_remaining": _days_remaining(summary["subscription"].next_billing_at),
         "payment_window_days_remaining": _days_remaining(commercial.get("payment_due_at")),
         "designer_pro_policy": _designer_pro_policy(),
+        "upgrade_request": upgrade_state["request"],
+        "latest_upgrade_request": latest_upgrade,
+        "upgrade_request_reason": upgrade_state["reason"],
+        "can_request_upgrade": bool(is_owner and upgrade_state["can_request"]),
     })
     context.update(commercial_context)
     return render(request, "designer/subscription.html", context)

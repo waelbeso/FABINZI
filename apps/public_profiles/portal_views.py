@@ -1,4 +1,5 @@
 from copy import deepcopy
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -6,6 +7,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Q
 from django.shortcuts import redirect, render
 
+from apps.media.designer_public_services import create_designer_public_image, designer_public_image_eligible
 from apps.media.manufacturer_public_services import create_manufacturer_public_image, manufacturer_public_image_eligible, validate_public_image
 from apps.media.models import MediaAsset
 from apps.organizations.designer_context import DESIGNER_MANAGE_ROLES, require_active_designer_context
@@ -25,10 +27,16 @@ def _list(value):
 
 def _public_images(organization):
     user_ids = organization.memberships.filter(is_active=True).values_list("user_id", flat=True)
+    assets = MediaAsset.objects.filter(access=MediaAsset.Access.PUBLIC, mime_type__startswith="image/").filter(
+        Q(metadata__organization_id=organization.pk)
+        | Q(metadata__organization_id=str(organization.pk))
+        | Q(uploaded_by_id__in=user_ids)
+    ).order_by("-created_at")
     if organization.kind == Organization.Kind.MANUFACTURER:
-        assets = MediaAsset.objects.filter(access=MediaAsset.Access.PUBLIC, mime_type__startswith="image/").filter(Q(metadata__organization_id=organization.pk) | Q(metadata__organization_id=str(organization.pk)) | Q(uploaded_by_id__in=user_ids)).order_by("-created_at")
-        return [asset for asset in assets if manufacturer_public_image_eligible(asset, organization)]
-    return MediaAsset.objects.filter(access=MediaAsset.Access.PUBLIC, mime_type__startswith="image/", uploaded_by_id__in=user_ids).order_by("-created_at")[:80]
+        return [asset for asset in assets if manufacturer_public_image_eligible(asset, organization)][:80]
+    if organization.kind == Organization.Kind.DESIGNER:
+        return [asset for asset in assets if designer_public_image_eligible(asset, organization)][:80]
+    return []
 
 
 def _editable_payload(organization):
@@ -77,23 +85,31 @@ def _profile_action(request, organization, *, manufacturer=False):
         return "Public visibility request submitted for FABINZI approval."
     _revision, payload = _editable_payload(organization)
     payload = _apply_post(payload, request.POST, manufacturer=manufacturer)
-    if manufacturer:
-        uploads = {purpose: request.FILES.get(f"{purpose}_image_upload") for purpose in ("profile", "cover")}
-        if any(uploads.values()):
-            if organization.public_profile_revisions.filter(status__in=[PublicProfileRevision.Status.SUBMITTED, PublicProfileRevision.Status.UNDER_REVIEW]).exists():
-                raise ValidationError("A revision is already under review. / توجد مراجعة قيد المراجعة بالفعل.")
-            for purpose, upload in uploads.items():
-                if upload:
-                    payload["public_state"][f"{purpose}_image_id"] = None
-            payload = normalize_public_profile_data(organization=organization, proposed_data=payload)
-            for upload in uploads.values():
-                if upload:
-                    validate_public_image(upload)
-                    upload.seek(0)
-            for purpose, upload in uploads.items():
-                if upload:
-                    asset = create_manufacturer_public_image(upload=upload, organization=organization, actor=request.user, purpose=purpose, request=request)
-                    payload["public_state"][f"{purpose}_image_id"] = asset.pk
+
+    uploads = {purpose: request.FILES.get(f"{purpose}_image_upload") for purpose in ("profile", "cover")}
+    if any(uploads.values()):
+        if organization.public_profile_revisions.filter(status__in=[PublicProfileRevision.Status.SUBMITTED, PublicProfileRevision.Status.UNDER_REVIEW]).exists():
+            raise ValidationError("A revision is already under review. / توجد مراجعة قيد المراجعة بالفعل.")
+        for purpose, upload in uploads.items():
+            if upload:
+                payload["public_state"][f"{purpose}_image_id"] = None
+        payload = normalize_public_profile_data(organization=organization, proposed_data=payload)
+        for upload in uploads.values():
+            if upload:
+                validate_public_image(upload)
+                upload.seek(0)
+        create_public_image = create_manufacturer_public_image if manufacturer else create_designer_public_image
+        for purpose, upload in uploads.items():
+            if upload:
+                asset = create_public_image(
+                    upload=upload,
+                    organization=organization,
+                    actor=request.user,
+                    purpose=purpose,
+                    request=request,
+                )
+                payload["public_state"][f"{purpose}_image_id"] = asset.pk
+
     revision = save_public_profile_revision(organization=organization, actor=request.user, proposed_data=payload, request=request)
     if action == "submit_revision":
         submit_public_profile_revision(revision=revision, actor=request.user, request=request)
@@ -151,8 +167,11 @@ def _profile_context(organization, *, tolerate_legacy_designer_data=False):
     return latest, deepcopy(editable.proposed_data if editable else current), current
 
 
-def _manufacturer_portal_state(organization, *, requested_edit=False, attempted_data=None, error=""):
-    revision, edit_data, current = _profile_context(organization)
+def _portal_state(organization, *, requested_edit=False, attempted_data=None, error="", tolerate_legacy_designer_data=False):
+    revision, edit_data, current = _profile_context(
+        organization,
+        tolerate_legacy_designer_data=tolerate_legacy_designer_data,
+    )
     locked = bool(
         revision
         and revision.status in {
@@ -177,19 +196,84 @@ def _manufacturer_portal_state(organization, *, requested_edit=False, attempted_
     }
 
 
+def _manufacturer_portal_state(organization, *, requested_edit=False, attempted_data=None, error=""):
+    return _portal_state(
+        organization,
+        requested_edit=requested_edit,
+        attempted_data=attempted_data,
+        error=error,
+    )
+
+
+def _designer_portal_state(organization, *, requested_edit=False, attempted_data=None, error=""):
+    return _portal_state(
+        organization,
+        requested_edit=requested_edit,
+        attempted_data=attempted_data,
+        error=error,
+        tolerate_legacy_designer_data=True,
+    )
+
+
+def _designer_public_profile_url(request, organization, *, edit=False):
+    params = {
+        "org": organization.pk,
+        "lang": getattr(request, "LANGUAGE_CODE", "en"),
+    }
+    if edit:
+        params["edit"] = "1"
+    return f"/designer/public-profile/?{urlencode(params)}"
+
+
 @login_required
 def designer_public_profile(request):
     context = require_active_designer_context(request, roles=DESIGNER_MANAGE_ROLES)
     organization = context["designer_organization"]
     state = ensure_public_state(organization)
+    requested_edit = request.GET.get("edit") == "1" or request.method == "POST"
+
     if request.method == "POST":
+        action = request.POST.get("action", "")
+        if action not in {"save_revision", "submit_revision", "hide", "request_visibility"}:
+            messages.error(request, "Unsupported public-profile action.")
+            return redirect(_designer_public_profile_url(request, organization))
+        if action in {"hide", "request_visibility"}:
+            try:
+                result = _profile_action(request, organization, manufacturer=False)
+            except (ValidationError, PermissionDenied) as exc:
+                messages.error(request, _error(exc))
+            else:
+                messages.success(request, result)
+            return redirect(_designer_public_profile_url(request, organization))
+
+        locked = organization.public_profile_revisions.filter(
+            status__in=[PublicProfileRevision.Status.SUBMITTED, PublicProfileRevision.Status.UNDER_REVIEW]
+        ).exists()
+        if locked:
+            messages.error(request, "A public profile revision is already submitted or under FABINZI review.")
+            return redirect(_designer_public_profile_url(request, organization))
         try:
-            messages.success(request, _profile_action(request, organization, manufacturer=False))
+            result = _profile_action(request, organization, manufacturer=False)
         except (ValidationError, PermissionDenied) as exc:
-            messages.error(request, _error(exc))
-        return redirect(f"/designer/public-profile/?org={organization.pk}")
-    revision, edit_data, current = _profile_context(organization, tolerate_legacy_designer_data=True)
-    context.update({"public_state": state, "current_public_data": current, "edit_public_data": edit_data, "public_revision": revision, "public_images": _public_images(organization)})
+            _revision, attempted = _editable_payload(organization)
+            attempted = _apply_post(attempted, request.POST, manufacturer=False)
+            context.update(
+                _designer_portal_state(
+                    organization,
+                    requested_edit=True,
+                    attempted_data=attempted,
+                    error=_error(exc),
+                )
+            )
+            context.update({"public_state": state})
+            return render(request, "public_profiles/designer_portal.html", context)
+        messages.success(request, result)
+        if action == "save_revision":
+            return redirect(_designer_public_profile_url(request, organization, edit=True))
+        return redirect(_designer_public_profile_url(request, organization))
+
+    context.update(_designer_portal_state(organization, requested_edit=requested_edit))
+    context.update({"public_state": state})
     return render(request, "public_profiles/designer_portal.html", context)
 
 

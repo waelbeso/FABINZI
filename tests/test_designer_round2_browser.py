@@ -131,11 +131,13 @@ def test_designer_round2_real_chrome_owner_surfaces_and_upload_inputs(
     try:
         wait = _wait(driver)
 
-        # Owner public-profile management: real rendered controls and draft lifecycle.
+        # Owner public-profile management: Phase 4 opens read-only, then the explicit Edit action exposes the existing revision lifecycle.
         _login(driver, live_server, client, owner)
         driver.get(f"{live_server.url}/designer/public-profile/?org={organization.pk}&lang=en")
+        wait.until(EC.visibility_of_element_located((By.ID, "revision-state-title")))
+        wait.until(EC.visibility_of_element_located((By.ID, "designer-public-profile-readonly")))
+        _click_element(driver, driver.find_element(By.ID, "public-profile-edit-action"))
         for element_id in (
-            "revision-state-title",
             "public-identity-title",
             "location-studio-title",
             "professional-presence-title",
@@ -331,6 +333,8 @@ def test_designer_round2_real_chrome_owner_surfaces_and_upload_inputs(
         assert _no_overflow(driver)
         _shot(driver, "round2-09-create-store-mobile-ar-rtl.png")
         driver.get(f"{live_server.url}/designer/public-profile/?org={organization.pk}&lang=ar")
+        wait.until(EC.visibility_of_element_located((By.ID, "designer-public-profile-readonly")))
+        _click_element(driver, driver.find_element(By.ID, "public-profile-edit-action"))
         wait.until(EC.visibility_of_element_located((By.ID, "public-identity-title")))
         assert driver.find_element(By.TAG_NAME, "html").get_attribute("dir") == "rtl"
         assert _no_overflow(driver)

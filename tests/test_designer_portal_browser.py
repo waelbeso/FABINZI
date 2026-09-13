@@ -392,6 +392,9 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server, v2_3_reference_
         _shot(driver, "01-designer-dashboard-desktop-en-light.png")
 
         _click(driver, By.CSS_SELECTOR, 'a[href^="/designer/profile/"]')
+        wait.until(EC.visibility_of_element_located((By.ID, "designer-profile-readonly")))
+        assert not driver.find_elements(By.ID, "designer-profile-form")
+        _click(driver, By.ID, "profile-edit-action")
         wait.until(EC.presence_of_element_located((By.ID, "profile-display-name")))
         profile_form = driver.find_element(By.XPATH, '//form[.//*[@id="profile-studio-name"]]')
         _replace(driver, profile_form.find_element(By.ID, "profile-studio-name"), "Atelier North Studio")
@@ -522,10 +525,7 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server, v2_3_reference_
         assert all(media.provider_asset_id not in driver.page_source for media in private_media)
         assert "Approved public preview" not in driver.page_source
         _shot(driver, "07-designer-artwork-desktop-en-light.png")
-        ip_heading = driver.find_element(
-            By.XPATH,
-            '//*[self::h2 or self::h3][contains(normalize-space(.), "IP cases") or contains(normalize-space(.), "IP Cases")]',
-        )
+        ip_heading = driver.find_element(By.XPATH, '//*[self::h2 or self::h3][contains(normalize-space(.), "IP cases") or contains(normalize-space(.), "IP Cases")]')
         ActionChains(driver).scroll_to_element(ip_heading).perform()
         assert "rights@example.test" not in driver.page_source
         _shot(driver, "08-designer-ip-desktop-en-light.png")
@@ -534,9 +534,7 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server, v2_3_reference_
         create_product_section = _section_by_heading(driver, "Create Designed Product")
         create_product_form = create_product_section.find_element(By.CSS_SELECTOR, 'form[method="post"]')
         create_product_form.find_element(By.NAME, "title").send_keys("North Wave Tee")
-        create_product_form.find_element(By.CSS_SELECTOR, 'textarea[name="description"]').send_keys(
-            "Approved garment and Artwork combination"
-        )
+        create_product_form.find_element(By.CSS_SELECTOR, 'textarea[name="description"]').send_keys("Approved garment and Artwork combination")
         Select(create_product_form.find_element(By.NAME, "garment_version")).select_by_value(str(approved_garment.pk))
         Select(create_product_form.find_element(By.NAME, "artwork_version")).select_by_value(str(approved_artwork_version.pk))
         _click_element(driver, create_product_form.find_element(By.CSS_SELECTOR, 'button[type="submit"]'))
@@ -555,22 +553,12 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server, v2_3_reference_
         _replace(driver, placement_form.find_element(By.NAME, "scale"), "0.30")
         _replace(driver, placement_form.find_element(By.NAME, "rotation"), "12")
         _click_element(driver, placement_form.find_element(By.CSS_SELECTOR, 'button[type="submit"]'))
-        wait.until(
-            lambda _d: designed.placements.filter(
-                decoration_zone=approved_zone,
-                production_method="print",
-            ).exists()
-        )
+        wait.until(lambda _d: designed.placements.filter(decoration_zone=approved_zone, production_method="print").exists())
         wait.until(EC.text_to_be_present_in_element((By.ID, "placements"), "Scale 0.3"))
         product_header = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "header.designer-page-head")))
         publish_designed_form = _form_with_action(product_header, "publish")
         _click_element(driver, publish_designed_form.find_element(By.CSS_SELECTOR, 'button[type="submit"]'))
-        wait.until(
-            lambda _d: designed.__class__.objects.filter(
-                pk=designed.pk,
-                status=designed.Status.PUBLISHED,
-            ).exists()
-        )
+        wait.until(lambda _d: designed.__class__.objects.filter(pk=designed.pk, status=designed.Status.PUBLISHED).exists())
         designed.refresh_from_db()
         _shot(driver, "09-designer-products-desktop-en-light.png")
 
@@ -589,10 +577,7 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server, v2_3_reference_
 
         open_section = _section_by_heading(driver, "Open RFQ to Manufacturers")
         open_form = _form_with_action(open_section, "open")
-        manufacturer_box = open_form.find_element(
-            By.CSS_SELECTOR,
-            f'input[name="manufacturers"][value="{factory.pk}"]',
-        )
+        manufacturer_box = open_form.find_element(By.CSS_SELECTOR, f'input[name="manufacturers"][value="{factory.pk}"]')
         _click_element(driver, manufacturer_box)
         assert manufacturer_box.is_selected()
         _click_element(driver, open_form.find_element(By.CSS_SELECTOR, 'button[type="submit"]'))
@@ -611,23 +596,11 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server, v2_3_reference_
             production_lead_days=12,
         )
         driver.refresh()
-        quote_card = wait.until(
-            EC.visibility_of_element_located(
-                (
-                    By.XPATH,
-                    f'//article[contains(@class,"designer-quote")][.//strong[normalize-space(.)="{factory.display_name}"]]'
-                )
-            )
-        )
+        quote_card = wait.until(EC.visibility_of_element_located((By.XPATH, f'//article[contains(@class,"designer-quote")][.//strong[normalize-space(.)="{factory.display_name}"]]')))
         select_quote_form = _form_with_action(quote_card, "select_quote")
         _assert_hidden(select_quote_form, "quote_id", quote.pk)
         _click_element(driver, select_quote_form.find_element(By.CSS_SELECTOR, 'button[type="submit"]'))
-        wait.until(
-            lambda _d: rfq.__class__.objects.filter(
-                pk=rfq.pk,
-                status=rfq.Status.SELECTED,
-            ).exists()
-        )
+        wait.until(lambda _d: rfq.__class__.objects.filter(pk=rfq.pk, status=rfq.Status.SELECTED).exists())
         rfq.refresh_from_db()
         _shot(driver, "10-designer-rfq-quotes-desktop-en-light.png")
 
@@ -645,12 +618,7 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server, v2_3_reference_
         storefront_details = _section_by_heading(driver, "Storefront details")
         publish_store_form = _form_with_action(storefront_details, "publish")
         _click_element(driver, publish_store_form.find_element(By.CSS_SELECTOR, 'button[type="submit"]'))
-        wait.until(
-            lambda _d: store.__class__.objects.filter(
-                pk=store.pk,
-                status=store.Status.PUBLISHED,
-            ).exists()
-        )
+        wait.until(lambda _d: store.__class__.objects.filter(pk=store.pk, status=store.Status.PUBLISHED).exists())
         store.refresh_from_db()
 
         catalog_section = _section_by_heading(driver, "Add catalog product")
@@ -691,12 +659,7 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server, v2_3_reference_
         store_product_header = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "header.designer-page-head")))
         publish_product_form = _form_with_action(store_product_header, "publish")
         _click_element(driver, publish_product_form.find_element(By.CSS_SELECTOR, 'button[type="submit"]'))
-        wait.until(
-            lambda _d: StoreProduct.objects.filter(
-                pk=product.pk,
-                status=StoreProduct.Status.PUBLISHED,
-            ).exists()
-        )
+        wait.until(lambda _d: StoreProduct.objects.filter(pk=product.pk, status=StoreProduct.Status.PUBLISHED).exists())
         product.refresh_from_db()
         _shot(driver, "11-designer-store-desktop-en-light.png")
 
@@ -713,11 +676,7 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server, v2_3_reference_
         driver.switch_to.window(original_window)
 
         # F. Real fulfillment + finance visibility; settlement is a visible Designer action.
-        customer = User.objects.create_user(
-            username="designer-browser-customer",
-            password="password12345",
-            email="customer-private@example.test",
-        )
+        customer = User.objects.create_user(username="designer-browser-customer", password="password12345", email="customer-private@example.test")
         order, fulfillment = _create_order_visibility(customer, org, product, variant)
         driver.get(f"{live_server.url}/designer/fulfillment/?org={org.pk}&lang=en")
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "FAB-QA-1001"))
@@ -732,12 +691,7 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server, v2_3_reference_
         _click_element(driver, amount)
         amount.send_keys("100")
         _click_element(driver, settlement_form.find_element(By.CSS_SELECTOR, 'button[type="submit"]'))
-        wait.until(
-            lambda _d: SettlementRequest.objects.filter(
-                organization=org,
-                amount=Decimal("100.00"),
-            ).exists()
-        )
+        wait.until(lambda _d: SettlementRequest.objects.filter(organization=org, amount=Decimal("100.00")).exists())
         _shot(driver, "13-designer-finance-desktop-en-light.png")
 
         # G1. Tablet English regression.
@@ -762,9 +716,7 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server, v2_3_reference_
         assert _no_overflow(driver)
         _shot(driver, "15-designer-dashboard-mobile-ar-rtl-dark.png")
 
-        driver.get(
-            f"{live_server.url}/designer/designs/{browser_design.pk}/?org={org.pk}&version={browser_version.pk}&lang=ar"
-        )
+        driver.get(f"{live_server.url}/designer/designs/{browser_design.pk}/?org={org.pk}&version={browser_version.pk}&lang=ar")
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Browser Capsule Tee"))
         assert driver.find_element(By.TAG_NAME, "html").get_attribute("dir") == "rtl"
         assert _no_overflow(driver)
