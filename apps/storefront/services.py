@@ -7,6 +7,7 @@ from django.utils import timezone
 from apps.artwork.models import ArtworkVersion, DesignedProduct
 from apps.artwork.public import public_media_path, supported_methods, version_eligible_for_zone
 from apps.audit.services import record_audit_event
+from apps.media.designer_public_services import designer_store_product_image_eligible
 from apps.organizations.models import Membership, Organization
 from apps.organizations.services import require_org_access
 from .models import CustomerCustomization, CustomizationElement, ProductVariant, StoreProduct, StoreProductImage, Storefront, StudioProject
@@ -14,6 +15,9 @@ from .models import CustomerCustomization, CustomizationElement, ProductVariant,
 STORE_EDIT_ROLES = [Membership.Role.OWNER, Membership.Role.MANAGER, Membership.Role.DESIGN_MANAGER]
 TRANSFORM_MIN_SCALE = 0.05
 TRANSFORM_MAX_SCALE = 1.0
+PRODUCT_IMAGE_STATE_ERROR = "Hide the published product before changing public product images. / أخفِ المنتج المنشور قبل تغيير صور المنتج العامة."
+PRODUCT_IMAGE_CONTRACT_ERROR = "Choose a genuine Store product image uploaded for this Designer organization. / اختر صورة منتج متجر حقيقية مرفوعة لجهة التصميم هذه."
+PRODUCT_GALLERY_ERROR = "Every public gallery image must be a genuine Store product image before publication. / يجب أن تكون كل صور المعرض العام صور منتجات متجر حقيقية قبل النشر."
 
 
 def _require_active_designer(organization):
@@ -23,6 +27,19 @@ def _require_active_designer(organization):
 
 def require_store_access(actor, storefront):
     return require_org_access(actor, storefront.organization, roles=STORE_EDIT_ROLES)
+
+
+def require_store_product_image_access(*, product, actor):
+    organization = product.storefront.organization
+    _require_active_designer(organization)
+    require_store_access(actor, product.storefront)
+    if product.status not in {StoreProduct.Status.DRAFT, StoreProduct.Status.HIDDEN}:
+        raise ValidationError(PRODUCT_IMAGE_STATE_ERROR)
+    return organization
+
+
+def store_product_image_eligible(media_asset, organization):
+    return designer_store_product_image_eligible(media_asset, organization)
 
 
 @transaction.atomic
@@ -78,11 +95,52 @@ def add_variant(*, product, actor, sku, size="", color_name="", color_hex="", pr
 
 @transaction.atomic
 def add_product_image(*, product, actor, media_asset, alt_en="", alt_ar="", sort_order=0, request=None):
-    require_store_access(actor, product.storefront)
-    image = StoreProductImage(product=product, media_asset=media_asset, alt_en=alt_en, alt_ar=alt_ar, sort_order=sort_order)
+    """Attach only explicitly classified Store-product photography.
+
+    ``sort_order`` remains in the signature for existing callers but is not a
+    caller-controlled business ordering input. Phase 6 derives ordering from the
+    current gallery so the first genuine image becomes primary and later images
+    append deterministically.
+    """
+    organization = require_store_product_image_access(product=product, actor=actor)
+    if not store_product_image_eligible(media_asset, organization):
+        raise ValidationError(PRODUCT_IMAGE_CONTRACT_ERROR)
+    if StoreProductImage.objects.filter(product=product, media_asset=media_asset).exists():
+        raise ValidationError("This product image is already attached. / صورة المنتج هذه مرفقة بالفعل.")
+
+    rows = list(
+        StoreProductImage.objects.select_for_update()
+        .filter(product=product)
+        .select_related("media_asset")
+        .order_by("sort_order", "id")
+    )
+    has_genuine_primary = any(store_product_image_eligible(row.media_asset, organization) for row in rows)
+    if has_genuine_primary:
+        next_order = max((row.sort_order for row in rows), default=-1) + 1
+    else:
+        # Legacy rows stay visible for management/detach but move behind the
+        # first genuine product image. They remain publication-ineligible.
+        for row in rows:
+            row.sort_order += 1
+            row.save(update_fields=["sort_order"])
+        next_order = 0
+
+    image = StoreProductImage(
+        product=product,
+        media_asset=media_asset,
+        alt_en=alt_en,
+        alt_ar=alt_ar,
+        sort_order=next_order,
+    )
     image.full_clean()
     image.save()
-    record_audit_event(actor=actor, action="store.product.image.added", instance=image, metadata={"product_id": product.pk}, request=request)
+    record_audit_event(
+        actor=actor,
+        action="store.product.image.added",
+        instance=image,
+        metadata={"product_id": product.pk, "media_asset_id": media_asset.pk, "sort_order": image.sort_order},
+        request=request,
+    )
     return image
 
 
@@ -95,8 +153,16 @@ def publish_store_product(*, product, actor, request=None):
         raise ValidationError("The underlying Designed Product is not published.")
     if not product.variants.filter(is_active=True).exists():
         raise ValidationError("At least one active product variant is required.")
-    if not product.images.exists():
-        raise ValidationError("At least one public product image is required.")
+
+    organization = product.storefront.organization
+    images = list(product.images.select_related("media_asset").order_by("sort_order", "id"))
+    if not images:
+        raise ValidationError("At least one genuine Store product image is required. / يلزم وجود صورة منتج متجر حقيقية واحدة على الأقل.")
+    if not store_product_image_eligible(images[0].media_asset, organization):
+        raise ValidationError(PRODUCT_GALLERY_ERROR)
+    if any(not store_product_image_eligible(row.media_asset, organization) for row in images):
+        raise ValidationError(PRODUCT_GALLERY_ERROR)
+
     product.status = StoreProduct.Status.PUBLISHED
     product.published_at = product.published_at or timezone.now()
     product.save(update_fields=["status", "published_at", "updated_at"])
@@ -249,7 +315,7 @@ def enable_customization(*, project, actor, request=None):
 
 def _validate_element(element):
     project = element.customization.project
-    if element.decoration_zone.version_id != project.product.designed_product.garment_version_id:
+    if element.decoration_zone_id and element.decoration_zone.version_id != project.product.designed_product.garment_version_id:
         raise ValidationError("Selected decoration zone is no longer available for this product.")
     if element.kind == CustomizationElement.Kind.ARTWORK:
         version = element.artwork_version
