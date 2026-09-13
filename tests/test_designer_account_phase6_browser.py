@@ -256,3 +256,66 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
     finally:
         release_provider.set()
         driver.quit()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_designer_phase6_store_product_upload_falls_back_to_normal_multipart_without_javascript(client, live_server, tmp_path, monkeypatch):
+    if os.getenv("CI") != "true":
+        pytest.skip("Phase 6 real-browser evidence is CI-only.")
+
+    from apps.media import designer_public_services as media_service
+
+    owner, org, _store, product = _catalog("phase6-nojs")
+    IntegrationConfig.objects.update_or_create(
+        provider=IntegrationConfig.Provider.CLOUDFLARE_IMAGES,
+        defaults={"enabled": True, "config": {"account_id": "b" * 32}},
+    )
+    monkeypatch.setattr(IntegrationConfig, "get_secrets", lambda self: {"api_token": "phase6-nojs-secret"})
+    provider_calls = []
+
+    class ProviderResponse:
+        ok = True
+        def json(self):
+            return {
+                "success": True,
+                "result": {
+                    "id": "phase6-nojs-provider-image",
+                    "requireSignedURLs": False,
+                    "variants": ["https://imagedelivery.net/browser/phase6-nojs-provider-image/public"],
+                },
+            }
+
+    def provider_post(*args, **kwargs):
+        provider_calls.append((args, kwargs))
+        return ProviderResponse()
+
+    monkeypatch.setattr(media_service.requests, "post", provider_post)
+
+    upload = tmp_path / "phase6-nojs-product.png"
+    _small_png(upload, (80, 120, 40))
+    driver = _chrome(width=1280, height=900)
+    try:
+        _login(driver, live_server, client, owner)
+        driver.execute_cdp_cmd("Emulation.setScriptExecutionDisabled", {"value": True})
+        manage_url = f"{live_server.url}/designer/store/products/{product.pk}/?org={org.pk}&lang=en"
+        driver.get(manage_url)
+        wait = _wait(driver)
+        form = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "form[data-store-media-upload-form]")))
+        assert form.get_attribute("enctype").lower() == "multipart/form-data"
+        form.find_element(By.CSS_SELECTOR, "[data-store-media-file]").send_keys(str(upload))
+        form.find_element(By.NAME, "alt_en").send_keys("No-JavaScript product photo")
+        _click_element(driver, form.find_element(By.CSS_SELECTOR, "[data-store-media-submit]"))
+        wait.until(lambda _d: product.images.count() == 1)
+        wait.until(lambda _d: "Product image uploaded and attached" in driver.page_source)
+        assert len(provider_calls) == 1
+        relation = product.images.select_related("media_asset").get()
+        assert relation.media_asset.metadata["store_product_id"] == product.pk
+        assert relation.media_asset.metadata["purpose"] == "store_product_image"
+        assert "phase6-nojs-secret" not in driver.page_source
+        assert "api.cloudflare.com" not in driver.page_source
+        # JavaScript enhancement is absent, so the browser performed a normal
+        # navigation and no byte-progress claim was made.
+        progress_wrap = driver.find_element(By.CSS_SELECTOR, "[data-store-media-progress-wrap]")
+        assert progress_wrap.get_attribute("hidden") is not None
+    finally:
+        driver.quit()
