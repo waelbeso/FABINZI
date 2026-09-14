@@ -2,14 +2,20 @@ import http.client
 import io
 import json
 import os
+import ssl
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
 from PIL import Image
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 from django.contrib.auth import get_user_model
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
@@ -31,13 +37,54 @@ ARTIFACT_DIR = Path("artifacts/designer-browser-qa")
 UPLOAD_THROUGHPUT_BYTES_PER_SECOND = 512 * 1024
 
 
+def _browser_png_bytes(color):
+    buffer = io.BytesIO()
+    Image.new("RGB", (640, 800), color).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _delivery_tls_context(cert_dir):
+    cert_dir = Path(cert_dir)
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "imagedelivery.net")])
+    now = datetime.now(timezone.utc)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=5))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(
+            x509.SubjectAlternativeName([x509.DNSName("imagedelivery.net")]),
+            critical=False,
+        )
+        .sign(key, hashes.SHA256())
+    )
+    cert_path = cert_dir / "phase6-browser-imagedelivery.crt"
+    key_path = cert_dir / "phase6-browser-imagedelivery.key"
+    cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.TraditionalOpenSSL,
+            serialization.NoEncryption(),
+        )
+    )
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
+    context.set_alpn_protocols(["http/1.1"])
+    return context
+
+
 class _UploadProxyServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
 
 class _UploadObservationProxy:
-    """Observe real Store-media multipart POSTs without fabricating progress."""
+    """Observe real Store-media multipart POSTs and serve deterministic mocked delivery pixels."""
 
     _HOP_BY_HOP = {
         "connection",
@@ -52,7 +99,7 @@ class _UploadObservationProxy:
         "expect",
     }
 
-    def __init__(self, target_url):
+    def __init__(self, target_url, cert_dir):
         target = urlsplit(target_url)
         assert target.scheme == "http" and target.hostname
         self.target_host = target.hostname
@@ -65,6 +112,13 @@ class _UploadObservationProxy:
         self._upload_connection_id = None
         self._upload_request_path = None
         self._upload_seen = False
+        self._delivery_hits = []
+        self._delivery_errors = []
+        self._delivery_images = {
+            "/browser/phase6-browser-1/public": _browser_png_bytes((218, 112, 44)),
+            "/browser/phase6-browser-2/public": _browser_png_bytes((32, 80, 170)),
+        }
+        self._delivery_tls_context = _delivery_tls_context(cert_dir)
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -87,6 +141,66 @@ class _UploadObservationProxy:
 
             def do_POST(self):
                 self._forward()
+
+            def do_CONNECT(self):
+                host, separator, port_text = self.path.partition(":")
+                port_text = port_text if separator else "443"
+                if host.lower() != "imagedelivery.net" or port_text != "443":
+                    self.close_connection = True
+                    self.send_error(502, "Unexpected CONNECT destination")
+                    return
+
+                self.send_response(200, "Connection Established")
+                self.end_headers()
+                self.wfile.flush()
+                try:
+                    tls_socket = outer._delivery_tls_context.wrap_socket(
+                        self.connection,
+                        server_side=True,
+                    )
+                    self.connection = tls_socket
+                    self.rfile = tls_socket.makefile("rb", self.rbufsize)
+                    self.wfile = tls_socket.makefile("wb", self.wbufsize)
+                    request_line = self.rfile.readline(65537)
+                    if not request_line:
+                        raise OSError("Mock delivery TLS tunnel closed before request")
+                    method, request_target, _version = request_line.decode("iso-8859-1").strip().split(" ", 2)
+                    while True:
+                        header_line = self.rfile.readline(65537)
+                        if header_line in (b"\r\n", b"\n", b""):
+                            break
+                    request_path = urlsplit(request_target).path
+                    body = outer._delivery_images.get(request_path)
+                    if method not in {"GET", "HEAD"}:
+                        status, reason, content_type, body = 405, "Method Not Allowed", "text/plain", b"method not allowed"
+                    elif body is None:
+                        status, reason, content_type, body = 404, "Not Found", "text/plain", b"not found"
+                    else:
+                        status, reason, content_type = 200, "OK", "image/png"
+                        with outer._lock:
+                            outer._delivery_hits.append(
+                                {
+                                    "path": request_path,
+                                    "method": method,
+                                    "content_length": len(body),
+                                }
+                            )
+                    response_head = (
+                        f"HTTP/1.1 {status} {reason}\r\n"
+                        f"Content-Type: {content_type}\r\n"
+                        f"Content-Length: {len(body)}\r\n"
+                        "Cache-Control: no-store\r\n"
+                        "Connection: close\r\n\r\n"
+                    ).encode("ascii")
+                    self.wfile.write(response_head)
+                    if method != "HEAD":
+                        self.wfile.write(body)
+                    self.wfile.flush()
+                except (OSError, ValueError, ssl.SSLError) as exc:
+                    with outer._lock:
+                        outer._delivery_errors.append(f"{type(exc).__name__}:{exc}")
+                finally:
+                    self.close_connection = True
 
             def _forward(self):
                 parsed = urlsplit(self.path)
@@ -220,6 +334,14 @@ class _UploadObservationProxy:
                 self._upload_request_path,
             )
 
+    def delivery_hits(self):
+        with self._lock:
+            return [dict(row) for row in self._delivery_hits]
+
+    def delivery_errors(self):
+        with self._lock:
+            return list(self._delivery_errors)
+
     def close(self):
         self._server.shutdown()
         self._server.server_close()
@@ -232,6 +354,8 @@ def _chrome_through_proxy(proxy_url, *, language="en-US,en", width=1440, height=
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-background-networking")
+    options.add_argument("--disable-quic")
+    options.add_argument("--ignore-certificate-errors")
     options.add_argument(f"--window-size={width},{height}")
     options.add_argument(f"--proxy-server={proxy_url}")
     options.add_argument("--proxy-bypass-list=<-loopback>")
@@ -368,6 +492,121 @@ def _frame(driver, element):
         "arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});",
         element,
     )
+
+
+def _frame_evidence(driver, elements, label):
+    if not isinstance(elements, (list, tuple)):
+        elements = [elements]
+    elements = list(elements)
+    assert elements, label
+    position_script = """
+        const nodes = Array.from(arguments);
+        for (const node of nodes) {
+          for (let parent = node.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+            const style = getComputedStyle(parent);
+            if (/(auto|scroll)/.test(style.overflowY) && parent.scrollHeight > parent.clientHeight) {
+              const nodeRect = node.getBoundingClientRect();
+              const parentRect = parent.getBoundingClientRect();
+              parent.scrollTop += (nodeRect.top + nodeRect.height / 2) - (parentRect.top + parent.clientHeight / 2);
+            }
+          }
+        }
+        const rects = nodes.map((node) => node.getBoundingClientRect());
+        const top = Math.min(...rects.map((rect) => rect.top));
+        const bottom = Math.max(...rects.map((rect) => rect.bottom));
+        const fixedTop = Array.from(document.querySelectorAll('body *')).reduce((value, node) => {
+          const style = getComputedStyle(node);
+          if (style.position !== 'fixed' && style.position !== 'sticky') return value;
+          const rect = node.getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0 || rect.bottom <= 0 || rect.top > 12) return value;
+          return Math.max(value, rect.bottom);
+        }, 0);
+        const availableTop = fixedTop + 12;
+        const availableBottom = window.innerHeight - 12;
+        const groupHeight = bottom - top;
+        const desiredTop = availableTop + Math.max(0, (availableBottom - availableTop - groupHeight) / 2);
+        window.scrollBy({left: 0, top: top - desiredTop, behavior: 'instant'});
+    """
+    driver.execute_script(position_script, *elements)
+    time.sleep(0.08)
+    driver.execute_script(position_script, *elements)
+    time.sleep(0.08)
+    state = driver.execute_script(
+        """
+        const nodes = Array.from(arguments);
+        const rects = nodes.map((node) => node.getBoundingClientRect());
+        const rect = {
+          left: Math.min(...rects.map((item) => item.left)),
+          top: Math.min(...rects.map((item) => item.top)),
+          right: Math.max(...rects.map((item) => item.right)),
+          bottom: Math.max(...rects.map((item) => item.bottom))
+        };
+        const fixedTop = Array.from(document.querySelectorAll('body *')).reduce((value, node) => {
+          const style = getComputedStyle(node);
+          if (style.position !== 'fixed' && style.position !== 'sticky') return value;
+          const candidate = node.getBoundingClientRect();
+          if (candidate.width <= 0 || candidate.height <= 0 || candidate.bottom <= 0 || candidate.top > 12) return value;
+          return Math.max(value, candidate.bottom);
+        }, 0);
+        return {
+          innerWidth: window.innerWidth,
+          innerHeight: window.innerHeight,
+          scrollX: window.scrollX,
+          scrollY: window.scrollY,
+          fixedTop: fixedTop,
+          rect: rect,
+          fullyVisible: (
+            rect.left >= 0 && rect.right <= window.innerWidth &&
+            rect.top >= fixedTop + 8 && rect.bottom <= window.innerHeight - 8
+          )
+        };
+        """,
+        *elements,
+    )
+    assert state["fullyVisible"], f"{label} not fully framed: {state!r}"
+    return state
+
+
+def _assert_loaded_image(driver, image, expected_src):
+    state = driver.execute_script(
+        """
+        const image = arguments[0];
+        return {
+          complete: image.complete,
+          naturalWidth: image.naturalWidth,
+          naturalHeight: image.naturalHeight,
+          attrSrc: image.getAttribute('src'),
+          resolvedSrc: image.src
+        };
+        """,
+        image,
+    )
+    assert state["complete"] is True, state
+    assert state["naturalWidth"] > 0 and state["naturalHeight"] > 0, state
+    assert state["attrSrc"] == expected_src, state
+    assert state["resolvedSrc"] == expected_src, state
+    return state
+
+
+def _assert_no_synthetic_progress_harness():
+    source = Path(__file__).read_text(encoding="utf-8")
+    forbidden = [
+        "Progress" + "Event(",
+        "dispatch" + "Event(",
+        "progress.value" + " =",
+        "percent.textContent" + " =",
+        "window." + "XMLHttpRequest =",
+        "XMLHttpRequest.prototype." + "upload",
+        "set" + "Interval(",
+        "set" + "Timeout(",
+    ]
+    for token in forbidden:
+        assert token not in source, f"Synthetic upload evidence token found in browser harness: {token}"
+    return {
+        "synthetic_progress_injection_used": False,
+        "dom_progress_injection_used": False,
+        "xhr_upload_replacement_used": False,
+    }
 
 
 def _store_media_submit_geometry(driver, submit):
@@ -722,7 +961,7 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
     _small_png(second, (32, 80, 170))
     invalid.write_bytes(b"not an image")
 
-    proxy = _UploadObservationProxy(live_server.url)
+    proxy = _UploadObservationProxy(live_server.url, tmp_path)
     driver = None
     native_throttle_enabled = False
     manage_url = f"{live_server.url}/designer/store/products/{product.pk}/?org={org.pk}&lang=en"
@@ -732,10 +971,12 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         wait = _wait(driver)
         driver.get(manage_url)
         upload_form = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-upload-form]")))
-        assert driver.find_element(By.CSS_SELECTOR, "[data-store-media-empty]")
+        empty_state = driver.find_element(By.CSS_SELECTOR, "[data-store-media-empty]")
+        media_section = driver.find_element(By.CSS_SELECTOR, "[data-store-media-section]")
         assert upload_form.get_attribute("enctype").lower() == "multipart/form-data"
         assert driver.current_url == manage_url
-        _frame(driver, driver.find_element(By.CSS_SELECTOR, "[data-store-media-section]"))
+        _frame_evidence(driver, media_section, "p6-01 Store-product media section")
+        assert empty_state.is_displayed() and upload_form.is_displayed()
         _shot_checked(driver, "p6-01-product-images-empty-en-desktop.png")
 
         # Control: prove the production submit handler reaches the application
@@ -945,12 +1186,19 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         assert completed_connection_id == upload_connection_id
         assert completed_path == upload_request_path
         assert not release_provider.is_set()
-        assert float(progress.get_attribute("value") or 0) == 100
-        assert driver.find_element(By.CSS_SELECTOR, "[data-store-media-percent]").text == "100%"
+        final_native_progress_value = float(progress.get_attribute("value") or 0)
+        final_visible_percent = driver.find_element(By.CSS_SELECTOR, "[data-store-media-percent]").text
+        final_processing_status = processing_status.text
+        assert final_native_progress_value == 100
+        assert final_visible_percent == "100%"
+        assert "Processing image" in final_processing_status
+        assert len(provider_calls) == 1
         _frame(driver, processing_status)
         _shot_checked(driver, "p6-04-product-image-processing-en.png")
 
         final_console_errors = _browser_console_errors(driver)
+        assert not final_console_errors, final_console_errors
+        synthetic_assertions = _assert_no_synthetic_progress_harness()
         probe_geometry = probe_activation["geometry_positioned"]
         upload_geometry = upload_activation["geometry_positioned"]
         ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
@@ -958,6 +1206,29 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
             "native xhr.upload evidence via real multipart transport\n"
             f"browser_product={browser_version.get('product', '')}\n"
             f"browser_protocol_version={browser_version.get('protocolVersion', '')}\n"
+            f"selected_file_name={selected_runtime['fileName']}\n"
+            f"selected_file_size_bytes={selected_runtime['fileSize']}\n"
+            f"production_script_present={upload_activation['relationship']['productionScriptPresent']}\n"
+            f"production_script_src={upload_activation['relationship']['productionScriptSrc']}\n"
+            f"multipart_request_url={network_state['request_url']}\n"
+            f"browser_network_rule_id={throttle_rule_id}\n"
+            f"applied_network_rule_id={network_state['applied_rule_id']}\n"
+            f"native_progress_values_observed={','.join(f'{value:g}' for value in observed_progress)}\n"
+            f"intermediate_native_progress_value={intermediate_percent:g}\n"
+            f"intermediate_visible_percent={percent_text}\n"
+            f"intermediate_transport_received={intermediate_received}\n"
+            f"transport_total={upload_total}\n"
+            f"completed_transport_received={completed_received}\n"
+            f"final_native_progress_value={final_native_progress_value:g}\n"
+            f"final_visible_percent={final_visible_percent}\n"
+            f"final_processing_status={final_processing_status}\n"
+            f"provider_started={provider_started.is_set()}\n"
+            f"provider_release_pending={not release_provider.is_set()}\n"
+            f"browser_console_error_count={len(final_console_errors)}\n"
+            f"activation_mode={upload_activation['activation']}\n"
+            f"synthetic_progress_injection_used={synthetic_assertions['synthetic_progress_injection_used']}\n"
+            f"dom_progress_injection_used={synthetic_assertions['dom_progress_injection_used']}\n"
+            f"xhr_upload_replacement_used={synthetic_assertions['xhr_upload_replacement_used']}\n"
             f"unthrottled_probe_activation={probe_activation['activation']}\n"
             f"unthrottled_probe_activation_errors={probe_activation['activation_errors']}\n"
             f"unthrottled_probe_pointer_eligible={probe_activation['pointer_eligible']}\n"
@@ -977,7 +1248,6 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
             f"unthrottled_probe_elapsed_seconds={probe_elapsed:.3f}\n"
             f"unthrottled_probe_status_text={probe_runtime_after['statusText']}\n"
             f"unthrottled_probe_provider_calls=0\n"
-            f"evidence_upload_activation={upload_activation['activation']}\n"
             f"evidence_upload_activation_errors={upload_activation['activation_errors']}\n"
             f"evidence_upload_pointer_eligible={upload_activation['pointer_eligible']}\n"
             f"evidence_upload_viewport={upload_geometry['innerWidth']}x{upload_geometry['innerHeight']}\n"
@@ -986,23 +1256,12 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
             f"evidence_upload_submit_center={upload_geometry['centerX']:.3f},{upload_geometry['centerY']:.3f}\n"
             f"evidence_upload_center_hits_submit={upload_geometry['centerHitsSubmit']}\n"
             f"evidence_upload_topmost={json.dumps(upload_geometry['topmost'], sort_keys=True)}\n"
-            f"browser_network_rule_id={throttle_rule_id}\n"
-            f"browser_rule_applied_id={network_state['applied_rule_id']}\n"
-            f"browser_request_url={network_state['request_url']}\n"
             f"browser_upload_throughput_bytes_per_second={UPLOAD_THROUGHPUT_BYTES_PER_SECOND}\n"
-            f"native_progress_values_observed={','.join(f'{value:g}' for value in observed_progress)}\n"
-            f"intermediate_visible_percent={intermediate_percent:g}\n"
-            f"intermediate_transport_received={intermediate_received}\n"
-            f"transport_total={upload_total}\n"
             f"intermediate_elapsed_seconds={intermediate_elapsed:.3f}\n"
-            f"completed_transport_received={completed_received}\n"
             f"upload_complete_elapsed_seconds={upload_complete_elapsed:.3f}\n"
             f"proxy_connections_before_upload={connections_before_upload}\n"
             f"upload_connection_id={upload_connection_id}\n"
-            f"upload_request_path={upload_request_path}\n"
-            f"provider_started={provider_started.is_set()}\n"
-            f"provider_release_pending={not release_provider.is_set()}\n"
-            f"browser_console_error_count={len(final_console_errors)}\n",
+            f"upload_request_path={upload_request_path}\n",
             encoding="utf-8",
         )
 
@@ -1011,16 +1270,21 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         release_provider.set()
         wait.until(lambda _d: product.images.count() == 1)
         wait.until(lambda _d: "/designer/store/products/" in driver.current_url)
-        driver.refresh()
         media_item = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-item]")))
+        first_relation = product.images.select_related("media_asset").order_by("sort_order", "id").first()
+        first_url = first_relation.media_asset.metadata["public_url"]
+        first_image = media_item.find_element(By.TAG_NAME, "img")
+        _assert_loaded_image(driver, first_image, first_url)
+        assert proxy.delivery_hits(), (proxy.delivery_hits(), proxy.delivery_errors())
+        assert not proxy.delivery_errors(), proxy.delivery_errors()
         assert "phase6-browser-secret" not in driver.page_source
         assert "api.cloudflare.com" not in driver.page_source
         assert "phase6-browser-1" not in media_item.text
-        _frame(driver, media_item)
+        _frame_evidence(driver, media_item, "p6-05 uploaded media item")
         _shot_checked(driver, "p6-05-product-image-upload-success-en.png")
         primary_badge = driver.find_element(By.CSS_SELECTOR, "[data-store-media-primary]")
         assert primary_badge.text == "Primary"
-        _frame(driver, primary_badge)
+        _frame_evidence(driver, [media_item, primary_badge], "p6-06 loaded primary item")
         _shot_checked(driver, "p6-06-product-image-primary-en.png")
 
         second_form = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-upload-form]")))
@@ -1033,11 +1297,19 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         _click_element(driver, set_primary)
         wait.until(lambda _d: "Primary product image updated" in driver.page_source)
         product.refresh_from_db()
-        ordered = list(product.images.order_by("sort_order", "id"))
+        ordered = list(product.images.select_related("media_asset").order_by("sort_order", "id"))
         assert ordered[0].media_asset.original_filename == second.name
         assert [row.sort_order for row in ordered] == [0, 1]
         gallery = driver.find_element(By.CSS_SELECTOR, "[data-store-media-gallery]")
-        _frame(driver, gallery)
+        gallery_images = driver.find_elements(By.CSS_SELECTOR, "[data-store-media-item] img")
+        assert len(gallery_images) == 2
+        expected_gallery_urls = [row.media_asset.metadata["public_url"] for row in ordered]
+        for image, expected_url in zip(gallery_images, expected_gallery_urls):
+            _assert_loaded_image(driver, image, expected_url)
+        first_gallery_item = driver.find_elements(By.CSS_SELECTOR, "[data-store-media-item]")[0]
+        assert first_gallery_item.find_element(By.CSS_SELECTOR, "[data-store-media-primary]").text == "Primary"
+        assert not proxy.delivery_errors(), proxy.delivery_errors()
+        _frame_evidence(driver, gallery, "p6-07 reassigned two-image gallery")
         _shot_checked(driver, "p6-07-product-images-primary-reassigned-en.png")
 
         before_provider_calls = len(provider_calls)
@@ -1066,7 +1338,8 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         primary_url = ordered[0].media_asset.metadata["public_url"]
         assert primary_url in driver.page_source
         marketplace_image = driver.find_element(By.XPATH, f"//img[@src='{primary_url}']")
-        _frame(driver, marketplace_image)
+        _assert_loaded_image(driver, marketplace_image, primary_url)
+        _frame_evidence(driver, marketplace_image, "p6-10 marketplace primary image")
         _shot_checked(driver, "p6-10-marketplace-primary-image-en.png")
 
         public_url = f"{live_server.url}/store/{store.slug}/{product.slug}/?lang=en"
@@ -1075,14 +1348,19 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         assert hero.get_attribute("src") == primary_url
         thumbs = driver.find_elements(By.CSS_SELECTOR, ".product-thumb img")
         assert thumbs and thumbs[0].get_attribute("src") == primary_url
-        _frame(driver, hero)
+        _assert_loaded_image(driver, hero, primary_url)
+        for image, expected_url in zip(thumbs, expected_gallery_urls):
+            _assert_loaded_image(driver, image, expected_url)
+        public_gallery = driver.find_element(By.CSS_SELECTOR, ".gallery")
+        _frame_evidence(driver, public_gallery, "p6-11 public hero and thumbnail gallery")
         _shot_checked(driver, "p6-11-public-product-primary-gallery-en.png")
 
         driver.get(f"{live_server.url}/studio/?product={product.pk}&lang=en")
         wait.until(lambda _d: product.title_en in driver.page_source)
         assert primary_url in driver.page_source
         studio_image = driver.find_element(By.XPATH, f"//img[@src='{primary_url}']")
-        _frame(driver, studio_image)
+        _assert_loaded_image(driver, studio_image, primary_url)
+        _frame_evidence(driver, studio_image, "p6-12 Studio primary image")
         _shot_checked(driver, "p6-12-studio-primary-image-en.png")
 
         driver.get(public_url)
@@ -1090,7 +1368,8 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         wait.until(lambda _d: "/cart" in driver.current_url)
         assert primary_url in driver.page_source
         cart_image = driver.find_element(By.XPATH, f"//img[@src='{primary_url}']")
-        _frame(driver, cart_image)
+        _assert_loaded_image(driver, cart_image, primary_url)
+        _frame_evidence(driver, cart_image, "p6-13 cart primary image")
         _shot_checked(driver, "p6-13-cart-primary-image-en.png")
 
         owner.language_preference = "ar"
@@ -1099,10 +1378,16 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         driver.set_window_size(390, 844)
         driver.get(f"{live_server.url}/designer/store/products/{product.pk}/?org={org.pk}&lang=ar")
         readonly = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-readonly]")))
-        assert driver.find_element(By.TAG_NAME, "html").get_attribute("dir") == "rtl"
+        html = driver.find_element(By.TAG_NAME, "html")
+        assert html.get_attribute("dir") == "rtl"
+        assert html.get_attribute("data-theme") == "dark"
         assert "صور المنتج العامة" in driver.page_source
         assert _no_overflow(driver)
-        _frame(driver, readonly)
+        mobile_images = driver.find_elements(By.CSS_SELECTOR, "[data-store-media-item] img")
+        assert len(mobile_images) == 2
+        for image, expected_url in zip(mobile_images, expected_gallery_urls):
+            _assert_loaded_image(driver, image, expected_url)
+        _frame_evidence(driver, [mobile_images[-1], readonly], "p6-14 RTL mobile dark media state")
         _shot_checked(driver, "p6-14-product-images-ar-rtl-mobile-dark.png")
 
         hide_store_product(product=product, actor=owner)
@@ -1112,11 +1397,18 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-upload-form]")))
         actions = driver.find_elements(By.CSS_SELECTOR, ".designer-product-media__actions")
         assert actions
+        desktop_gallery = driver.find_element(By.CSS_SELECTOR, "[data-store-media-gallery]")
+        desktop_images = driver.find_elements(By.CSS_SELECTOR, "[data-store-media-item] img")
+        assert len(desktop_images) == 2
+        for image, expected_url in zip(desktop_images, expected_gallery_urls):
+            _assert_loaded_image(driver, image, expected_url)
         assert _no_overflow(driver)
-        _frame(driver, actions[0])
+        _frame_evidence(driver, [desktop_gallery, actions[0]], "p6-15 desktop media gallery and actions")
         _shot_checked(driver, "p6-15-product-images-en-desktop-no-overflow.png")
 
         assert len(provider_calls) == 2
+        assert len(proxy.delivery_hits()) >= 2
+        assert not proxy.delivery_errors(), proxy.delivery_errors()
     finally:
         release_provider.set()
         if driver is not None:
