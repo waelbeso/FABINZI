@@ -80,7 +80,8 @@
       status.textContent = text("Uploading…", "جارٍ الرفع…");
 
       var xhr = new XMLHttpRequest();
-      xhr.open("POST", form.action || window.location.href, true);
+      var endpoint = form.getAttribute("action") || window.location.href;
+      xhr.open("POST", endpoint, true);
       xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
       xhr.responseType = "text";
 

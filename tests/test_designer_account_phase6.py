@@ -246,12 +246,14 @@ def test_phase6_missing_disabled_invalid_integration_make_no_provider_request(mo
     calls = []
     monkeypatch.setattr(media_service.requests, "post", lambda *a, **k: calls.append((a, k)))
 
+    IntegrationConfig.objects.filter(provider=IntegrationConfig.Provider.CLOUDFLARE_IMAGES).delete()
     with pytest.raises(ValidationError):
         create_designer_store_product_image(upload=_upload(), product=product, organization=org, actor=owner)
     assert calls == []
 
-    IntegrationConfig.objects.create(
-        provider=IntegrationConfig.Provider.CLOUDFLARE_IMAGES, enabled=False, config={"account_id": "a" * 32}
+    IntegrationConfig.objects.update_or_create(
+        provider=IntegrationConfig.Provider.CLOUDFLARE_IMAGES,
+        defaults={"enabled": False, "config": {"account_id": "a" * 32}},
     )
     with pytest.raises(ValidationError):
         create_designer_store_product_image(upload=_upload(), product=product, organization=org, actor=owner)
@@ -431,6 +433,20 @@ def test_phase6_order_primary_detach_and_publication_contract():
         set_primary_product_image(product=product, actor=owner, image_id=second_row.pk)
     with pytest.raises(ValidationError):
         detach_product_image(product=product, actor=owner, image_id=second_row.pk)
+
+
+@pytest.mark.django_db
+def test_phase6_publish_keeps_caller_visible_product_coherent():
+    owner, org, store, product = _catalog("publish-caller-state")
+    media = _classified_media(org=org, product=product, actor=owner, key="publish-caller-state")
+    add_product_image(product=product, actor=owner, media_asset=media)
+    publish_storefront(storefront=store, actor=owner)
+
+    result = publish_store_product(product=product, actor=owner)
+
+    assert result is product
+    assert product.status == StoreProduct.Status.PUBLISHED
+    assert product.published_at is not None
 
 
 @pytest.mark.django_db

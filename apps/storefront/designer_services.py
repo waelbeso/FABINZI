@@ -81,8 +81,9 @@ def detach_product_image(*, product, actor, image_id, request=None):
         raise ValidationError("Choose an image attached to this product. / اختر صورة مرفقة بهذا المنتج.")
     target_id = target.pk
     media_asset_id = target.media_asset_id
+    remaining_rows = [row for row in rows if row.pk != target_id]
     target.delete()
-    _renumber([row for row in rows if row.pk != target_id])
+    _renumber(remaining_rows)
     record_audit_event(
         actor=actor,
         action="store.product.image.detached",

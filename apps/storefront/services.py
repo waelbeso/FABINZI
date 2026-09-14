@@ -147,22 +147,24 @@ def add_product_image(*, product, actor, media_asset, alt_en="", alt_ar="", sort
 @transaction.atomic
 def publish_store_product(*, product, actor, request=None):
     # Serialize publication with Store-product media mutation. Direct uploads,
-    # reuse, primary changes and detach all lock the same product row.
-    product = StoreProduct.objects.select_for_update().select_related(
+    # reuse, primary changes and detach all lock the same product row while the
+    # caller-visible instance remains coherent with the established service contract.
+    caller_product = product
+    locked_product = StoreProduct.objects.select_for_update().select_related(
         "storefront__organization", "designed_product"
     ).get(pk=product.pk)
-    require_store_access(actor, product.storefront)
-    if product.storefront.status != Storefront.Status.PUBLISHED:
+    require_store_access(actor, locked_product.storefront)
+    if locked_product.storefront.status != Storefront.Status.PUBLISHED:
         raise ValidationError("Publish the Storefront first.")
-    if product.designed_product.status != DesignedProduct.Status.PUBLISHED:
+    if locked_product.designed_product.status != DesignedProduct.Status.PUBLISHED:
         raise ValidationError("The underlying Designed Product is not published.")
-    if not product.variants.filter(is_active=True).exists():
+    if not locked_product.variants.filter(is_active=True).exists():
         raise ValidationError("At least one active product variant is required.")
 
-    organization = product.storefront.organization
+    organization = locked_product.storefront.organization
     images = list(
         StoreProductImage.objects.select_for_update()
-        .filter(product=product)
+        .filter(product=locked_product)
         .select_related("media_asset")
         .order_by("sort_order", "id")
     )
@@ -173,11 +175,15 @@ def publish_store_product(*, product, actor, request=None):
     if any(not store_product_image_eligible(row.media_asset, organization) for row in images):
         raise ValidationError(PRODUCT_GALLERY_ERROR)
 
-    product.status = StoreProduct.Status.PUBLISHED
-    product.published_at = product.published_at or timezone.now()
-    product.save(update_fields=["status", "published_at", "updated_at"])
-    record_audit_event(actor=actor, action="store.product.published", instance=product, request=request)
-    return product
+    locked_product.status = StoreProduct.Status.PUBLISHED
+    locked_product.published_at = locked_product.published_at or timezone.now()
+    locked_product.save(update_fields=["status", "published_at", "updated_at"])
+    record_audit_event(actor=actor, action="store.product.published", instance=locked_product, request=request)
+
+    caller_product.status = locked_product.status
+    caller_product.published_at = locked_product.published_at
+    caller_product.updated_at = locked_product.updated_at
+    return caller_product
 
 
 def _validate_available_product(product, variant=None, quantity=1):
