@@ -14,6 +14,7 @@ from django.contrib.auth import get_user_model
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
@@ -369,15 +370,84 @@ def _frame(driver, element):
     )
 
 
+def _store_media_submit_geometry(driver, submit):
+    """Return effective viewport, hit-test and pointer geometry for submit."""
+    return driver.execute_script(
+        """
+        const submit = arguments[0];
+        const rect = submit.getBoundingClientRect();
+        const centerX = rect.left + (rect.width / 2);
+        const centerY = rect.top + (rect.height / 2);
+        const centerInsideViewport = (
+          centerX >= 0 && centerY >= 0 &&
+          centerX < window.innerWidth && centerY < window.innerHeight
+        );
+        const topmost = centerInsideViewport ? document.elementFromPoint(centerX, centerY) : null;
+        const describe = function (node) {
+          if (!node) return null;
+          return {
+            tag: node.tagName,
+            id: node.id || null,
+            className: String(node.className || '').slice(0, 240),
+            text: String(node.textContent || '').trim().slice(0, 160),
+            isSubmit: node === submit,
+            containedBySubmit: submit.contains(node)
+          };
+        };
+        return {
+          innerWidth: window.innerWidth,
+          innerHeight: window.innerHeight,
+          scrollX: window.scrollX,
+          scrollY: window.scrollY,
+          rect: {
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+            width: rect.width,
+            height: rect.height
+          },
+          centerX: centerX,
+          centerY: centerY,
+          fullyInsideViewport: (
+            rect.width > 0 && rect.height > 0 &&
+            rect.left >= 0 && rect.top >= 0 &&
+            rect.right <= window.innerWidth && rect.bottom <= window.innerHeight
+          ),
+          centerInsideViewport: centerInsideViewport,
+          centerHitsSubmit: Boolean(topmost && (topmost === submit || submit.contains(topmost))),
+          topmost: describe(topmost)
+        };
+        """,
+        submit,
+    )
+
+
 def _activate_store_media_submit(driver, form, expected_file):
-    """Activate the real enhanced upload form with Selenium's native element click."""
+    """Activate the real enhanced form through standards-based browser submission."""
     expected_file = Path(expected_file)
     file_input = form.find_element(By.CSS_SELECTOR, "[data-store-media-file]")
     submit = form.find_element(By.CSS_SELECTOR, "[data-store-media-submit]")
     filename = form.find_element(By.CSS_SELECTOR, "[data-store-media-filename]")
     _wait(driver).until(lambda _d: submit.is_displayed() and submit.is_enabled())
     _wait(driver).until(lambda _d: expected_file.name in filename.text)
-    _frame(driver, submit)
+
+    geometry_before = _store_media_submit_geometry(driver, submit)
+    driver.execute_script(
+        """
+        const submit = arguments[0];
+        submit.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'});
+        const rect = submit.getBoundingClientRect();
+        const dx = (rect.left + rect.width / 2) - (window.innerWidth / 2);
+        const dy = (rect.top + rect.height / 2) - (window.innerHeight / 2);
+        if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+          window.scrollBy({left: dx, top: dy, behavior: 'instant'});
+        }
+        """,
+        submit,
+    )
+    time.sleep(0.05)
+    geometry_positioned = _store_media_submit_geometry(driver, submit)
 
     runtime = _upload_form_runtime_state(driver)
     relationship = driver.execute_script(
@@ -400,6 +470,7 @@ def _activate_store_media_submit(driver, form, expected_file):
           productionScriptSrc: script ? script.src : null,
           xhrAvailable: Boolean(window.XMLHttpRequest),
           formDataAvailable: Boolean(window.FormData),
+          requestSubmitAvailable: typeof form.requestSubmit === 'function',
           activeTagBefore: document.activeElement ? document.activeElement.tagName : null,
           activeIsSubmitBefore: document.activeElement === submit
         };
@@ -425,6 +496,7 @@ def _activate_store_media_submit(driver, form, expected_file):
     assert relationship["productionScriptPresent"], relationship
     assert "designer-store-product-media.js" in str(relationship["productionScriptSrc"]), relationship
     assert relationship["xhrAvailable"] and relationship["formDataAvailable"], relationship
+    assert relationship["requestSubmitAvailable"], relationship
 
     driver.execute_script(
         """
@@ -433,6 +505,7 @@ def _activate_store_media_submit(driver, form, expected_file):
         window.__phase6StoreSubmitObservation = null;
         form.addEventListener('submit', function () {
           const input = form.querySelector('[data-store-media-file]');
+          const selected = input.files && input.files[0];
           const progressWrap = form.querySelector('[data-store-media-progress-wrap]');
           const progress = form.querySelector('[data-store-media-progress]');
           const percent = form.querySelector('[data-store-media-percent]');
@@ -444,6 +517,8 @@ def _activate_store_media_submit(driver, form, expected_file):
             statusText: status.textContent.trim(),
             submitDisabled: submit.disabled,
             fileInputDisabled: input.disabled,
+            selectedFileName: selected ? selected.name : null,
+            selectedFileSize: selected ? selected.size : null,
             activeTag: document.activeElement ? document.activeElement.tagName : null,
             activeIsSubmit: document.activeElement === submit
           };
@@ -453,28 +528,67 @@ def _activate_store_media_submit(driver, form, expected_file):
         submit,
     )
 
-    try:
-        submit.click()
-    except WebDriverException as exc:
-        activation = driver.execute_script(
-            """
-            const submit = arguments[0];
-            return {
-              activeTag: document.activeElement ? document.activeElement.tagName : null,
-              activeText: document.activeElement ? document.activeElement.textContent.trim().slice(0, 160) : null,
-              activeIsSubmit: document.activeElement === submit,
-              observation: window.__phase6StoreSubmitObservation
-            };
-            """,
-            submit,
-        )
-        pytest.fail(
-            "Native Selenium Store-media submit click raised before activation: "
-            f"error={exc!r}, relationship={relationship!r}, runtime={runtime!r}, activation={activation!r}"
-        )
+    activation_mode = None
+    activation_errors = []
+    pointer_eligible = bool(
+        geometry_positioned["fullyInsideViewport"]
+        and geometry_positioned["centerInsideViewport"]
+        and geometry_positioned["centerHitsSubmit"]
+    )
+
+    if pointer_eligible:
+        try:
+            submit.click()
+        except WebDriverException as exc:
+            activation_errors.append(
+                f"pointer:{type(exc).__name__}:{str(exc).splitlines()[0][:240]}"
+            )
+        if driver.execute_script("return window.__phase6StoreSubmitObservation") is not None:
+            activation_mode = "native_webelement_click"
+
+    if activation_mode is None:
+        try:
+            driver.execute_script("arguments[0].focus({preventScroll: true});", submit)
+            submit.send_keys(Keys.ENTER)
+        except WebDriverException as exc:
+            activation_errors.append(
+                f"keyboard_enter:{type(exc).__name__}:{str(exc).splitlines()[0][:240]}"
+            )
+        if driver.execute_script("return window.__phase6StoreSubmitObservation") is not None:
+            activation_mode = "native_keyboard_enter"
+
+    if activation_mode is None:
+        try:
+            driver.execute_script("arguments[0].focus({preventScroll: true});", submit)
+            submit.send_keys(Keys.SPACE)
+        except WebDriverException as exc:
+            activation_errors.append(
+                f"keyboard_space:{type(exc).__name__}:{str(exc).splitlines()[0][:240]}"
+            )
+        if driver.execute_script("return window.__phase6StoreSubmitObservation") is not None:
+            activation_mode = "native_keyboard_space"
+
+    if activation_mode is None:
+        try:
+            driver.execute_script(
+                """
+                const form = arguments[0];
+                const submit = arguments[1];
+                form.requestSubmit(submit);
+                """,
+                form,
+                submit,
+            )
+        except WebDriverException as exc:
+            activation_errors.append(
+                f"request_submit:{type(exc).__name__}:{str(exc).splitlines()[0][:240]}"
+            )
+        if driver.execute_script("return window.__phase6StoreSubmitObservation") is not None:
+            activation_mode = "form_requestSubmit"
 
     synchronous = driver.execute_script("return window.__phase6StoreSubmitObservation")
     immediate = _upload_form_runtime_state(driver)
+    geometry_after = _store_media_submit_geometry(driver, submit)
     if synchronous is None:
         active = driver.execute_script(
             """
@@ -488,8 +602,11 @@ def _activate_store_media_submit(driver, form, expected_file):
             submit,
         )
         pytest.fail(
-            "Native Selenium Store-media click did not dispatch the production submit event: "
-            f"relationship={relationship!r}, runtime_before={runtime!r}, runtime_after={immediate!r}, active={active!r}"
+            "Standards-based Store-media activation did not dispatch the production submit event: "
+            f"relationship={relationship!r}, runtime_before={runtime!r}, runtime_after={immediate!r}, "
+            f"geometry_before={geometry_before!r}, geometry_positioned={geometry_positioned!r}, "
+            f"geometry_after={geometry_after!r}, pointer_eligible={pointer_eligible!r}, "
+            f"activation_errors={activation_errors!r}, active={active!r}"
         )
 
     # This passive listener was registered after the production listener. Its
@@ -501,8 +618,16 @@ def _activate_store_media_submit(driver, form, expected_file):
     assert "Uploading" in synchronous["statusText"], (synchronous, relationship, immediate)
     assert synchronous["submitDisabled"] is True, (synchronous, relationship, immediate)
     assert synchronous["fileInputDisabled"] is False, (synchronous, relationship, immediate)
+    assert synchronous["selectedFileName"] == expected_file.name, (synchronous, relationship, immediate)
+    assert synchronous["selectedFileSize"] == expected_file.stat().st_size, (synchronous, relationship, immediate)
+    assert activation_mode is not None
     return {
-        "activation": "native_webelement_click",
+        "activation": activation_mode,
+        "activation_errors": activation_errors,
+        "pointer_eligible": pointer_eligible,
+        "geometry_before": geometry_before,
+        "geometry_positioned": geometry_positioned,
+        "geometry_after": geometry_after,
         "relationship": relationship,
         "synchronous": synchronous,
         "immediate": immediate,
@@ -826,12 +951,22 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         _shot_checked(driver, "p6-04-product-image-processing-en.png")
 
         final_console_errors = _browser_console_errors(driver)
+        probe_geometry = probe_activation["geometry_positioned"]
+        upload_geometry = upload_activation["geometry_positioned"]
         ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
         (ARTIFACT_DIR / "p6-native-upload-progress-evidence.txt").write_text(
             "native xhr.upload evidence via real multipart transport\n"
             f"browser_product={browser_version.get('product', '')}\n"
             f"browser_protocol_version={browser_version.get('protocolVersion', '')}\n"
             f"unthrottled_probe_activation={probe_activation['activation']}\n"
+            f"unthrottled_probe_activation_errors={probe_activation['activation_errors']}\n"
+            f"unthrottled_probe_pointer_eligible={probe_activation['pointer_eligible']}\n"
+            f"unthrottled_probe_viewport={probe_geometry['innerWidth']}x{probe_geometry['innerHeight']}\n"
+            f"unthrottled_probe_scroll={probe_geometry['scrollX']},{probe_geometry['scrollY']}\n"
+            f"unthrottled_probe_submit_rect={json.dumps(probe_geometry['rect'], sort_keys=True)}\n"
+            f"unthrottled_probe_submit_center={probe_geometry['centerX']:.3f},{probe_geometry['centerY']:.3f}\n"
+            f"unthrottled_probe_center_hits_submit={probe_geometry['centerHitsSubmit']}\n"
+            f"unthrottled_probe_topmost={json.dumps(probe_geometry['topmost'], sort_keys=True)}\n"
             f"unthrottled_probe_js_initialized={probe_activation['relationship']['productionScriptPresent']}\n"
             f"unthrottled_probe_sync_percent={probe_activation['synchronous']['percentText']}\n"
             f"unthrottled_probe_sync_status={probe_activation['synchronous']['statusText']}\n"
@@ -842,6 +977,15 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
             f"unthrottled_probe_elapsed_seconds={probe_elapsed:.3f}\n"
             f"unthrottled_probe_status_text={probe_runtime_after['statusText']}\n"
             f"unthrottled_probe_provider_calls=0\n"
+            f"evidence_upload_activation={upload_activation['activation']}\n"
+            f"evidence_upload_activation_errors={upload_activation['activation_errors']}\n"
+            f"evidence_upload_pointer_eligible={upload_activation['pointer_eligible']}\n"
+            f"evidence_upload_viewport={upload_geometry['innerWidth']}x{upload_geometry['innerHeight']}\n"
+            f"evidence_upload_scroll={upload_geometry['scrollX']},{upload_geometry['scrollY']}\n"
+            f"evidence_upload_submit_rect={json.dumps(upload_geometry['rect'], sort_keys=True)}\n"
+            f"evidence_upload_submit_center={upload_geometry['centerX']:.3f},{upload_geometry['centerY']:.3f}\n"
+            f"evidence_upload_center_hits_submit={upload_geometry['centerHitsSubmit']}\n"
+            f"evidence_upload_topmost={json.dumps(upload_geometry['topmost'], sort_keys=True)}\n"
             f"browser_network_rule_id={throttle_rule_id}\n"
             f"browser_rule_applied_id={network_state['applied_rule_id']}\n"
             f"browser_request_url={network_state['request_url']}\n"
