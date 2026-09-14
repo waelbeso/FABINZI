@@ -12,6 +12,7 @@ import pytest
 from PIL import Image
 from django.contrib.auth import get_user_model
 from selenium import webdriver
+from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -368,6 +369,146 @@ def _frame(driver, element):
     )
 
 
+def _activate_store_media_submit(driver, form, expected_file):
+    """Activate the real enhanced upload form with Selenium's native element click."""
+    expected_file = Path(expected_file)
+    file_input = form.find_element(By.CSS_SELECTOR, "[data-store-media-file]")
+    submit = form.find_element(By.CSS_SELECTOR, "[data-store-media-submit]")
+    filename = form.find_element(By.CSS_SELECTOR, "[data-store-media-filename]")
+    _wait(driver).until(lambda _d: submit.is_displayed() and submit.is_enabled())
+    _wait(driver).until(lambda _d: expected_file.name in filename.text)
+    _frame(driver, submit)
+
+    runtime = _upload_form_runtime_state(driver)
+    relationship = driver.execute_script(
+        """
+        const form = arguments[0];
+        const submit = arguments[1];
+        const input = arguments[2];
+        const script = Array.from(document.scripts).find(function (node) {
+          return (node.src || '').includes('designer-store-product-media.js');
+        });
+        return {
+          formMatches: form.matches('[data-store-media-upload-form]'),
+          formConnected: form.isConnected,
+          submitConnected: submit.isConnected,
+          submitFormMatches: submit.form === form,
+          inputFormMatches: input.form === form,
+          submitType: submit.type,
+          filenameText: form.querySelector('[data-store-media-filename]').textContent.trim(),
+          productionScriptPresent: Boolean(script),
+          productionScriptSrc: script ? script.src : null,
+          xhrAvailable: Boolean(window.XMLHttpRequest),
+          formDataAvailable: Boolean(window.FormData),
+          activeTagBefore: document.activeElement ? document.activeElement.tagName : null,
+          activeIsSubmitBefore: document.activeElement === submit
+        };
+        """,
+        form,
+        submit,
+        file_input,
+    )
+
+    assert submit.is_displayed(), relationship
+    assert submit.is_enabled(), relationship
+    assert str(submit.get_attribute("type") or "").lower() == "submit", relationship
+    assert runtime["fileName"] == expected_file.name, (runtime, relationship)
+    assert runtime["fileSize"] == expected_file.stat().st_size, (runtime, relationship)
+    assert relationship["formMatches"] and relationship["formConnected"], relationship
+    assert relationship["submitConnected"] and relationship["submitFormMatches"], relationship
+    assert relationship["inputFormMatches"], relationship
+    assert str(relationship["submitType"]).lower() == "submit", relationship
+    assert expected_file.name in relationship["filenameText"], relationship
+    # The custom filename text is written only by initForm's change listener;
+    # together with the loaded script element this proves the production asset
+    # initialized this exact form before the test attempts submit activation.
+    assert relationship["productionScriptPresent"], relationship
+    assert "designer-store-product-media.js" in str(relationship["productionScriptSrc"]), relationship
+    assert relationship["xhrAvailable"] and relationship["formDataAvailable"], relationship
+
+    driver.execute_script(
+        """
+        const form = arguments[0];
+        const submit = arguments[1];
+        window.__phase6StoreSubmitObservation = null;
+        form.addEventListener('submit', function () {
+          const input = form.querySelector('[data-store-media-file]');
+          const progressWrap = form.querySelector('[data-store-media-progress-wrap]');
+          const progress = form.querySelector('[data-store-media-progress]');
+          const percent = form.querySelector('[data-store-media-percent]');
+          const status = form.querySelector('[data-store-media-status]');
+          window.__phase6StoreSubmitObservation = {
+            progressVisible: !progressWrap.hidden,
+            progressValue: progress.hasAttribute('value') ? Number(progress.value) : null,
+            percentText: percent.textContent.trim(),
+            statusText: status.textContent.trim(),
+            submitDisabled: submit.disabled,
+            fileInputDisabled: input.disabled,
+            activeTag: document.activeElement ? document.activeElement.tagName : null,
+            activeIsSubmit: document.activeElement === submit
+          };
+        }, {once: true});
+        """,
+        form,
+        submit,
+    )
+
+    try:
+        submit.click()
+    except WebDriverException as exc:
+        activation = driver.execute_script(
+            """
+            const submit = arguments[0];
+            return {
+              activeTag: document.activeElement ? document.activeElement.tagName : null,
+              activeText: document.activeElement ? document.activeElement.textContent.trim().slice(0, 160) : null,
+              activeIsSubmit: document.activeElement === submit,
+              observation: window.__phase6StoreSubmitObservation
+            };
+            """,
+            submit,
+        )
+        pytest.fail(
+            "Native Selenium Store-media submit click raised before activation: "
+            f"error={exc!r}, relationship={relationship!r}, runtime={runtime!r}, activation={activation!r}"
+        )
+
+    synchronous = driver.execute_script("return window.__phase6StoreSubmitObservation")
+    immediate = _upload_form_runtime_state(driver)
+    if synchronous is None:
+        active = driver.execute_script(
+            """
+            const submit = arguments[0];
+            return {
+              activeTag: document.activeElement ? document.activeElement.tagName : null,
+              activeText: document.activeElement ? document.activeElement.textContent.trim().slice(0, 160) : null,
+              activeIsSubmit: document.activeElement === submit
+            };
+            """,
+            submit,
+        )
+        pytest.fail(
+            "Native Selenium Store-media click did not dispatch the production submit event: "
+            f"relationship={relationship!r}, runtime_before={runtime!r}, runtime_after={immediate!r}, active={active!r}"
+        )
+
+    # This passive listener was registered after the production listener. Its
+    # same-event snapshot therefore proves the production handler synchronously
+    # revealed progress, wrote Uploading, and disabled submit before XHR progress.
+    assert synchronous["progressVisible"] is True, (synchronous, relationship, immediate)
+    assert synchronous["progressValue"] == 0, (synchronous, relationship, immediate)
+    assert synchronous["percentText"] == "0%", (synchronous, relationship, immediate)
+    assert "Uploading" in synchronous["statusText"], (synchronous, relationship, immediate)
+    assert synchronous["submitDisabled"] is True, (synchronous, relationship, immediate)
+    assert synchronous["fileInputDisabled"] is False, (synchronous, relationship, immediate)
+    return {
+        "activation": "native_webelement_click",
+        "relationship": relationship,
+        "synchronous": synchronous,
+        "immediate": immediate,
+    }
+
+
 def _shot_checked(driver, name):
     _shot(driver, name)
     assert (ARTIFACT_DIR / name).exists()
@@ -491,7 +632,7 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
 
         probe_state = {"extra_by_request": {}, "events": [], "post_urls": []}
         probe_started_at = time.monotonic()
-        _click_element(driver, upload_form.find_element(By.CSS_SELECTOR, "[data-store-media-submit]"))
+        probe_activation = _activate_store_media_submit(driver, upload_form, invalid)
         probe_complete = None
         while time.monotonic() - probe_started_at < 30:
             _collect_upload_network_state(driver, upload_url=manage_url, state=probe_state)
@@ -537,7 +678,7 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
             probe_received, probe_total, probe_connection, probe_path = proxy.upload_snapshot()
             pytest.fail(
                 "Unthrottled Store-product multipart control did not complete deterministically: "
-                f"runtime={probe_runtime_after!r}, "
+                f"activation={probe_activation!r}, runtime={probe_runtime_after!r}, "
                 f"post_urls={probe_state.get('post_urls', [])[-8:]!r}, "
                 f"network_events={probe_state.get('events', [])[-16:]!r}, "
                 f"request_url={probe_state.get('request_url')!r}, "
@@ -593,7 +734,7 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         observed_progress = []
         upload_started_at = time.monotonic()
         upload_runtime_before = _upload_form_runtime_state(driver)
-        _click_element(driver, upload_form.find_element(By.CSS_SELECTOR, "[data-store-media-submit]"))
+        upload_activation = _activate_store_media_submit(driver, upload_form, large)
         progress = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-progress]")))
 
         deadline = upload_started_at + 45
@@ -638,7 +779,7 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
                 f"connections_before_upload={connections_before_upload}, "
                 f"posts_before_upload={posts_before_upload}, recent_proxy_posts={recent_posts!r}, "
                 f"request_path={request_path!r}, runtime_before={upload_runtime_before!r}, "
-                f"runtime_after={upload_runtime_after!r}, browser_errors={browser_errors!r}, "
+                f"activation={upload_activation!r}, runtime_after={upload_runtime_after!r}, browser_errors={browser_errors!r}, "
                 f"browser_product={browser_version.get('product')!r}, "
                 f"protocol_version={browser_version.get('protocolVersion')!r}, "
                 f"elapsed={time.monotonic() - upload_started_at:.3f}s"
@@ -690,6 +831,10 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
             "native xhr.upload evidence via real multipart transport\n"
             f"browser_product={browser_version.get('product', '')}\n"
             f"browser_protocol_version={browser_version.get('protocolVersion', '')}\n"
+            f"unthrottled_probe_activation={probe_activation['activation']}\n"
+            f"unthrottled_probe_js_initialized={probe_activation['relationship']['productionScriptPresent']}\n"
+            f"unthrottled_probe_sync_percent={probe_activation['synchronous']['percentText']}\n"
+            f"unthrottled_probe_sync_status={probe_activation['synchronous']['statusText']}\n"
             f"unthrottled_probe_request_url={probe_state['request_url']}\n"
             f"unthrottled_probe_content_length={probe_post['content_length']}\n"
             f"unthrottled_probe_received_bytes={probe_post['received_bytes']}\n"
@@ -734,8 +879,9 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         _frame(driver, primary_badge)
         _shot_checked(driver, "p6-06-product-image-primary-en.png")
 
-        driver.find_element(By.CSS_SELECTOR, "[data-store-media-file]").send_keys(str(second))
-        _click_element(driver, driver.find_element(By.CSS_SELECTOR, "[data-store-media-submit]"))
+        second_form = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-upload-form]")))
+        second_form.find_element(By.CSS_SELECTOR, "[data-store-media-file]").send_keys(str(second))
+        _activate_store_media_submit(driver, second_form, second)
         wait.until(lambda _d: product.images.count() == 2)
         driver.refresh()
         wait.until(lambda _d: len(driver.find_elements(By.CSS_SELECTOR, "[data-store-media-item]")) == 2)
@@ -751,13 +897,14 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         _shot_checked(driver, "p6-07-product-images-primary-reassigned-en.png")
 
         before_provider_calls = len(provider_calls)
-        driver.find_element(By.CSS_SELECTOR, "[data-store-media-file]").send_keys(str(invalid))
-        submit = driver.find_element(By.CSS_SELECTOR, "[data-store-media-submit]")
-        _click_element(driver, submit)
+        retry_form = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-upload-form]")))
+        retry_form.find_element(By.CSS_SELECTOR, "[data-store-media-file]").send_keys(str(invalid))
+        retry_submit = retry_form.find_element(By.CSS_SELECTOR, "[data-store-media-submit]")
+        _activate_store_media_submit(driver, retry_form, invalid)
         wait.until(lambda _d: "valid PNG, JPEG or WebP" in driver.find_element(By.CSS_SELECTOR, "[data-store-media-status]").text)
         assert len(provider_calls) == before_provider_calls
-        assert submit.is_enabled()
-        _frame(driver, submit)
+        assert retry_submit.is_enabled()
+        _frame(driver, retry_submit)
         _shot_checked(driver, "p6-08-product-image-invalid-retry-en.png")
 
         publish_store_product(product=product, actor=owner)
