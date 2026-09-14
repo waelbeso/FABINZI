@@ -26,6 +26,13 @@ def _wait(driver, seconds=20):
     return WebDriverWait(driver, seconds)
 
 
+def _frame(driver, element):
+    driver.execute_script(
+        "arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});",
+        element,
+    )
+
+
 def _shot_checked(driver, name):
     _shot(driver, name)
     assert (ARTIFACT_DIR / name).exists()
@@ -125,14 +132,16 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         wait = _wait(driver)
         manage_url = f"{live_server.url}/designer/store/products/{product.pk}/?org={org.pk}&lang=en"
         driver.get(manage_url)
-        wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-upload-form]")))
+        upload_form = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-upload-form]")))
         assert driver.find_element(By.CSS_SELECTOR, "[data-store-media-empty]")
-        assert driver.find_element(By.CSS_SELECTOR, "[data-store-media-upload-form]").get_attribute("enctype").lower() == "multipart/form-data"
+        assert upload_form.get_attribute("enctype").lower() == "multipart/form-data"
+        _frame(driver, driver.find_element(By.CSS_SELECTOR, "[data-store-media-section]"))
         _shot_checked(driver, "p6-01-product-images-empty-en-desktop.png")
 
         file_input = driver.find_element(By.CSS_SELECTOR, "[data-store-media-file]")
         file_input.send_keys(str(large))
         wait.until(lambda _d: large.name in driver.find_element(By.CSS_SELECTOR, "[data-store-media-filename]").text)
+        _frame(driver, upload_form)
         _shot_checked(driver, "p6-02-product-image-selected-file-en.png")
 
         # Real Chrome network throttling + the real multipart/XHR request are used
@@ -169,12 +178,15 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
             {"offline": False, "latency": 0, "downloadThroughput": -1, "uploadThroughput": -1},
         )
         driver.refresh()
-        wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-item]")))
+        media_item = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-item]")))
         assert "phase6-browser-secret" not in driver.page_source
         assert "api.cloudflare.com" not in driver.page_source
-        assert "phase6-browser-1" not in driver.find_element(By.CSS_SELECTOR, "[data-store-media-item]").text
+        assert "phase6-browser-1" not in media_item.text
+        _frame(driver, media_item)
         _shot_checked(driver, "p6-05-product-image-upload-success-en.png")
-        assert driver.find_element(By.CSS_SELECTOR, "[data-store-media-primary]").text == "Primary"
+        primary_badge = driver.find_element(By.CSS_SELECTOR, "[data-store-media-primary]")
+        assert primary_badge.text == "Primary"
+        _frame(driver, primary_badge)
         _shot_checked(driver, "p6-06-product-image-primary-en.png")
 
         # Upload a second real image through the same canonical multipart form.
@@ -190,6 +202,8 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         ordered = list(product.images.order_by("sort_order", "id"))
         assert ordered[0].media_asset.original_filename == second.name
         assert [row.sort_order for row in ordered] == [0, 1]
+        gallery = driver.find_element(By.CSS_SELECTOR, "[data-store-media-gallery]")
+        _frame(driver, gallery)
         _shot_checked(driver, "p6-07-product-images-primary-reassigned-en.png")
 
         before_provider_calls = len(provider_calls)
@@ -199,21 +213,25 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         wait.until(lambda _d: "valid PNG, JPEG or WebP" in driver.find_element(By.CSS_SELECTOR, "[data-store-media-status]").text)
         assert len(provider_calls) == before_provider_calls
         assert submit.is_enabled()
+        _frame(driver, submit)
         _shot_checked(driver, "p6-08-product-image-invalid-retry-en.png")
 
         publish_store_product(product=product, actor=owner)
         product.refresh_from_db()
         assert product.status == StoreProduct.Status.PUBLISHED
         driver.get(manage_url)
-        wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-readonly]")))
+        readonly = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-readonly]")))
         assert not driver.find_elements(By.CSS_SELECTOR, "[data-store-media-upload-form]")
-        assert "Hide the product before" in driver.find_element(By.CSS_SELECTOR, "[data-store-media-readonly]").text
+        assert "Hide the product before" in readonly.text
+        _frame(driver, readonly)
         _shot_checked(driver, "p6-09-product-images-published-readonly-en.png")
 
         driver.get(f"{live_server.url}/?lang=en")
         wait.until(lambda _d: product.title_en in driver.page_source)
         primary_url = ordered[0].media_asset.metadata["public_url"]
         assert primary_url in driver.page_source
+        marketplace_image = driver.find_element(By.XPATH, f"//img[@src='{primary_url}']")
+        _frame(driver, marketplace_image)
         _shot_checked(driver, "p6-10-marketplace-primary-image-en.png")
 
         public_url = f"{live_server.url}/store/{store.slug}/{product.slug}/?lang=en"
@@ -222,17 +240,22 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         assert hero.get_attribute("src") == primary_url
         thumbs = driver.find_elements(By.CSS_SELECTOR, ".product-thumb img")
         assert thumbs and thumbs[0].get_attribute("src") == primary_url
+        _frame(driver, hero)
         _shot_checked(driver, "p6-11-public-product-primary-gallery-en.png")
 
         driver.get(f"{live_server.url}/studio/?product={product.pk}&lang=en")
         wait.until(lambda _d: product.title_en in driver.page_source)
         assert primary_url in driver.page_source
+        studio_image = driver.find_element(By.XPATH, f"//img[@src='{primary_url}']")
+        _frame(driver, studio_image)
         _shot_checked(driver, "p6-12-studio-primary-image-en.png")
 
         driver.get(public_url)
         _click_element(driver, driver.find_element(By.CSS_SELECTOR, "#product-purchase-form button[type='submit']"))
         wait.until(lambda _d: "/cart" in driver.current_url)
         assert primary_url in driver.page_source
+        cart_image = driver.find_element(By.XPATH, f"//img[@src='{primary_url}']")
+        _frame(driver, cart_image)
         _shot_checked(driver, "p6-13-cart-primary-image-en.png")
 
         owner.language_preference = "ar"
@@ -240,10 +263,11 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         owner.save(update_fields=["language_preference", "theme_preference"])
         driver.set_window_size(390, 844)
         driver.get(f"{live_server.url}/designer/store/products/{product.pk}/?org={org.pk}&lang=ar")
-        wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-readonly]")))
+        readonly = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-readonly]")))
         assert driver.find_element(By.TAG_NAME, "html").get_attribute("dir") == "rtl"
         assert "صور المنتج العامة" in driver.page_source
         assert _no_overflow(driver)
+        _frame(driver, readonly)
         _shot_checked(driver, "p6-14-product-images-ar-rtl-mobile-dark.png")
 
         hide_store_product(product=product, actor=owner)
@@ -251,8 +275,10 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         driver.set_window_size(1440, 1000)
         driver.get(manage_url)
         wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-upload-form]")))
-        assert driver.find_elements(By.CSS_SELECTOR, ".designer-product-media__actions")
+        actions = driver.find_elements(By.CSS_SELECTOR, ".designer-product-media__actions")
+        assert actions
         assert _no_overflow(driver)
+        _frame(driver, actions[0])
         _shot_checked(driver, "p6-15-product-images-en-desktop-no-overflow.png")
 
         assert len(provider_calls) == 2
