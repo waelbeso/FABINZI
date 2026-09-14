@@ -20,6 +20,7 @@ from apps.storefront.services import (
     publish_store_product,
     publish_storefront,
 )
+from .v2_6_helpers import product_image_metadata
 
 User = get_user_model()
 
@@ -50,7 +51,18 @@ def ready_project(stock=False, stock_quantity=None):
     variant = add_variant(product=product, actor=owner, sku="WT-M", stock_quantity=stock_quantity)
     from apps.media.models import MediaAsset
     from apps.storefront.services import add_product_image
-    image = MediaAsset.objects.create(provider="cloudflare_images", provider_asset_id="/static/brand/fabinzi-logo.svg", original_filename="x.png", mime_type="image/png", size_bytes=1, access="public", uploaded_by=owner)
+    public_url = "https://imagedelivery.net/test/stage6-checkout/public"
+    image = MediaAsset.objects.create(
+        provider="cloudflare_images",
+        provider_asset_id="stage6-checkout-image",
+        original_filename="x.png",
+        mime_type="image/png",
+        size_bytes=1,
+        checksum_sha256="0" * 64,
+        access="public",
+        uploaded_by=owner,
+        metadata=product_image_metadata(organization=org, product=product, actor=owner, public_url=public_url),
+    )
     add_product_image(product=product, actor=owner, media_asset=image)
     publish_store_product(product=product, actor=owner)
 

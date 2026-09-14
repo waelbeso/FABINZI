@@ -19,6 +19,7 @@ from apps.media.models import MediaAsset
 from apps.organizations.models import Membership, Organization
 from apps.storefront.models import StudioProject
 from apps.storefront.services import add_product_image, add_variant, create_store_product, create_storefront, publish_store_product, publish_storefront
+from .v2_6_helpers import product_image_metadata
 
 User = get_user_model()
 ARTIFACT_DIR = Path("artifacts/browser-qa")
@@ -42,7 +43,8 @@ def _catalog(prefix, *, customization=False, ready_designed=False):
     publish_storefront(storefront=store, actor=owner)
     product = create_store_product(storefront=store, actor=owner, designed_product=designed, slug=f"{prefix}-browser-product", title_en=f"{prefix} Browser Product", title_ar=f"منتج {prefix} للمتصفح", description_en="Customer commerce browser QA product.", description_ar="منتج لاختبار رحلة شراء العميل عبر المتصفح.", base_price="500.00", customization_enabled=customization)
     variant = add_variant(product=product, actor=owner, sku=f"{prefix.upper()}-BROWSER-M", size="M", color_name="Black", color_hex="#111111")
-    image = MediaAsset.objects.create(provider=MediaAsset.Provider.LOCAL_DEV, provider_asset_id="/static/brand/fabinzi-logo.svg", original_filename=f"{prefix}-browser.svg", mime_type="image/svg+xml", size_bytes=1, access=MediaAsset.Access.PUBLIC, uploaded_by=owner, metadata={"public_url": "/static/brand/fabinzi-logo.svg"})
+    public_url = f"https://imagedelivery.net/test/{prefix}-browser-product/public"
+    image = MediaAsset.objects.create(provider=MediaAsset.Provider.CLOUDFLARE_IMAGES, provider_asset_id=f"{prefix}-browser-product", original_filename=f"{prefix}-browser.png", mime_type="image/png", size_bytes=1, checksum_sha256="0" * 64, access=MediaAsset.Access.PUBLIC, uploaded_by=owner, metadata=product_image_metadata(organization=org, product=product, actor=owner, public_url=public_url))
     add_product_image(product=product, actor=owner, media_asset=image, alt_en=product.title_en, alt_ar=product.title_ar)
     publish_store_product(product=product, actor=owner)
     return product, variant, zone

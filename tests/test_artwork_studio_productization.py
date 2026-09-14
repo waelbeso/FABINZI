@@ -32,6 +32,7 @@ from apps.storefront.services import (
     update_customization_element,
     validate_studio_project,
 )
+from .v2_6_helpers import product_image_metadata
 
 User = get_user_model()
 PNG_1X1 = base64.b64decode(
@@ -92,7 +93,18 @@ def build_catalog(prefix="creative", *, stock=False, stock_quantity=5, artwork_s
         fulfillment_mode=StoreProduct.FulfillmentMode.STOCK if stock else StoreProduct.FulfillmentMode.MADE_TO_ORDER,
     )
     variant = add_variant(product=product, actor=owner, sku=f"{prefix.upper()}-M", size="M", color_name="Black", stock_quantity=stock_quantity if stock else None)
-    garment_image = MediaAsset.objects.create(provider=MediaAsset.Provider.LOCAL_DEV, provider_asset_id="/static/demo/garment-mens-tshirt.svg", original_filename="tee.svg", mime_type="image/svg+xml", size_bytes=100, access=MediaAsset.Access.PUBLIC, uploaded_by=owner, metadata={"public_url": "/static/demo/garment-mens-tshirt.svg"})
+    product_public_url = f"https://imagedelivery.net/test/{prefix}-store-product/public"
+    garment_image = MediaAsset.objects.create(
+        provider=MediaAsset.Provider.CLOUDFLARE_IMAGES,
+        provider_asset_id=f"{prefix}-store-product",
+        original_filename="tee-product.png",
+        mime_type="image/png",
+        size_bytes=100,
+        checksum_sha256="0" * 64,
+        access=MediaAsset.Access.PUBLIC,
+        uploaded_by=owner,
+        metadata=product_image_metadata(organization=org, product=product, actor=owner, public_url=product_public_url),
+    )
     add_product_image(product=product, actor=owner, media_asset=garment_image, alt_en=product.title_en, alt_ar=product.title_ar)
     publish_store_product(product=product, actor=owner)
     return {

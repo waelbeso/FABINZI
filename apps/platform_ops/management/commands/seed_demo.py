@@ -289,11 +289,44 @@ class Command(BaseCommand):
         product.published_at = product.published_at or timezone.now()
         product.full_clean()
         product.save()
-        image_row, _ = StoreProductImage.objects.get_or_create(product=product, media_asset=image)
+
+        # Phase 6 demo data uses a distinct MediaAsset for the Store-product
+        # gallery. The visual URL may point at a bundled QA static illustration,
+        # but the Store relation never reuses the DesignAsset/ArtworkAsset row.
+        source_meta = image.metadata if isinstance(image.metadata, dict) else {}
+        public_url = source_meta.get("public_url") or source_meta.get("static_url") or image.provider_asset_id
+        product_media, _ = MediaAsset.objects.update_or_create(
+            provider=MediaAsset.Provider.LOCAL_DEV,
+            provider_asset_id=f"demo-store-product:{product.pk}",
+            defaults={
+                "original_filename": f"{slug}-store-product.svg",
+                "mime_type": image.mime_type,
+                "size_bytes": image.size_bytes,
+                "checksum_sha256": image.checksum_sha256,
+                "access": MediaAsset.Access.PUBLIC,
+                "metadata": {
+                    "demo": True,
+                    "demo_store_product_media": True,
+                    "organization_id": store.organization_id,
+                    "store_product_id": product.pk,
+                    "actor_id": image.uploaded_by_id,
+                    "purpose": "store_product_image",
+                    "designer_store_product_upload": True,
+                    "public_url": public_url,
+                },
+                "uploaded_by": image.uploaded_by,
+            },
+        )
+        # Re-running the guarded QA command reconciles only demo relations and
+        # removes the historical Design/Artwork media reuse from this demo product.
+        StoreProductImage.objects.filter(product=product).exclude(media_asset=product_media).delete()
+        image_row, _ = StoreProductImage.objects.get_or_create(product=product, media_asset=product_media)
+        image_row.sort_order = 0
         image_row.alt_en = title_en
         image_row.alt_ar = title_ar
         image_row.full_clean()
         image_row.save()
+
         result = []
         for item in variants:
             variant, _ = ProductVariant.objects.update_or_create(

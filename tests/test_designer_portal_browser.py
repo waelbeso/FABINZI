@@ -28,6 +28,7 @@ from apps.design.models import DecorationZone, DesignAsset, GarmentDesign, Garme
 from apps.design.services import review_version
 from apps.finance.models import LedgerEntry, OrderFinance, PayoutProfile, SettlementRequest
 from apps.finance.services import organization_account
+from apps.integrations.models import IntegrationConfig
 from apps.manufacturer_marketplace.services import add_capability, get_or_create_listing, publish_listing, submit_quote
 from apps.media.designer_services import create_private_designer_asset
 from apps.media.models import MediaAsset
@@ -356,7 +357,7 @@ def _create_order_visibility(customer, org, product, variant):
 
 
 @pytest.mark.django_db(transaction=True)
-def test_designer_portal_real_chrome_a_to_g(client, live_server, v2_3_reference_rows):
+def test_designer_portal_real_chrome_a_to_g(client, live_server, v2_3_reference_rows, monkeypatch, tmp_path):
     if os.getenv("CI") != "true":
         pytest.skip("Real Chrome Designer QA is CI-only.")
 
@@ -378,6 +379,37 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server, v2_3_reference_
     approved_design, approved_garment, approved_zone, public_media = _approved_garment(owner, staff, org)
     approved_artwork, approved_artwork_version, ip_case = _approved_artwork(owner, staff, org)
     factory = _manufacturer(factory_user, "Nile Works")
+
+    store_upload_path = tmp_path / "phase6-designer-store-product.png"
+    store_upload_path.write_bytes(VALID_PNG)
+    IntegrationConfig.objects.update_or_create(
+        provider=IntegrationConfig.Provider.CLOUDFLARE_IMAGES,
+        defaults={"enabled": True, "config": {"account_id": "a" * 32}},
+    )
+    monkeypatch.setattr(IntegrationConfig, "get_secrets", lambda self: {"api_token": "phase6-designer-browser-token"})
+    from apps.media import designer_public_services as store_media_service
+
+    class UploadResponse:
+        ok = True
+
+        def json(self):
+            return {
+                "success": True,
+                "result": {
+                    "id": "phase6-designer-browser-image",
+                    "requireSignedURLs": False,
+                    "variants": ["https://imagedelivery.net/browser/phase6-designer-browser-image/public"],
+                },
+            }
+
+    class DeleteResponse:
+        ok = True
+
+        def json(self):
+            return {"success": True}
+
+    monkeypatch.setattr(store_media_service.requests, "post", lambda *a, **k: UploadResponse())
+    monkeypatch.setattr(store_media_service.requests, "delete", lambda *a, **k: DeleteResponse())
 
     driver = _chrome()
     try:
@@ -604,7 +636,8 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server, v2_3_reference_
         rfq.refresh_from_db()
         _shot(driver, "10-designer-rfq-quotes-desktop-en-light.png")
 
-        # E. Create Designer Store and a StoreProduct through visible controls, then open the same public customer Product.
+        # E. Create Designer Store and a StoreProduct through visible controls, upload a genuine
+        # Store-product image, publish it, then open the same public customer Product.
         driver.get(f"{live_server.url}/designer/store/?org={org.pk}&lang=en")
         store_setup = _section_by_heading(driver, "Store setup")
         create_store_form = _form_with_action(store_setup, "create")
@@ -650,10 +683,24 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server, v2_3_reference_
         variant = product.variants.get(sku="NW-TEE-M")
 
         image_section = _section_by_heading(driver, "Public product images")
-        image_form = _form_with_action(image_section, "add_image")
-        Select(image_form.find_element(By.NAME, "media_asset")).select_by_value(str(public_media.pk))
-        _click_element(driver, image_form.find_element(By.CSS_SELECTOR, 'button[type="submit"]'))
-        wait.until(lambda _d: product.images.filter(media_asset=public_media).exists())
+        image_form = image_section.find_element(By.CSS_SELECTOR, "form[data-store-media-upload-form]")
+        _assert_hidden(image_form, "action", "update")
+        _assert_hidden(image_form, "media_action", "upload")
+        assert product.images.count() == 0
+        image_form.find_element(By.NAME, "product_image").send_keys(str(store_upload_path))
+        image_form.find_element(By.NAME, "alt_en").send_keys("North Wave Tee front product photo")
+        _click_element(driver, image_form.find_element(By.CSS_SELECTOR, "button[data-store-media-submit]"))
+        wait.until(lambda _d: product.images.count() == 1)
+        relation = product.images.select_related("media_asset").get()
+        metadata = relation.media_asset.metadata
+        assert relation.media_asset_id != public_media.pk
+        assert metadata["organization_id"] == org.pk
+        assert metadata["store_product_id"] == product.pk
+        assert metadata["purpose"] == "store_product_image"
+        assert metadata["designer_store_product_upload"] is True
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "[data-store-media-item]")))
+        assert "phase6-designer-browser-token" not in driver.page_source
+        assert "api.cloudflare.com" not in driver.page_source
         product.refresh_from_db()
 
         store_product_header = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "header.designer-page-head")))
@@ -661,6 +708,8 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server, v2_3_reference_
         _click_element(driver, publish_product_form.find_element(By.CSS_SELECTOR, 'button[type="submit"]'))
         wait.until(lambda _d: StoreProduct.objects.filter(pk=product.pk, status=StoreProduct.Status.PUBLISHED).exists())
         product.refresh_from_db()
+        assert wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "[data-store-media-readonly]"))).is_displayed()
+        assert not driver.find_elements(By.CSS_SELECTOR, "form[data-store-media-upload-form]")
         _shot(driver, "11-designer-store-desktop-en-light.png")
 
         store_product_header = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "header.designer-page-head")))
@@ -672,6 +721,7 @@ def test_designer_portal_real_chrome_a_to_g(client, live_server, v2_3_reference_
         driver.switch_to.window(customer_window)
         wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "North Wave Tee"))
         assert f"/store/{store.slug}/{product.slug}/" in driver.current_url
+        assert relation.media_asset.metadata["public_url"] in driver.page_source
         driver.close()
         driver.switch_to.window(original_window)
 

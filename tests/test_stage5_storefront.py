@@ -9,6 +9,7 @@ from apps.media.models import MediaAsset
 from apps.organizations.models import Membership, Organization
 from apps.storefront.models import CustomizationElement, StoreProduct, Storefront, StudioProject
 from apps.storefront.services import add_customization_element, add_product_image, add_variant, create_store_product, create_storefront, create_studio_project, enable_customization, mark_project_ready, publish_store_product, publish_storefront, update_studio_project
+from .v2_6_helpers import product_image_metadata
 
 User=get_user_model()
 
@@ -25,7 +26,8 @@ def ready_store(owner):
     org=designer(owner); dp,zone=published_design(org,owner); store=create_storefront(organization=org,actor=owner,slug="brand",name_en="Brand"); publish_storefront(storefront=store,actor=owner)
     product=create_store_product(storefront=store,actor=owner,designed_product=dp,slug="wave-tee",title_en="Wave Tee",base_price="500.00",customization_enabled=True)
     variant=add_variant(product=product,actor=owner,sku="WT-M-BLK",size="M",color_name="Black",color_hex="#111111")
-    image=MediaAsset.objects.create(provider="cloudflare_images",provider_asset_id="p1",original_filename="p.png",mime_type="image/png",size_bytes=2,access="public",uploaded_by=owner); add_product_image(product=product,actor=owner,media_asset=image); publish_store_product(product=product,actor=owner)
+    public_url="https://imagedelivery.net/test/stage5-product/public"
+    image=MediaAsset.objects.create(provider="cloudflare_images",provider_asset_id="p1",original_filename="p.png",mime_type="image/png",size_bytes=2,checksum_sha256="0"*64,access="public",uploaded_by=owner,metadata=product_image_metadata(organization=org,product=product,actor=owner,public_url=public_url)); add_product_image(product=product,actor=owner,media_asset=image); publish_store_product(product=product,actor=owner)
     return org,store,product,variant,zone
 
 @pytest.mark.django_db

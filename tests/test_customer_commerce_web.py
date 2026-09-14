@@ -16,6 +16,7 @@ from apps.storefront.services import (
     publish_store_product,
     publish_storefront,
 )
+from .v2_6_helpers import product_image_metadata
 
 User = get_user_model()
 
@@ -109,14 +110,17 @@ def make_web_catalog(prefix, *, customization=False, ready_designed=False, stock
         color_hex="#111111",
         stock_quantity=stock_quantity,
     )
+    public_url = f"https://imagedelivery.net/test/{prefix}-product-image/public"
     image = MediaAsset.objects.create(
-        provider=MediaAsset.Provider.LOCAL_DEV,
-        provider_asset_id="/static/brand/fabinzi-logo.svg",
-        original_filename=f"{prefix}.svg",
-        mime_type="image/svg+xml",
+        provider=MediaAsset.Provider.CLOUDFLARE_IMAGES,
+        provider_asset_id=f"{prefix}-product-image",
+        original_filename=f"{prefix}-product.png",
+        mime_type="image/png",
         size_bytes=1,
+        checksum_sha256="0" * 64,
         access=MediaAsset.Access.PUBLIC,
         uploaded_by=owner,
+        metadata=product_image_metadata(organization=org, product=product, actor=owner, public_url=public_url),
     )
     add_product_image(product=product, actor=owner, media_asset=image, alt_en=product.title_en, alt_ar=product.title_ar)
     publish_store_product(product=product, actor=owner)

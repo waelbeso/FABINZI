@@ -4,8 +4,8 @@ from django.core.management.base import CommandError
 from django.test import override_settings
 
 from apps.accounts.models import User
-from apps.artwork.models import Artwork, DesignedProduct
-from apps.design.models import GarmentDesign
+from apps.artwork.models import Artwork, ArtworkAsset, DesignedProduct
+from apps.design.models import DesignAsset, GarmentDesign
 from apps.manufacturer_marketplace.models import ManufacturerCapability, ManufacturerQuote, RFQ
 from apps.organizations.models import Organization
 from apps.platform_ops.public_urls import absolute_public_url
@@ -84,8 +84,27 @@ def test_seed_demo_is_idempotent_and_builds_real_domain_graph(v2_3_reference_row
         "projects": 3,
     }
     assert User.objects.get(username="fabinzi_demo_admin").is_superuser is True
-    assert Organization.objects.get(display_name="FABINZI Demo Studio").verification_status == Organization.VerificationStatus.ACTIVE
+    designer_org = Organization.objects.get(display_name="FABINZI Demo Studio")
+    assert designer_org.verification_status == Organization.VerificationStatus.ACTIVE
     assert Organization.objects.get(display_name="FABINZI Demo Manufacturing").verification_status == Organization.VerificationStatus.ACTIVE
+
+    design_media_ids = set(DesignAsset.objects.filter(version__design__organization=designer_org).values_list("media_asset_id", flat=True))
+    artwork_media_ids = set(ArtworkAsset.objects.filter(version__artwork__organization=designer_org).values_list("media_asset_id", flat=True))
+    products = StoreProduct.objects.filter(storefront__organization=designer_org).prefetch_related("images__media_asset")
+    assert products.count() == 6
+    for product in products:
+        rows = list(product.images.all())
+        assert len(rows) == 1
+        assert rows[0].sort_order == 0
+        media = rows[0].media_asset
+        metadata = media.metadata
+        assert media.pk not in design_media_ids
+        assert media.pk not in artwork_media_ids
+        assert metadata["demo_store_product_media"] is True
+        assert metadata["designer_store_product_upload"] is True
+        assert metadata["purpose"] == "store_product_image"
+        assert str(metadata["organization_id"]) == str(designer_org.pk)
+        assert str(metadata["store_product_id"]) == str(product.pk)
 
 
 def test_absolute_public_url_uses_central_setting():

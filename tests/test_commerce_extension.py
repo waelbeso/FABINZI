@@ -14,6 +14,7 @@ from apps.media.models import MediaAsset
 from apps.organizations.models import Membership, Organization
 from apps.storefront.models import CustomizationElement, StudioProject
 from apps.storefront.services import add_customization_element, add_product_image, add_variant, create_store_product, create_storefront, create_studio_project, enable_customization, mark_project_ready, publish_store_product, publish_storefront
+from .v2_6_helpers import product_image_metadata
 
 User = get_user_model()
 
@@ -33,7 +34,8 @@ def make_catalog(prefix, *, customization=False):
     publish_storefront(storefront=store, actor=owner)
     product = create_store_product(storefront=store, actor=owner, designed_product=designed, slug=f"{prefix}-product", title_en=f"{prefix} Product", base_price="500.00", customization_enabled=customization)
     variant = add_variant(product=product, actor=owner, sku=f"{prefix.upper()}-M", size="M")
-    image = MediaAsset.objects.create(provider="cloudflare_images", provider_asset_id=f"{prefix}-image", original_filename=f"{prefix}.png", mime_type="image/png", size_bytes=1, access="public", uploaded_by=owner)
+    public_url = f"https://imagedelivery.net/test/{prefix}-image/public"
+    image = MediaAsset.objects.create(provider="cloudflare_images", provider_asset_id=f"{prefix}-image", original_filename=f"{prefix}.png", mime_type="image/png", size_bytes=1, checksum_sha256="0" * 64, access="public", uploaded_by=owner, metadata=product_image_metadata(organization=org, product=product, actor=owner, public_url=public_url))
     add_product_image(product=product, actor=owner, media_asset=image)
     publish_store_product(product=product, actor=owner)
     return org, product, variant

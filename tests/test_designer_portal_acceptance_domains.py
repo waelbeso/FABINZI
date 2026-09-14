@@ -15,12 +15,13 @@ from apps.design.services import create_design, create_revision, review_version
 from apps.finance.models import FinancePolicy, LedgerEntry, PayoutProfile
 from apps.finance.services import account_balance, organization_account, request_settlement
 from apps.manufacturer_marketplace.services import add_capability, create_rfq, get_or_create_listing, open_rfq, publish_listing, select_quote, submit_quote
+from apps.media.designer_public_services import STORE_PRODUCT_PURPOSE
 from apps.media.models import MediaAsset
 from apps.operations.models import FulfillmentRecord
 from apps.organizations.models import DesignerProfile, Membership, OnboardingApplication, Organization
 from apps.storefront.designer_services import hide_store_product, update_store_product, update_variant
-from apps.storefront.models import StoreProduct, StoreProductImage
-from apps.storefront.services import add_variant, create_store_product, create_storefront, publish_store_product, publish_storefront
+from apps.storefront.models import StoreProduct
+from apps.storefront.services import add_product_image, add_variant, create_store_product, create_storefront, publish_store_product, publish_storefront
 
 User = get_user_model()
 
@@ -50,8 +51,31 @@ def published_designed_product(org, user):
     return product, garment, zone, artwork_version
 
 
-def public_image(user, key="/static/test-product.png"):
-    return MediaAsset.objects.create(provider=MediaAsset.Provider.CLOUDFLARE_IMAGES, provider_asset_id=key, original_filename="product.png", mime_type="image/png", size_bytes=10, access=MediaAsset.Access.PUBLIC, uploaded_by=user, metadata={"public_url": key})
+def public_image(org, product, user):
+    checksum = f"{product.pk:064x}"[-64:]
+    public_url = f"https://imagedelivery.net/acceptance/store-product-{product.pk}/public"
+    return MediaAsset.objects.create(
+        provider=MediaAsset.Provider.CLOUDFLARE_IMAGES,
+        provider_asset_id=f"acceptance-store-product-{product.pk}",
+        original_filename="product.png",
+        mime_type="image/png",
+        size_bytes=10,
+        checksum_sha256=checksum,
+        access=MediaAsset.Access.PUBLIC,
+        uploaded_by=user,
+        metadata={
+            "organization_id": org.pk,
+            "store_product_id": product.pk,
+            "actor_id": user.pk,
+            "purpose": STORE_PRODUCT_PURPOSE,
+            "designer_store_product_upload": True,
+            "public_url": public_url,
+            "validated_format": "png",
+            "width": 8,
+            "height": 8,
+            "checksum_sha256": checksum,
+        },
+    )
 
 
 @pytest.mark.django_db
@@ -220,7 +244,8 @@ def draft_store_product(org, owner, *, publish=False):
     publish_storefront(storefront=store, actor=owner)
     product = create_store_product(storefront=store, actor=owner, designed_product=designed, slug="wave-tee", title_en="Wave Tee", title_ar="تيشيرت ويف", base_price=Decimal("550.00"), currency="EGP", customization_enabled=True, fulfillment_mode=StoreProduct.FulfillmentMode.STOCK)
     variant = add_variant(product=product, actor=owner, sku=f"SKU-{org.pk}", size="M", stock_quantity=7)
-    StoreProductImage.objects.create(product=product, media_asset=public_image(owner), alt_en="Wave Tee", alt_ar="تيشيرت ويف")
+    media = public_image(org, product, owner)
+    add_product_image(product=product, actor=owner, media_asset=media, alt_en="Wave Tee", alt_ar="تيشيرت ويف")
     if publish:
         publish_store_product(product=product, actor=owner)
     return store, product, variant
