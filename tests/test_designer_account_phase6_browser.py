@@ -1352,8 +1352,11 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         for image, expected_url in zip(thumbs, expected_gallery_urls):
             _assert_loaded_image(driver, image, expected_url)
         public_gallery = driver.find_element(By.CSS_SELECTOR, ".gallery")
+        public_gallery_window = driver.get_window_size()
+        driver.set_window_size(public_gallery_window["width"], 1200)
         _frame_evidence(driver, public_gallery, "p6-11 public hero and thumbnail gallery")
         _shot_checked(driver, "p6-11-public-product-primary-gallery-en.png")
+        driver.set_window_size(public_gallery_window["width"], public_gallery_window["height"])
 
         driver.get(f"{live_server.url}/studio/?product={product.pk}&lang=en")
         wait.until(lambda _d: product.title_en in driver.page_source)
