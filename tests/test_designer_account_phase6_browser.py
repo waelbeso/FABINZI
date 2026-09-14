@@ -35,7 +35,7 @@ class _UploadProxyServer(ThreadingHTTPServer):
 
 
 class _UploadObservationProxy:
-    """Observe the real Store-media multipart POST without fabricating progress."""
+    """Observe real Store-media multipart POSTs without fabricating progress."""
 
     _HOP_BY_HOP = {
         "connection",
@@ -57,6 +57,7 @@ class _UploadObservationProxy:
         self.target_port = target.port or 80
         self._lock = threading.Lock()
         self._connection_count = 0
+        self._product_posts = []
         self._upload_received = 0
         self._upload_total = 0
         self._upload_connection_id = None
@@ -104,12 +105,18 @@ class _UploadObservationProxy:
                     return
 
                 content_length = int(self.headers.get("Content-Length") or 0)
-                evidence_upload = (
-                    self.command == "POST"
-                    and "/designer/store/products/" in path
-                    and content_length > 7_000_000
-                    and not outer._upload_seen
-                )
+                product_post = self.command == "POST" and "/designer/store/products/" in path
+                if product_post:
+                    with outer._lock:
+                        outer._product_posts.append(
+                            {
+                                "connection_id": self._connection_id,
+                                "path": path,
+                                "content_length": content_length,
+                            }
+                        )
+
+                evidence_upload = product_post and content_length > 7_000_000 and not outer._upload_seen
                 if evidence_upload:
                     with outer._lock:
                         outer._upload_seen = True
@@ -181,6 +188,10 @@ class _UploadObservationProxy:
         with self._lock:
             return self._connection_count
 
+    def product_posts(self):
+        with self._lock:
+            return [dict(row) for row in self._product_posts]
+
     def upload_snapshot(self):
         with self._lock:
             return (
@@ -206,23 +217,28 @@ def _chrome_through_proxy(proxy_url, *, language="en-US,en", width=1440, height=
     options.add_argument(f"--proxy-server={proxy_url}")
     options.add_argument("--proxy-bypass-list=<-loopback>")
     options.add_experimental_option("prefs", {"intl.accept_languages": language})
-    options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
+    options.set_capability("goog:loggingPrefs", {"performance": "ALL", "browser": "ALL"})
     return webdriver.Chrome(options=options)
 
 
 def _enable_native_upload_throttle(driver, upload_url):
-    """Throttle the exact application URL before any target connection exists."""
+    """Apply the same by-rule condition shape used by current Chrome DevTools."""
     driver.execute_cdp_cmd("Network.enable", {})
     result = driver.execute_cdp_cmd(
         "Network.emulateNetworkConditionsByRule",
         {
             "offline": False,
+            "emulateOfflineServiceWorker": False,
             "matchedNetworkConditions": [
                 {
                     "urlPattern": upload_url,
                     "latency": 0,
-                    "downloadThroughput": -1,
+                    # Chrome DevTools normalizes an unthrottled direction to 0
+                    # for this experimental by-rule command.
+                    "downloadThroughput": 0,
                     "uploadThroughput": UPLOAD_THROUGHPUT_BYTES_PER_SECOND,
+                    "packetLoss": 0,
+                    "offline": False,
                 }
             ],
         },
@@ -249,18 +265,72 @@ def _collect_upload_network_state(driver, *, upload_url, state):
         method = message.get("method")
         params = message.get("params") or {}
         request_id = params.get("requestId")
+
         if method == "Network.requestWillBeSent":
             request = params.get("request") or {}
+            if request.get("method") == "POST":
+                state.setdefault("post_urls", []).append(request.get("url"))
             if request.get("method") == "POST" and request.get("url") == upload_url:
                 state["request_id"] = request_id
                 state["request_url"] = request.get("url")
+                state.setdefault("events", []).append(f"requestWillBeSent:{request_id}")
         elif method == "Network.requestWillBeSentExtraInfo" and request_id:
-            state["extra_by_request"][request_id] = params.get("appliedNetworkConditionsId")
+            applied = params.get("appliedNetworkConditionsId")
+            state["extra_by_request"][request_id] = applied
+            if request_id == state.get("request_id"):
+                state.setdefault("events", []).append(
+                    f"requestWillBeSentExtraInfo:{request_id}:{applied or 'none'}"
+                )
+        elif request_id and request_id == state.get("request_id"):
+            if method == "Network.responseReceived":
+                response = params.get("response") or {}
+                state["response_status"] = response.get("status")
+                state.setdefault("events", []).append(
+                    f"responseReceived:{request_id}:{response.get('status')}"
+                )
+            elif method == "Network.loadingFailed":
+                state["loading_failed"] = params.get("errorText") or "unknown"
+                state.setdefault("events", []).append(
+                    f"loadingFailed:{request_id}:{state['loading_failed']}"
+                )
+            elif method == "Network.loadingFinished":
+                state["loading_finished"] = True
+                state.setdefault("events", []).append(f"loadingFinished:{request_id}")
 
     request_id = state.get("request_id")
     if request_id:
         state["applied_rule_id"] = state["extra_by_request"].get(request_id)
     return state
+
+
+def _browser_console_errors(driver):
+    errors = []
+    for entry in driver.get_log("browser"):
+        if str(entry.get("level", "")).upper() in {"SEVERE", "ERROR"}:
+            message = str(entry.get("message", ""))
+            errors.append(message.replace("phase6-browser-secret", "[redacted]")[:600])
+    return errors
+
+
+def _upload_form_runtime_state(driver):
+    return driver.execute_script(
+        """
+        const form = document.querySelector('[data-store-media-upload-form]');
+        const input = form && form.querySelector('[data-store-media-file]');
+        const selected = input && input.files && input.files[0];
+        const progress = form && form.querySelector('[data-store-media-progress]');
+        const status = form && form.querySelector('[data-store-media-status]');
+        return {
+          href: window.location.href,
+          action: form ? form.getAttribute('action') : null,
+          endpoint: form ? (form.getAttribute('action') || window.location.href) : null,
+          fileName: selected ? selected.name : null,
+          fileSize: selected ? selected.size : null,
+          progressValue: progress && progress.hasAttribute('value') ? Number(progress.value) : null,
+          statusText: status ? status.textContent.trim() : null
+        };
+        """
+    )
 
 
 def _wait(driver, seconds=20):
@@ -368,8 +438,6 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
     manage_url = f"{live_server.url}/designer/store/products/{product.pk}/?org={org.pk}&lang=en"
     try:
         driver = _chrome_through_proxy(proxy.url, width=1440, height=1000)
-        throttle_rule_id = _enable_native_upload_throttle(driver, manage_url)
-        native_throttle_enabled = True
         _login(driver, live_server, client, owner)
         wait = _wait(driver)
         driver.get(manage_url)
@@ -380,17 +448,59 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         _frame(driver, driver.find_element(By.CSS_SELECTOR, "[data-store-media-section]"))
         _shot_checked(driver, "p6-01-product-images-empty-en-desktop.png")
 
+        # Control: prove that this exact production submit handler, endpoint and
+        # proxy path produce a genuine multipart POST before any network rule is
+        # installed. Invalid image bytes guarantee the provider is not invoked.
+        driver.get_log("performance")
+        driver.get_log("browser")
+        probe_posts_before = len(proxy.product_posts())
+        probe_input = driver.find_element(By.CSS_SELECTOR, "[data-store-media-file]")
+        probe_input.send_keys(str(invalid))
+        probe_runtime = _upload_form_runtime_state(driver)
+        assert probe_runtime["href"] == manage_url
+        assert probe_runtime["endpoint"] == manage_url
+        assert probe_runtime["fileName"] == invalid.name
+        assert probe_runtime["fileSize"] == invalid.stat().st_size
+        _click_element(driver, upload_form.find_element(By.CSS_SELECTOR, "[data-store-media-submit]"))
+        wait.until(
+            lambda _d: "valid PNG, JPEG or WebP"
+            in driver.find_element(By.CSS_SELECTOR, "[data-store-media-status]").text
+        )
+        probe_state = {"extra_by_request": {}, "events": [], "post_urls": []}
+        _collect_upload_network_state(driver, upload_url=manage_url, state=probe_state)
+        probe_posts = proxy.product_posts()
+        probe_errors = _browser_console_errors(driver)
+        assert len(probe_posts) == probe_posts_before + 1, (probe_posts, probe_errors)
+        assert probe_posts[-1]["content_length"] > invalid.stat().st_size
+        assert probe_state.get("request_url") == manage_url, (probe_state, probe_errors)
+        assert probe_state.get("loading_failed") is None, (probe_state, probe_errors)
+        assert len(provider_calls) == 0
+        assert product.images.count() == 0
+
         file_input = driver.find_element(By.CSS_SELECTOR, "[data-store-media-file]")
+        file_input.clear()
         file_input.send_keys(str(large))
         wait.until(lambda _d: large.name in driver.find_element(By.CSS_SELECTOR, "[data-store-media-filename]").text)
+        selected_runtime = _upload_form_runtime_state(driver)
+        assert selected_runtime["endpoint"] == manage_url
+        assert selected_runtime["fileName"] == large.name
+        assert selected_runtime["fileSize"] == large.stat().st_size
         _frame(driver, upload_form)
         _shot_checked(driver, "p6-02-product-image-selected-file-en.png")
 
+        # Install the rule only after the successful unthrottled control. The
+        # proxy forces Connection: close, so the evidence upload necessarily uses
+        # a fresh browser-to-proxy connection created after the rule is active.
+        throttle_rule_id = _enable_native_upload_throttle(driver, manage_url)
+        native_throttle_enabled = True
         driver.get_log("performance")
+        driver.get_log("browser")
         connections_before_upload = proxy.connection_count()
-        network_state = {"extra_by_request": {}}
+        posts_before_upload = len(proxy.product_posts())
+        network_state = {"extra_by_request": {}, "events": [], "post_urls": []}
         observed_progress = []
         upload_started_at = time.monotonic()
+        upload_runtime_before = _upload_form_runtime_state(driver)
         _click_element(driver, upload_form.find_element(By.CSS_SELECTOR, "[data-store-media-submit]"))
         progress = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-progress]")))
 
@@ -421,14 +531,23 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         if intermediate is None:
             received, total, connection_id, request_path = proxy.upload_snapshot()
             _collect_upload_network_state(driver, upload_url=manage_url, state=network_state)
+            upload_runtime_after = _upload_form_runtime_state(driver)
+            browser_errors = _browser_console_errors(driver)
+            recent_posts = proxy.product_posts()[-4:]
             pytest.fail(
                 "No genuine intermediate native upload state observed: "
                 f"rule={throttle_rule_id!r}, applied={network_state.get('applied_rule_id')!r}, "
                 f"request_url={network_state.get('request_url')!r}, "
+                f"post_urls={network_state.get('post_urls', [])[-6:]!r}, "
+                f"network_events={network_state.get('events', [])[-12:]!r}, "
+                f"loading_failed={network_state.get('loading_failed')!r}, "
                 f"progress_values={observed_progress[-12:]!r}, "
                 f"proxy_bytes={received}/{total}, upload_connection={connection_id!r}, "
                 f"connections_before_upload={connections_before_upload}, "
-                f"request_path={request_path!r}, elapsed={time.monotonic() - upload_started_at:.3f}s"
+                f"posts_before_upload={posts_before_upload}, recent_proxy_posts={recent_posts!r}, "
+                f"request_path={request_path!r}, runtime_before={upload_runtime_before!r}, "
+                f"runtime_after={upload_runtime_after!r}, browser_errors={browser_errors!r}, "
+                f"elapsed={time.monotonic() - upload_started_at:.3f}s"
             )
 
         (
@@ -439,6 +558,7 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
             upload_connection_id,
             upload_request_path,
         ) = intermediate
+        assert len(proxy.product_posts()) == posts_before_upload + 1
         assert upload_connection_id is not None and upload_connection_id > connections_before_upload
         assert network_state["request_url"] == manage_url
         assert network_state["applied_rule_id"] == throttle_rule_id
@@ -470,9 +590,13 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         _frame(driver, processing_status)
         _shot_checked(driver, "p6-04-product-image-processing-en.png")
 
+        final_console_errors = _browser_console_errors(driver)
         ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
         (ARTIFACT_DIR / "p6-native-upload-progress-evidence.txt").write_text(
             "native xhr.upload evidence via real multipart transport\n"
+            f"unthrottled_probe_request_url={probe_state['request_url']}\n"
+            f"unthrottled_probe_content_length={probe_posts[-1]['content_length']}\n"
+            f"unthrottled_probe_provider_calls=0\n"
             f"browser_network_rule_id={throttle_rule_id}\n"
             f"browser_rule_applied_id={network_state['applied_rule_id']}\n"
             f"browser_request_url={network_state['request_url']}\n"
@@ -488,7 +612,8 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
             f"upload_connection_id={upload_connection_id}\n"
             f"upload_request_path={upload_request_path}\n"
             f"provider_started={provider_started.is_set()}\n"
-            f"provider_release_pending={not release_provider.is_set()}\n",
+            f"provider_release_pending={not release_provider.is_set()}\n"
+            f"browser_console_error_count={len(final_console_errors)}\n",
             encoding="utf-8",
         )
 
