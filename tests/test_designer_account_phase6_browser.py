@@ -1,11 +1,17 @@
+import http.client
 import io
 import os
+import socket
 import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 from PIL import Image
 from django.contrib.auth import get_user_model
+from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -20,6 +26,178 @@ from .test_designer_portal_browser import _chrome, _click_element, _login, _no_o
 
 User = get_user_model()
 ARTIFACT_DIR = Path("artifacts/designer-browser-qa")
+
+
+class _UploadProxyServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def get_request(self):
+        request, client_address = super().get_request()
+        # Keep the kernel receive window small before the request body arrives so
+        # a multi-megabyte browser upload must experience real TCP backpressure.
+        request.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16 * 1024)
+        return request, client_address
+
+
+class _SlowUploadForwardProxy:
+    """Test-only HTTP forward proxy that slows the first large Store-media POST.
+
+    Chromium still requests the actual Django LiveServer URL. The proxy only
+    controls transport pacing, reads the genuine multipart body in bounded
+    chunks, and forwards those exact bytes to the original application endpoint.
+    """
+
+    _HOP_BY_HOP = {
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "proxy-connection",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+        "expect",
+    }
+
+    def __init__(self, target_url):
+        target = urlsplit(target_url)
+        assert target.scheme == "http" and target.hostname
+        self.target_host = target.hostname
+        self.target_port = target.port or 80
+        self._lock = threading.Lock()
+        self._upload_received = 0
+        self._upload_total = 0
+        self._slow_upload_seen = False
+        outer = self
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *args):
+                return
+
+            def do_GET(self):
+                self._forward()
+
+            def do_HEAD(self):
+                self._forward()
+
+            def do_POST(self):
+                self._forward()
+
+            def _forward(self):
+                parsed = urlsplit(self.path)
+                if parsed.scheme:
+                    request_host = parsed.hostname
+                    request_port = parsed.port or (443 if parsed.scheme == "https" else 80)
+                    path = parsed.path or "/"
+                    if parsed.query:
+                        path = f"{path}?{parsed.query}"
+                else:
+                    request_host = outer.target_host
+                    request_port = outer.target_port
+                    path = self.path
+
+                if (request_host, request_port) != (outer.target_host, outer.target_port):
+                    self.send_error(502, "Unexpected proxy destination")
+                    return
+
+                content_length = int(self.headers.get("Content-Length") or 0)
+                slow_upload = (
+                    self.command == "POST"
+                    and "/designer/store/products/" in path
+                    and content_length > 7_000_000
+                    and not outer._slow_upload_seen
+                )
+                if slow_upload:
+                    with outer._lock:
+                        outer._slow_upload_seen = True
+                        outer._upload_total = content_length
+                        outer._upload_received = 0
+
+                remaining = content_length
+                body = bytearray()
+                while remaining:
+                    chunk = self.rfile.read(min(16 * 1024, remaining))
+                    if not chunk:
+                        break
+                    body.extend(chunk)
+                    remaining -= len(chunk)
+                    if slow_upload:
+                        with outer._lock:
+                            outer._upload_received += len(chunk)
+                        # This delay affects real socket reads only; no browser
+                        # progress value or ProgressEvent is injected or altered.
+                        time.sleep(0.01)
+
+                if remaining:
+                    self.send_error(400, "Incomplete proxied request body")
+                    return
+
+                headers = {
+                    key: value
+                    for key, value in self.headers.items()
+                    if key.lower() not in outer._HOP_BY_HOP and key.lower() != "content-length"
+                }
+                if content_length:
+                    headers["Content-Length"] = str(len(body))
+
+                connection = http.client.HTTPConnection(
+                    outer.target_host,
+                    outer.target_port,
+                    timeout=60,
+                )
+                try:
+                    connection.request(
+                        self.command,
+                        path,
+                        body=bytes(body) if content_length else None,
+                        headers=headers,
+                    )
+                    response = connection.getresponse()
+                    response_body = response.read()
+                    self.send_response(response.status, response.reason)
+                    for key, value in response.getheaders():
+                        if key.lower() in outer._HOP_BY_HOP or key.lower() == "content-length":
+                            continue
+                        self.send_header(key, value)
+                    self.send_header("Content-Length", str(len(response_body)))
+                    self.end_headers()
+                    if self.command != "HEAD":
+                        self.wfile.write(response_body)
+                finally:
+                    connection.close()
+
+        self._server = _UploadProxyServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self._server.server_port}"
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    def upload_snapshot(self):
+        with self._lock:
+            return self._upload_received, self._upload_total
+
+    def close(self):
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join(timeout=5)
+
+
+def _chrome_through_proxy(proxy_url, *, language="en-US,en", width=1440, height=1000):
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-background-networking")
+    options.add_argument(f"--window-size={width},{height}")
+    options.add_argument(f"--proxy-server={proxy_url}")
+    # Chrome normally bypasses proxies for localhost; this forces the real
+    # LiveServer request through the test-only pacing proxy instead.
+    options.add_argument("--proxy-bypass-list=<-loopback>")
+    options.add_experimental_option("prefs", {"intl.accept_languages": language})
+    return webdriver.Chrome(options=options)
 
 
 def _wait(driver, seconds=20):
@@ -40,10 +218,8 @@ def _shot_checked(driver, name):
 
 
 def _large_png(path):
-    # Use a near-limit, genuinely decoded random raster. Combined with Chrome's
-    # real upload throttling this keeps an intermediate xhr.upload progress value
-    # observable long enough for deterministic screenshot evidence without
-    # fabricating or injecting a progress percentage.
+    # Use a near-limit, genuinely decoded random raster so native upload progress
+    # spans enough real bytes for the transport-pacing harness to observe it.
     width = height = 1650
     image = Image.frombytes("RGB", (width, height), os.urandom(width * height * 3))
     image.save(path, format="PNG", compress_level=1)
@@ -126,8 +302,10 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
     _small_png(second, (32, 80, 170))
     invalid.write_bytes(b"not an image")
 
-    driver = _chrome(width=1440, height=1000)
+    slow_proxy = _SlowUploadForwardProxy(live_server.url)
+    driver = None
     try:
+        driver = _chrome_through_proxy(slow_proxy.url, width=1440, height=1000)
         _login(driver, live_server, client, owner)
         wait = _wait(driver)
         manage_url = f"{live_server.url}/designer/store/products/{product.pk}/?org={org.pk}&lang=en"
@@ -144,39 +322,61 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         _frame(driver, upload_form)
         _shot_checked(driver, "p6-02-product-image-selected-file-en.png")
 
-        # Real Chrome network throttling + the real multipart/XHR request are used
-        # for evidence. No JavaScript progress value is injected by the test.
-        driver.execute_cdp_cmd("Network.enable", {})
-        driver.execute_cdp_cmd(
-            "Network.emulateNetworkConditions",
-            {
-                "offline": False,
-                "latency": 40,
-                "downloadThroughput": 1024 * 1024,
-                "uploadThroughput": 256 * 1024,
-                "connectionType": "cellular3g",
-            },
-        )
+        # The browser sends the real multipart XHR to the actual LiveServer URL.
+        # The forward proxy only applies TCP backpressure while reading those bytes;
+        # it never injects, synthesizes or edits an xhr.upload progress event/value.
         upload_form = driver.find_element(By.CSS_SELECTOR, "[data-store-media-upload-form]")
         _click_element(driver, upload_form.find_element(By.CSS_SELECTOR, "[data-store-media-submit]"))
         progress = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-progress]")))
+
+        def genuine_intermediate_progress(_driver):
+            value = float(progress.get_attribute("value") or 0)
+            received, total = slow_proxy.upload_snapshot()
+            if 0 < value < 100 and 0 < received < total:
+                return value, received, total
+            return False
+
         progress_wait = WebDriverWait(driver, 30, poll_frequency=0.05)
-        progress_wait.until(lambda _d: 0 < float(progress.get_attribute("value") or 0) < 100)
+        intermediate_percent, intermediate_received, upload_total = progress_wait.until(genuine_intermediate_progress)
         percent_text = driver.find_element(By.CSS_SELECTOR, "[data-store-media-percent]").text
+        upload_status = driver.find_element(By.CSS_SELECTOR, "[data-store-media-status]")
         assert "%" in percent_text and percent_text != "100%"
+        assert "Uploading" in upload_status.text
+        assert 0 < intermediate_received < upload_total
+        progress_wrap = driver.find_element(By.CSS_SELECTOR, "[data-store-media-progress-wrap]")
+        _frame(driver, progress_wrap)
         _shot_checked(driver, "p6-03-product-image-upload-progress-en.png")
 
         assert provider_started.wait(timeout=45), "Provider was not reached after real multipart upload"
-        wait.until(lambda _d: "Processing image" in driver.find_element(By.CSS_SELECTOR, "[data-store-media-status]").text)
+        processing_status = wait.until(
+            EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-status]"))
+        )
+        wait.until(lambda _d: "Processing image" in processing_status.text)
+        completed_received, completed_total = slow_proxy.upload_snapshot()
+        assert completed_total == upload_total
+        assert completed_received == completed_total
+        assert completed_total > large.stat().st_size
+        assert not release_provider.is_set()
         assert float(progress.get_attribute("value") or 0) == 100
+        assert driver.find_element(By.CSS_SELECTOR, "[data-store-media-percent]").text == "100%"
+        _frame(driver, processing_status)
         _shot_checked(driver, "p6-04-product-image-processing-en.png")
+
+        ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+        (ARTIFACT_DIR / "p6-native-upload-progress-evidence.txt").write_text(
+            "native xhr.upload evidence via real multipart transport\n"
+            f"intermediate_visible_percent={intermediate_percent:g}\n"
+            f"intermediate_transport_received={intermediate_received}\n"
+            f"transport_total={upload_total}\n"
+            f"completed_transport_received={completed_received}\n"
+            f"provider_started={provider_started.is_set()}\n"
+            f"provider_release_pending={not release_provider.is_set()}\n",
+            encoding="utf-8",
+        )
+
         release_provider.set()
         wait.until(lambda _d: product.images.count() == 1)
         wait.until(lambda _d: "/designer/store/products/" in driver.current_url)
-        driver.execute_cdp_cmd(
-            "Network.emulateNetworkConditions",
-            {"offline": False, "latency": 0, "downloadThroughput": -1, "uploadThroughput": -1},
-        )
         driver.refresh()
         media_item = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-item]")))
         assert "phase6-browser-secret" not in driver.page_source
@@ -284,7 +484,9 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         assert len(provider_calls) == 2
     finally:
         release_provider.set()
-        driver.quit()
+        if driver is not None:
+            driver.quit()
+        slow_proxy.close()
 
 
 @pytest.mark.django_db(transaction=True)
