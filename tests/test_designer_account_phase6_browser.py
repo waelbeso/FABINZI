@@ -34,18 +34,19 @@ class _UploadProxyServer(ThreadingHTTPServer):
 
     def get_request(self):
         request, client_address = super().get_request()
-        # Keep the kernel receive window small before the request body arrives so
-        # a multi-megabyte browser upload must experience real TCP backpressure.
+        # Bound receiver-side buffering as an independent transport observation.
+        # Browser-side throttling below is what makes native xhr.upload progress
+        # deterministic; this socket setting does not fabricate progress values.
         request.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16 * 1024)
         return request, client_address
 
 
 class _SlowUploadForwardProxy:
-    """Test-only HTTP forward proxy that slows the first large Store-media POST.
+    """Test-only HTTP forward proxy that observes the real Store-media POST.
 
-    Chromium still requests the actual Django LiveServer URL. The proxy only
-    controls transport pacing, reads the genuine multipart body in bounded
-    chunks, and forwards those exact bytes to the original application endpoint.
+    Chromium still requests the actual Django LiveServer URL. The proxy reads the
+    genuine multipart body in bounded chunks, records actual transport bytes, and
+    forwards those exact bytes to the original application endpoint.
     """
 
     _HOP_BY_HOP = {
@@ -130,7 +131,7 @@ class _SlowUploadForwardProxy:
                             outer._upload_received += len(chunk)
                         # This delay affects real socket reads only; no browser
                         # progress value or ProgressEvent is injected or altered.
-                        time.sleep(0.01)
+                        time.sleep(0.002)
 
                 if remaining:
                     self.send_error(400, "Incomplete proxied request body")
@@ -194,10 +195,43 @@ def _chrome_through_proxy(proxy_url, *, language="en-US,en", width=1440, height=
     options.add_argument(f"--window-size={width},{height}")
     options.add_argument(f"--proxy-server={proxy_url}")
     # Chrome normally bypasses proxies for localhost; this forces the real
-    # LiveServer request through the test-only pacing proxy instead.
+    # LiveServer request through the test-only observation proxy instead.
     options.add_argument("--proxy-bypass-list=<-loopback>")
     options.add_experimental_option("prefs", {"intl.accept_languages": language})
     return webdriver.Chrome(options=options)
+
+
+def _enable_native_upload_throttle(driver):
+    """Apply browser-native request throttling without touching XHR events."""
+    driver.execute_cdp_cmd("Network.enable", {})
+    result = driver.execute_cdp_cmd(
+        "Network.emulateNetworkConditionsByRule",
+        {
+            "offline": False,
+            "matchedNetworkConditions": [
+                {
+                    # Installed only after the page is loaded, so a global rule
+                    # affects the real multipart upload without slowing setup.
+                    "urlPattern": "",
+                    "latency": 25,
+                    "downloadThroughput": -1,
+                    "uploadThroughput": 512 * 1024,
+                }
+            ],
+        },
+    )
+    rule_ids = result.get("ruleIds") or []
+    assert len(rule_ids) == 1, result
+    return rule_ids[0]
+
+
+def _disable_native_upload_throttle(driver):
+    # Replacing the rule set with an empty list removes request throttling.
+    driver.execute_cdp_cmd(
+        "Network.emulateNetworkConditionsByRule",
+        {"offline": False, "matchedNetworkConditions": []},
+    )
+    driver.execute_cdp_cmd("Network.disable", {})
 
 
 def _wait(driver, seconds=20):
@@ -219,7 +253,7 @@ def _shot_checked(driver, name):
 
 def _large_png(path):
     # Use a near-limit, genuinely decoded random raster so native upload progress
-    # spans enough real bytes for the transport-pacing harness to observe it.
+    # spans enough real bytes for deterministic request throttling to expose it.
     width = height = 1650
     image = Image.frombytes("RGB", (width, height), os.urandom(width * height * 3))
     image.save(path, format="PNG", compress_level=1)
@@ -304,6 +338,7 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
 
     slow_proxy = _SlowUploadForwardProxy(live_server.url)
     driver = None
+    native_throttle_enabled = False
     try:
         driver = _chrome_through_proxy(slow_proxy.url, width=1440, height=1000)
         _login(driver, live_server, client, owner)
@@ -322,9 +357,12 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         _frame(driver, upload_form)
         _shot_checked(driver, "p6-02-product-image-selected-file-en.png")
 
-        # The browser sends the real multipart XHR to the actual LiveServer URL.
-        # The forward proxy only applies TCP backpressure while reading those bytes;
-        # it never injects, synthesizes or edits an xhr.upload progress event/value.
+        # The browser sends a real multipart XHR to the actual application URL.
+        # Request throttling is performed by Chrome's network stack. The proxy
+        # independently records actual bytes; neither mechanism injects or edits
+        # xhr.upload ProgressEvent objects or DOM progress values.
+        throttle_rule_id = _enable_native_upload_throttle(driver)
+        native_throttle_enabled = True
         upload_form = driver.find_element(By.CSS_SELECTOR, "[data-store-media-upload-form]")
         _click_element(driver, upload_form.find_element(By.CSS_SELECTOR, "[data-store-media-submit]"))
         progress = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-store-media-progress]")))
@@ -365,6 +403,8 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
         ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
         (ARTIFACT_DIR / "p6-native-upload-progress-evidence.txt").write_text(
             "native xhr.upload evidence via real multipart transport\n"
+            f"browser_network_rule_id={throttle_rule_id}\n"
+            "browser_upload_throughput_bytes_per_second=524288\n"
             f"intermediate_visible_percent={intermediate_percent:g}\n"
             f"intermediate_transport_received={intermediate_received}\n"
             f"transport_total={upload_total}\n"
@@ -374,6 +414,8 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
             encoding="utf-8",
         )
 
+        _disable_native_upload_throttle(driver)
+        native_throttle_enabled = False
         release_provider.set()
         wait.until(lambda _d: product.images.count() == 1)
         wait.until(lambda _d: "/designer/store/products/" in driver.current_url)
@@ -485,6 +527,8 @@ def test_designer_phase6_store_product_media_browser_evidence(client, live_serve
     finally:
         release_provider.set()
         if driver is not None:
+            if native_throttle_enabled:
+                _disable_native_upload_throttle(driver)
             driver.quit()
         slow_proxy.close()
 
